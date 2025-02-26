@@ -1,3 +1,5 @@
+// app/table/[id].tsx - Fixed TypeScript errors
+
 import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert } from 'react-native';
 import { useState, useEffect } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -20,6 +22,7 @@ export default function TableScreen() {
   const [loading, setLoading] = useState(true);
 
   const menuItems: MenuItem[] = [
+    // Menu items remain the same
     { id: 1, name: 'Margherita Pizza', price: 12.99, category: 'Pizza' },
     { id: 2, name: 'Pepperoni Pizza', price: 14.99, category: 'Pizza' },
     { id: 3, name: 'Caesar Salad', price: 8.99, category: 'Salads' },
@@ -48,10 +51,24 @@ export default function TableScreen() {
     setLoading(false);
   };
 
+  // Fixed function to handle TypeScript errors
   const addItemToOrder = (item: MenuItem) => {
     if (!table || !table.order) return;
 
     const updatedTable = { ...table };
+    
+    // Ensure order exists (TypeScript safety)
+    if (!updatedTable.order) {
+      updatedTable.order = {
+        id: Date.now(),
+        items: [],
+        guests: guestCount,
+        status: 'active',
+        timestamp: new Date().toISOString(),
+        total: 0
+      };
+    }
+    
     const existingItem = updatedTable.order.items.find(
       orderItem => orderItem.name === item.name
     );
@@ -76,10 +93,15 @@ export default function TableScreen() {
     updateTable(updatedTable);
   };
 
+  // Fixed function to handle TypeScript errors
   const updateItemQuantity = (itemId: number, increment: boolean) => {
     if (!table || !table.order) return;
 
     const updatedTable = { ...table };
+    
+    // TypeScript safety
+    if (!updatedTable.order) return;
+    
     const updatedItems = updatedTable.order.items.map(item =>
       item.id === itemId
         ? { ...item, quantity: increment ? item.quantity + 1 : Math.max(0, item.quantity - 1) }
@@ -93,10 +115,15 @@ export default function TableScreen() {
     updateTable(updatedTable);
   };
 
+  // Fixed function to handle TypeScript errors
   const updateItemNotes = (itemId: number, notes: string) => {
     if (!table || !table.order) return;
 
     const updatedTable = { ...table };
+    
+    // TypeScript safety
+    if (!updatedTable.order) return;
+    
     updatedTable.order.items = updatedTable.order.items.map(item =>
       item.id === itemId ? { ...item, notes } : item
     );
@@ -109,6 +136,7 @@ export default function TableScreen() {
     return items.reduce((sum, item) => sum + item.price * item.quantity, 0);
   };
 
+  // Fixed function to handle TypeScript errors
   const updateGuestCount = (newCount: number) => {
     if (!table) return;
     
@@ -116,6 +144,8 @@ export default function TableScreen() {
     setGuestCount(updatedCount);
     
     const updatedTable = { ...table, guests: updatedCount };
+    
+    // TypeScript safety - check if order exists
     if (updatedTable.order) {
       updatedTable.order.guests = updatedCount;
     }
@@ -197,7 +227,10 @@ export default function TableScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Table {tableId}</Text>
+        <Text style={styles.title}>{table.name}</Text>
+        <View style={styles.sectionBadge}>
+          <Text style={styles.sectionText}>{table.section}</Text>
+        </View>
         <View style={styles.guestCounter}>
           <Users size={24} color="#666" />
           <Pressable onPress={() => updateGuestCount(guestCount - 1)}>
@@ -210,6 +243,7 @@ export default function TableScreen() {
         </View>
       </View>
 
+      {/* Rest of the component remains the same */}
       <View style={styles.content}>
         <View style={styles.orderSection}>
           <Text style={styles.sectionTitle}>Current Order</Text>
@@ -296,6 +330,7 @@ export default function TableScreen() {
   );
 }
 
+// Styles remain the same
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -328,6 +363,19 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: 'bold',
+    flex: 1,
+  },
+  sectionBadge: {
+    backgroundColor: '#E1F5FE',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 16,
+    marginRight: 16,
+  },
+  sectionText: {
+    color: '#0288D1',
+    fontWeight: '600',
+    fontSize: 12,
   },
   guestCounter: {
     flexDirection: 'row',

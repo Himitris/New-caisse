@@ -1,14 +1,36 @@
-import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
-import { useState } from 'react';
+// app/payment/split.tsx - Updated split payment screen
+
+import { View, Text, StyleSheet, ScrollView, Pressable, Alert } from 'react-native';
+import { useState, useEffect } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { DollarSign, CreditCard, Wallet } from 'lucide-react-native';
+import { DollarSign, CreditCard, Wallet, Home } from 'lucide-react-native';
+import { getTable, updateTable, addBill, resetTable } from '../../utils/storage';
 
 export default function SplitBillScreen() {
-  const { tableId, total, guests } = useLocalSearchParams();
+  const { tableId, total, guests, items } = useLocalSearchParams();
   const router = useRouter();
   const totalAmount = parseFloat(total as string);
   const guestCount = parseInt(guests as string, 10);
+  const tableIdNum = parseInt(tableId as string, 10);
+  const orderItems = items ? JSON.parse(items as string) : [];
+  const [tableName, setTableName] = useState("");
+  const [tableSection, setTableSection] = useState("");
+  
+  // Split amount per guest (equal split)
   const splitAmount = totalAmount / guestCount;
+
+  // Fetch table details on load
+  useEffect(() => {
+    const fetchTableDetails = async () => {
+      const table = await getTable(tableIdNum);
+      if (table) {
+        setTableName(table.name);
+        setTableSection(table.section);
+      }
+    };
+    
+    fetchTableDetails();
+  }, [tableIdNum]);
 
   const [payments, setPayments] = useState<Array<{
     id: number;
@@ -23,24 +45,105 @@ export default function SplitBillScreen() {
     }))
   );
 
-  const remainingTotal = totalAmount - payments.reduce((sum, payment) => (
-    payment.paid ? sum + payment.amount : sum
-  ), 0);
+  // Track remaining total
+  const [remainingTotal, setRemainingTotal] = useState(totalAmount);
+  
+  // Update remaining total when payments change
+  useEffect(() => {
+    const paidTotal = payments.reduce((sum, payment) => (
+      payment.paid ? sum + payment.amount : sum
+    ), 0);
+    
+    setRemainingTotal(totalAmount - paidTotal);
+  }, [payments, totalAmount]);
 
-  const handlePayment = (id: number, method: 'cash' | 'card') => {
-    setPayments(prev =>
-      prev.map(payment =>
-        payment.id === id ? { ...payment, paid: true, method } : payment
-      )
-    );
+  const handlePayment = async (id: number, method: 'cash' | 'card') => {
+    try {
+      // Find the payment
+      const payment = payments.find(p => p.id === id);
+      if (!payment) return;
+      
+      // Mark as paid with method
+      setPayments(prev =>
+        prev.map(payment =>
+          payment.id === id ? { ...payment, paid: true, method } : payment
+        )
+      );
+      
+      // Create a bill record for this portion
+      const bill = {
+        id: Date.now(),
+        tableNumber: tableIdNum,
+        tableName: tableName,
+        section: tableSection,
+        amount: payment.amount,
+        items: orderItems.length,
+        status: 'split' as 'split',
+        timestamp: new Date().toISOString(),
+      };
+      
+      // Add to bills history
+      await addBill(bill);
+      
+      // Get current table data to check if table should be reset
+      const table = await getTable(tableIdNum);
+      
+      if (!table || !table.order) {
+        console.error('Table not found');
+        return;
+      }
+      
+      // Update the remaining total on the table's order
+      const newRemainingTotal = table.order.total - payment.amount;
+      
+      if (newRemainingTotal <= 0.01) {
+        // If this was the last payment, reset the table
+        await resetTable(tableIdNum);
+      } else {
+        // Otherwise, update the remaining total
+        const updatedTable = {
+          ...table,
+          order: {
+            ...table.order,
+            total: newRemainingTotal
+          }
+        };
+        await updateTable(updatedTable);
+      }
+    } catch (error) {
+      console.error('Payment processing error:', error);
+      Alert.alert('Payment Error', 'Failed to process payment');
+    }
   };
 
   const allPaid = payments.every(payment => payment.paid);
 
+  const handleComplete = () => {
+    if (allPaid) {
+      Alert.alert(
+        'Payment Complete',
+        'All payments processed successfully.',
+        [{ text: 'Return Home', onPress: () => router.push('/') }]
+      );
+    } else if (remainingTotal > 0) {
+      Alert.alert(
+        'Incomplete Payment',
+        `There is still $${remainingTotal.toFixed(2)} remaining unpaid. Do you want to return to the table?`,
+        [
+          { text: 'Continue Payments', style: 'cancel' },
+          { text: 'Return to Table', onPress: () => router.push(`/table/${tableId}`) }
+        ]
+      );
+    }
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Split Bill - Table {tableId}</Text>
+        <Text style={styles.title}>Split Bill - {tableName || `Table ${tableId}`}</Text>
+        <View style={styles.sectionBadge}>
+          <Text style={styles.sectionText}>{tableSection}</Text>
+        </View>
         <Text style={styles.subtitle}>
           Total: ${totalAmount.toFixed(2)} • {guestCount} Guests
         </Text>
@@ -82,17 +185,21 @@ export default function SplitBillScreen() {
       <View style={styles.footer}>
         <View style={styles.totalSection}>
           <Text style={styles.remainingLabel}>Remaining</Text>
-          <Text style={styles.remainingAmount}>
+          <Text style={[
+            styles.remainingAmount,
+            remainingTotal <= 0 ? styles.paidAmount : {}
+          ]}>
             ${remainingTotal.toFixed(2)}
           </Text>
         </View>
-        {allPaid && (
-          <Pressable
-            style={styles.completeButton}
-            onPress={() => router.push('/bills')}>
-            <Text style={styles.completeButtonText}>Complete Payment</Text>
-          </Pressable>
-        )}
+        <Pressable
+          style={styles.completeButton}
+          onPress={handleComplete}>
+          <Home size={20} color="white" />
+          <Text style={styles.completeButtonText}>
+            {allPaid ? 'Return Home' : 'Finish & Return to Table'}
+          </Text>
+        </Pressable>
       </View>
     </View>
   );
@@ -112,7 +219,20 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  sectionBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#E1F5FE',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 16,
     marginBottom: 8,
+  },
+  sectionText: {
+    color: '#0288D1',
+    fontWeight: '600',
+    fontSize: 12,
   },
   subtitle: {
     fontSize: 16,
@@ -196,13 +316,19 @@ const styles = StyleSheet.create({
   remainingAmount: {
     fontSize: 24,
     fontWeight: 'bold',
+    color: '#F44336',
+  },
+  paidAmount: {
     color: '#4CAF50',
   },
   completeButton: {
-    backgroundColor: '#4CAF50',
+    backgroundColor: '#2196F3',
     padding: 16,
     borderRadius: 8,
     alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
   },
   completeButtonText: {
     color: 'white',

@@ -1,10 +1,15 @@
+// app/(tabs)/bills.tsx - Updated bill screen to show table names
+
 import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Receipt, Printer, Download } from 'lucide-react-native';
+import { getBills } from '../../utils/storage';
 
 interface Bill {
   id: number;
   tableNumber: number;
+  tableName?: string;
+  section?: string;
   amount: number;
   items: number;
   status: 'pending' | 'paid' | 'split';
@@ -12,32 +17,30 @@ interface Bill {
 }
 
 export default function BillsScreen() {
-  const [bills] = useState<Bill[]>([
-    {
-      id: 1,
-      tableNumber: 2,
-      amount: 89.97,
-      items: 6,
-      status: 'pending',
-      timestamp: '2024-02-20 19:30',
-    },
-    {
-      id: 2,
-      tableNumber: 6,
-      amount: 45.98,
-      items: 3,
-      status: 'split',
-      timestamp: '2024-02-20 19:15',
-    },
-    {
-      id: 3,
-      tableNumber: 4,
-      amount: 156.75,
-      items: 8,
-      status: 'paid',
-      timestamp: '2024-02-20 18:45',
-    },
-  ]);
+  const [bills, setBills] = useState<Bill[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Load bills on component mount
+  useEffect(() => {
+    loadBills();
+  }, []);
+
+  // Function to load bills from storage
+  const loadBills = async () => {
+    try {
+      setLoading(true);
+      const loadedBills = await getBills();
+      // Sort bills by timestamp (newest first)
+      const sortedBills = loadedBills.sort((a, b) => 
+        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      );
+      setBills(sortedBills);
+    } catch (error) {
+      console.error('Error loading bills:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const getStatusColor = (status: Bill['status']) => {
     switch (status) {
@@ -52,50 +55,78 @@ export default function BillsScreen() {
     }
   };
 
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text>Loading bills...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Bills & Payments</Text>
       </View>
-      <ScrollView>
-        {bills.map((bill) => (
-          <Pressable key={bill.id} style={styles.billCard}>
-            <View style={styles.billHeader}>
-              <View>
-                <Text style={styles.tableNumber}>Table {bill.tableNumber}</Text>
-                <Text style={styles.timestamp}>{bill.timestamp}</Text>
+      
+      {bills.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Receipt size={60} color="#cccccc" />
+          <Text style={styles.emptyText}>No bills found</Text>
+          <Text style={styles.emptySubtext}>Bills will appear here after payments</Text>
+        </View>
+      ) : (
+        <ScrollView>
+          {bills.map((bill) => (
+            <Pressable key={bill.id} style={styles.billCard}>
+              <View style={styles.billHeader}>
+                <View>
+                  <Text style={styles.tableNumber}>
+                    {bill.tableName || `Table ${bill.tableNumber}`}
+                  </Text>
+                  <View style={styles.sectionAndDate}>
+                    {bill.section && (
+                      <View style={styles.sectionBadge}>
+                        <Text style={styles.sectionText}>{bill.section}</Text>
+                      </View>
+                    )}
+                    <Text style={styles.timestamp}>
+                      {new Date(bill.timestamp).toLocaleString()}
+                    </Text>
+                  </View>
+                </View>
+                <Text style={[styles.status, { color: getStatusColor(bill.status) }]}>
+                  {bill.status}
+                </Text>
               </View>
-              <Text style={[styles.status, { color: getStatusColor(bill.status) }]}>
-                {bill.status}
-              </Text>
-            </View>
-            <View style={styles.billDetails}>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Amount:</Text>
-                <Text style={styles.amount}>${bill.amount.toFixed(2)}</Text>
+              <View style={styles.billDetails}>
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Amount:</Text>
+                  <Text style={styles.amount}>${bill.amount.toFixed(2)}</Text>
+                </View>
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Items:</Text>
+                  <Text style={styles.items}>{bill.items} items</Text>
+                </View>
               </View>
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Items:</Text>
-                <Text style={styles.items}>{bill.items} items</Text>
+              <View style={styles.actions}>
+                <Pressable style={styles.actionButton}>
+                  <Receipt size={20} color="#2196F3" />
+                  <Text style={[styles.actionText, { color: '#2196F3' }]}>View</Text>
+                </Pressable>
+                <Pressable style={styles.actionButton}>
+                  <Printer size={20} color="#4CAF50" />
+                  <Text style={[styles.actionText, { color: '#4CAF50' }]}>Print</Text>
+                </Pressable>
+                <Pressable style={styles.actionButton}>
+                  <Download size={20} color="#FF9800" />
+                  <Text style={[styles.actionText, { color: '#FF9800' }]}>Export</Text>
+                </Pressable>
               </View>
-            </View>
-            <View style={styles.actions}>
-              <Pressable style={styles.actionButton}>
-                <Receipt size={20} color="#2196F3" />
-                <Text style={[styles.actionText, { color: '#2196F3' }]}>View</Text>
-              </Pressable>
-              <Pressable style={styles.actionButton}>
-                <Printer size={20} color="#4CAF50" />
-                <Text style={[styles.actionText, { color: '#4CAF50' }]}>Print</Text>
-              </Pressable>
-              <Pressable style={styles.actionButton}>
-                <Download size={20} color="#FF9800" />
-                <Text style={[styles.actionText, { color: '#FF9800' }]}>Export</Text>
-              </Pressable>
-            </View>
-          </Pressable>
-        ))}
-      </ScrollView>
+            </Pressable>
+          ))}
+        </ScrollView>
+      )}
     </View>
   );
 }
@@ -104,6 +135,29 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 40,
+  },
+  emptyText: {
+    marginTop: 20,
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#666',
+  },
+  emptySubtext: {
+    marginTop: 8,
+    fontSize: 16,
+    color: '#999',
+    textAlign: 'center',
   },
   header: {
     padding: 20,
@@ -138,11 +192,28 @@ const styles = StyleSheet.create({
   tableNumber: {
     fontSize: 18,
     fontWeight: '600',
+    marginBottom: 4,
+  },
+  sectionAndDate: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  sectionBadge: {
+    backgroundColor: '#E1F5FE',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 12,
+  },
+  sectionText: {
+    color: '#0288D1',
+    fontWeight: '600',
+    fontSize: 12,
   },
   timestamp: {
     fontSize: 14,
     color: '#666',
-    marginTop: 4,
   },
   status: {
     fontSize: 14,

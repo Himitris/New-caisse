@@ -1,3 +1,5 @@
+// app/(tabs)/_layout.tsx - Make sure tabs are properly configured
+
 import { Tabs } from 'expo-router';
 import { LayoutGrid, UtensilsCrossed, Receipt, Settings } from 'lucide-react-native';
 
@@ -9,10 +11,15 @@ export default function TabLayout() {
         tabBarStyle: {
           height: 60,
           paddingBottom: 8,
+          backgroundColor: 'white',
+          borderTopWidth: 1,
+          borderTopColor: '#e0e0e0',
         },
         tabBarLabelStyle: {
           fontSize: 12,
         },
+        tabBarActiveTintColor: '#2196F3',
+        tabBarInactiveTintColor: '#757575',
       }}>
       <Tabs.Screen
         name="index"

@@ -1,5 +1,7 @@
+// Modifications for app/payment/full.tsx
+
 import { View, Text, StyleSheet, Pressable, Alert, Switch } from 'react-native';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { CreditCard, Wallet, Receipt, ArrowLeft } from 'lucide-react-native';
 import { getTable, updateTable, resetTable, addBill } from '../../utils/storage';
@@ -9,11 +11,25 @@ export default function FullPaymentScreen() {
   const router = useRouter();
   const [printReceipt, setPrintReceipt] = useState(true);
   const [processing, setProcessing] = useState(false);
+  const [tableName, setTableName] = useState('');
   
   const tableIdNum = parseInt(tableId as string, 10);
   const totalAmount = parseFloat(total as string);
   const orderItems = items ? JSON.parse(items as string) : [];
 
+  // Get table name on load
+  useEffect(() => {
+    const fetchTableName = async () => {
+      const tableData = await getTable(tableIdNum);
+      if (tableData) {
+        setTableName(tableData.name);
+      }
+    };
+    
+    fetchTableName();
+  }, [tableIdNum]);
+
+  // Rest of the payment handling code...
   const handlePayment = async (method: 'cash' | 'card') => {
     if (processing) return;
     
@@ -33,43 +49,90 @@ export default function FullPaymentScreen() {
       const bill = {
         id: Date.now(),
         tableNumber: tableIdNum,
+        tableName: table.name,
+        section: table.section,
         amount: totalAmount,
         items: orderItems.length,
-        status: 'paid',
+        status: 'paid' as 'paid',
         timestamp: new Date().toISOString(),
       };
       
       // Add to bills history
       await addBill(bill);
       
-      // Reset the table
-      await resetTable(tableIdNum);
-      
-      // Show success message
-      Alert.alert(
-        'Payment Successful',
-        `Table ${tableIdNum} has been paid in full with ${method}.`,
-        [
-          { 
-            text: 'OK', 
-            onPress: () => {
-              if (printReceipt) {
-                router.push({
-                  pathname: '/print-preview',
-                  params: {
-                    tableId: tableIdNum.toString(),
-                    total: totalAmount.toString(),
-                    items: items as string,
-                    paymentMethod: method
-                  }
-                });
-              } else {
-                router.push('/');
+      // Check if this payment completes the bill
+      if (totalAmount >= table.order.total) {
+        // Reset the table if payment covers full amount
+        await resetTable(tableIdNum);
+        
+        // Show success message
+        Alert.alert(
+          'Payment Successful',
+          `${table.name} has been paid in full with ${method}.`,
+          [
+            { 
+              text: 'OK', 
+              onPress: () => {
+                if (printReceipt) {
+                  router.push({
+                    pathname: '/print-preview',
+                    params: {
+                      tableId: tableIdNum.toString(),
+                      total: totalAmount.toString(),
+                      items: items as string,
+                      paymentMethod: method,
+                      tableName: table.name
+                    }
+                  });
+                } else {
+                  router.push('/');
+                }
               }
             }
+          ]
+        );
+      } else {
+        // If payment is partial, update the table's total
+        const remainingAmount = table.order.total - totalAmount;
+        const updatedTable = {
+          ...table,
+          order: {
+            ...table.order,
+            total: remainingAmount
           }
-        ]
-      );
+        };
+        
+        await updateTable(updatedTable);
+        
+        // Show success message for partial payment
+        Alert.alert(
+          'Partial Payment Successful',
+          `Paid ${method}: $${totalAmount.toFixed(2)}\nRemaining: $${remainingAmount.toFixed(2)}`,
+          [
+            { 
+              text: 'OK', 
+              onPress: () => {
+                if (printReceipt) {
+                  router.push({
+                    pathname: '/print-preview',
+                    params: {
+                      tableId: tableIdNum.toString(),
+                      total: totalAmount.toString(),
+                      items: items as string,
+                      paymentMethod: method,
+                      isPartial: 'true',
+                      remaining: remainingAmount.toString(),
+                      tableName: table.name
+                    }
+                  });
+                } else {
+                  router.push(`/table/${tableIdNum}`);
+                }
+              }
+            }
+          ]
+        );
+      }
     } catch (error) {
       console.error('Payment error:', error);
       Alert.alert('Payment Error', 'There was an error processing your payment.');
@@ -84,9 +147,10 @@ export default function FullPaymentScreen() {
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <ArrowLeft size={24} color="#333" />
         </Pressable>
-        <Text style={styles.title}>Payment - Table {tableId}</Text>
+        <Text style={styles.title}>Payment - {tableName || `Table ${tableId}`}</Text>
       </View>
 
+      {/* Rest of the UI remains the same */}
       <View style={styles.content}>
         <View style={styles.amountCard}>
           <Text style={styles.amountLabel}>Total Amount</Text>
@@ -124,7 +188,9 @@ export default function FullPaymentScreen() {
   );
 }
 
+// Styles remain the same
 const styles = StyleSheet.create({
+  // Existing styles...
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
