@@ -44,7 +44,7 @@ export default function TableScreen() {
   const { id } = useLocalSearchParams();
   const tableId = parseInt(id as string, 10);
   const router = useRouter();
-  
+
   const [guestCount, setGuestCount] = useState(1);
   const [table, setTable] = useState<Table | null>(null);
   const [loading, setLoading] = useState(true);
@@ -56,7 +56,7 @@ export default function TableScreen() {
     return priceData.map(item => {
       // Déterminer la catégorie en fonction du type et du nom
       let category = item.type === 'resto' ? 'Plats Principaux' : 'Softs';
-      
+
       // Pour les plats (resto)
       if (item.type === 'resto') {
         if (item.name.toLowerCase().includes('salade')) {
@@ -85,7 +85,7 @@ export default function TableScreen() {
           category = 'Alcools';
         }
       }
-      
+
       return {
         id: item.id,
         name: item.name,
@@ -105,10 +105,10 @@ export default function TableScreen() {
   // Obtenir les catégories par type
   const categoriesByType = useMemo(() => {
     const result = {
-      resto: categories.filter(cat => 
+      resto: categories.filter(cat =>
         menuItems.some(item => item.category === cat && item.type === 'resto')
       ),
-      boisson: categories.filter(cat => 
+      boisson: categories.filter(cat =>
         menuItems.some(item => item.category === cat && item.type === 'boisson')
       )
     };
@@ -145,7 +145,7 @@ export default function TableScreen() {
     if (!table || !table.order) return;
 
     const updatedTable = { ...table };
-    
+
     // Assurer que la commande existe
     if (!updatedTable.order) {
       updatedTable.order = {
@@ -157,7 +157,7 @@ export default function TableScreen() {
         total: 0
       };
     }
-    
+
     // Vérifier si l'item existe déjà
     const existingItem = updatedTable.order.items.find(
       orderItem => orderItem.name === item.name
@@ -178,7 +178,7 @@ export default function TableScreen() {
 
     // Recalculer le total
     updatedTable.order.total = calculateTotal(updatedTable.order.items);
-    
+
     setTable(updatedTable);
     updateTable(updatedTable);
   };
@@ -188,10 +188,10 @@ export default function TableScreen() {
     if (!table || !table.order) return;
 
     const updatedTable = { ...table };
-    
+
     // Vérification TypeScript
     if (!updatedTable.order) return;
-    
+
     const updatedItems = updatedTable.order.items.map(item =>
       item.id === itemId
         ? { ...item, quantity: increment ? item.quantity + 1 : Math.max(0, item.quantity - 1) }
@@ -200,7 +200,7 @@ export default function TableScreen() {
 
     updatedTable.order.items = updatedItems;
     updatedTable.order.total = calculateTotal(updatedItems);
-    
+
     setTable(updatedTable);
     updateTable(updatedTable);
   };
@@ -210,14 +210,14 @@ export default function TableScreen() {
     if (!table || !table.order) return;
 
     const updatedTable = { ...table };
-    
+
     // Vérification TypeScript
     if (!updatedTable.order) return;
-    
+
     updatedTable.order.items = updatedTable.order.items.map(item =>
       item.id === itemId ? { ...item, notes } : item
     );
-    
+
     setTable(updatedTable);
     updateTable(updatedTable);
   };
@@ -230,17 +230,17 @@ export default function TableScreen() {
   // Mettre à jour le nombre de convives
   const updateGuestCount = (newCount: number) => {
     if (!table) return;
-    
+
     const updatedCount = Math.max(1, newCount);
     setGuestCount(updatedCount);
-    
+
     const updatedTable = { ...table, guests: updatedCount };
-    
+
     // Vérification TypeScript
     if (updatedTable.order) {
       updatedTable.order.guests = updatedCount;
     }
-    
+
     setTable(updatedTable);
     updateTable(updatedTable);
   };
@@ -248,9 +248,9 @@ export default function TableScreen() {
   // Gérer le paiement
   const handlePayment = (type: 'full' | 'split' | 'custom') => {
     if (!table || !table.order) return;
-    
+
     const total = table.order.total;
-    
+
     if (total <= 0) {
       Alert.alert('No Items', 'There are no items to pay for.');
       return;
@@ -259,8 +259,8 @@ export default function TableScreen() {
     if (type === 'full') {
       router.push({
         pathname: '/payment/full',
-        params: { 
-          tableId: tableId.toString(), 
+        params: {
+          tableId: tableId.toString(),
           total: total.toString(),
           items: JSON.stringify(table.order.items)
         },
@@ -270,12 +270,12 @@ export default function TableScreen() {
         Alert.alert('Cannot Split', 'Need at least 2 guests to split the bill.');
         return;
       }
-      
+
       router.push({
         pathname: '/payment/split',
-        params: { 
-          tableId: tableId.toString(), 
-          total: total.toString(), 
+        params: {
+          tableId: tableId.toString(),
+          total: total.toString(),
           guests: guestCount.toString(),
           items: JSON.stringify(table.order.items)
         },
@@ -283,8 +283,8 @@ export default function TableScreen() {
     } else if (type === 'custom') {
       router.push({
         pathname: '/payment/custom',
-        params: { 
-          tableId: tableId.toString(), 
+        params: {
+          tableId: tableId.toString(),
           total: total.toString(),
           items: JSON.stringify(table.order.items)
         },
@@ -304,7 +304,7 @@ export default function TableScreen() {
     return (
       <View style={styles.loadingContainer}>
         <Text>Table not found</Text>
-        <Pressable 
+        <Pressable
           style={styles.backButton}
           onPress={() => router.back()}>
           <Text style={styles.backButtonText}>Go Back</Text>
@@ -448,11 +448,11 @@ export default function TableScreen() {
               </Pressable>
             </View>
           </View>
-          
+
           {/* Onglets de catégories */}
-          <ScrollView 
-            horizontal 
-            showsHorizontalScrollIndicator={false} 
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
             style={styles.categoryTabs}>
             <Pressable
               style={[
@@ -461,7 +461,7 @@ export default function TableScreen() {
                 activeCategory === null && { borderBottomColor: '#2196F3' }
               ]}
               onPress={() => setActiveCategory(null)}>
-              <Text 
+              <Text
                 style={[
                   styles.categoryTabText,
                   activeCategory === null && styles.activeCategoryTabText
@@ -478,7 +478,7 @@ export default function TableScreen() {
                   activeCategory === category && { borderBottomColor: CATEGORY_COLORS[category] || '#2196F3' }
                 ]}
                 onPress={() => setActiveCategory(category)}>
-                <Text 
+                <Text
                   style={[
                     styles.categoryTabText,
                     activeCategory === category && styles.activeCategoryTabText,
@@ -489,11 +489,11 @@ export default function TableScreen() {
               </Pressable>
             ))}
           </ScrollView>
-          
+
           <ScrollView style={styles.menuItems}>
             <View style={styles.menuGrid}>
-              {(activeCategory 
-                ? [activeCategory] 
+              {(activeCategory
+                ? [activeCategory]
                 : getVisibleCategories()
               ).map(category => (
                 <View key={category} style={styles.categorySection}>
@@ -750,14 +750,18 @@ const styles = StyleSheet.create({
   // Styles pour les onglets de catégorie
   categoryTabs: {
     marginBottom: 12,
+    flexGrow: 0
   },
   categoryTab: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    marginRight: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    marginRight: 6,
     borderBottomWidth: 2,
     borderBottomColor: 'transparent',
-  },
+    textAlign: 'center',
+    minWidth: 80, // Largeur minimale pour éviter l’étirement
+    alignSelf: 'flex-start', // Empêche l'expansion verticale
+  },  
   activeCategoryTab: {
     borderBottomWidth: 2,
   },
@@ -791,14 +795,14 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   menuItem: {
-    width: '32%', // 3 par ligne
+    width: '30%', // Ajuste pour éviter des espaces vides
+    height: 50, // Fixe une hauteur raisonnable
     backgroundColor: '#f9f9f9',
     borderRadius: 6,
-    padding: 6,
+    padding: 8,
     borderLeftWidth: 4,
-    justifyContent: 'space-between',
-    marginBottom: 2,
-    height: 50, // Hauteur fixe pour tous les éléments
+    justifyContent: 'center', // Centre le contenu verticalement
+    alignItems: 'center', // Centre horizontalement
   },
   menuItemName: {
     fontSize: 12,
