@@ -1,4 +1,4 @@
-// app/_layout.tsx - Make sure the root layout includes all screens
+// app/_layout.tsx - Mise à jour pour rendre tous les onglets fonctionnels
 
 import { useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
@@ -41,7 +41,7 @@ export default function RootLayout() {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
         <ActivityIndicator size="large" color="#4CAF50" />
-        <Text style={{ marginTop: 16, fontSize: 16 }}>Initializing app...</Text>
+        <Text style={{ marginTop: 16, fontSize: 16 }}>Initialisation de l'application...</Text>
       </View>
     );
   }

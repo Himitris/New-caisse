@@ -20,12 +20,14 @@ export default function PrintPreviewScreen() {
   const displayName = tableName || `Table ${tableIdNum}`;
   
   const restaurantInfo = {
-    name: 'Sample Restaurant',
-    address: '123 Main Street',
-    phone: '(555) 123-4567',
-    email: 'info@samplerestaurant.com',
+    name: 'Manjo Carn',
+    address: 'Route de la Corniche, 82140 Saint Antonin Noble Val',
+    siret: 'Siret N° 803 520 998 00011',
+    phone: 'Tel : 0563682585',
+    taxInfo: 'TVA non applicable - art.293B du CGI',
+    owner: 'Virginie',
   };
-
+  
   const order = {
     tableNumber: tableIdNum,
     tableName: displayName,
@@ -36,22 +38,42 @@ export default function PrintPreviewScreen() {
     total: totalAmount,
     remaining: remainingAmount,
     isPartial: isPartialPayment,
-    paymentMethod: paymentMethod || 'card',
+    paymentMethod: paymentMethod || 'Carte',
     timestamp: new Date().toLocaleString(),
   };
-
+  
   const generateHTML = () => {
+    let totalPrice = 0;
+    interface OrderItem {
+      name: string;
+      quantity: number;
+      price: number;
+    }
+
+    const itemsHTML: string = order.items.map((item: OrderItem) => {
+      const itemTotal: number = item.quantity * item.price;
+      totalPrice += itemTotal;
+      return `
+      <tr>
+        <td>${item.name}</td>
+        <td>${item.quantity}</td>
+        <td>${item.price.toFixed(2)}€</td>
+        <td>${itemTotal.toFixed(2)}€</td>
+      </tr>
+      `;
+    }).join('');
+  
     return `
       <html>
         <head>
           <style>
             body { font-family: Arial, sans-serif; padding: 20px; }
-            .header { text-align: center; margin-bottom: 20px; }
-            .info { margin-bottom: 20px; }
+            .header, .footer { text-align: center; margin-bottom: 20px; }
+            .info { margin-bottom: 20px; text-align: center; }
             .items { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-            .items th, .items td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
-            .totals { text-align: right; }
-            .payment-info { margin-top: 20px; padding: 10px; border: 1px dashed #ccc; text-align: center; }
+            .items th, .items td { padding: 8px; text-align: center; border-bottom: 1px solid #ddd; }
+            .totals { text-align: right; font-weight: bold; }
+            .payment-info { text-align: center; margin-top: 20px; padding: 10px; border: 1px dashed #ccc; }
             .partial { color: #f44336; font-weight: bold; }
           </style>
         </head>
@@ -59,52 +81,48 @@ export default function PrintPreviewScreen() {
           <div class="header">
             <h1>${restaurantInfo.name}</h1>
             <p>${restaurantInfo.address}</p>
-            <p>${restaurantInfo.phone}</p>
+            <p>${restaurantInfo.siret}</p>
           </div>
           
           <div class="info">
-            <p>${order.tableName}</p>
+            <p><strong>${order.tableName}</strong></p>
             <p>Date: ${order.timestamp}</p>
-            ${order.isPartial ? `<p class="partial">PARTIAL PAYMENT</p>` : ''}
+            ${order.isPartial ? `<p class="partial">PAIEMENT PARTIEL</p>` : ''}
           </div>
-
+  
           <table class="items">
             <tr>
-              <th>Item</th>
-              <th>Qty</th>
-              <th>Price</th>
+              <th>Description</th>
+              <th>Quantité</th>
+              <th>Prix</th>
               <th>Total</th>
             </tr>
-            ${order.items.map((item: { name: string; quantity: number; price: number }) => `
-              <tr>
-                <td>${item.name}</td>
-                <td>${item.quantity}</td>
-                <td>$${item.price.toFixed(2)}</td>
-                <td>$${(item.quantity * item.price).toFixed(2)}</td>
-              </tr>
-            `).join('')}
+            ${itemsHTML}
           </table>
-
+  
           <div class="totals">
-            <p>Subtotal: $${order.subtotal.toFixed(2)}</p>
-            <p>Tax: $${order.tax.toFixed(2)}</p>
-            <h2>Total: $${order.total.toFixed(2)}</h2>
-            ${order.isPartial ? `<p class="partial">Remaining Balance: $${order.remaining.toFixed(2)}</p>` : ''}
+            <p>Sous-total: ${order.subtotal.toFixed(2)}€</p>
+            <p>Taxe: ${order.tax.toFixed(2)}€</p>
+            <h2>Total à payer: ${order.total.toFixed(2)}€</h2>
+            ${order.isPartial ? `<p class="partial">Solde restant: ${order.remaining.toFixed(2)}€</p>` : ''}
           </div>
-
+  
           <div class="payment-info">
-            <p>Payment Method: ${order.paymentMethod === 'card' ? 'Credit Card' : 'Cash'}</p>
-            <p>Payment Amount: $${order.total.toFixed(2)}</p>
-            <p>Status: ${order.isPartial ? 'Partial Payment' : 'Paid in Full'}</p>
+            <p>Méthode de paiement: ${order.paymentMethod === 'card' ? 'Carte bancaire' : 'Espèces'}</p>
+            <p>Montant payé: ${order.total.toFixed(2)}€</p>
+            <p>Statut: ${order.isPartial ? 'Paiement partiel' : 'Payé en totalité'}</p>
           </div>
-
-          <div class="header">
-            <p>Thank you for dining with us!</p>
+  
+          <div class="footer">
+            <p>${restaurantInfo.taxInfo}</p>
+            <p>Merci de votre visite !</p>
+            <p>À bientôt,<br>${restaurantInfo.owner}<br>${restaurantInfo.phone}</p>
           </div>
         </body>
       </html>
     `;
   };
+  
 
   const handlePrint = async () => {
     try {

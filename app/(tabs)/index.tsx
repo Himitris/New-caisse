@@ -1,4 +1,4 @@
-// app/(tabs)/index.tsx - Version avec deux modals pour la sélection des couverts
+// app/(tabs)/index.tsx - Optimisé pour le mode paysage
 
 import { View, Text, StyleSheet, ScrollView, Pressable, Alert, Platform } from 'react-native';
 import { useState, useEffect } from 'react';
@@ -35,14 +35,8 @@ export default function TablesScreen() {
     setError(null);
     
     try {
-      
       // Récupérer les tables depuis le stockage
       const loadedTables = await getTables();
-      
-      // Logs pour le débogage
-      const eauTables = loadedTables.filter(t => t.section === TABLE_SECTIONS.EAU);
-      const buisTables = loadedTables.filter(t => t.section === TABLE_SECTIONS.BUIS);
-      
       setTables(loadedTables);
     } catch (error) {
       console.error("Error loading tables:", error);
@@ -265,82 +259,86 @@ export default function TablesScreen() {
         </View>
       </View>
 
-      <View style={styles.sectionTabs}>
-        {sections.map(section => (
-          <Pressable
-            key={section}
-            style={[
-              styles.sectionTab,
-              activeSection === section && styles.activeTab
-            ]}
-            onPress={() => toggleSection(section)}
-          >
-            <Text 
+      <View style={styles.mainContent}>
+        <View style={styles.sectionTabs}>
+          {sections.map(section => (
+            <Pressable
+              key={section}
               style={[
-                styles.sectionTabText,
-                activeSection === section && styles.activeTabText
+                styles.sectionTab,
+                activeSection === section && styles.activeTab
               ]}
+              onPress={() => toggleSection(section)}
             >
-              {section}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
+              <Text 
+                style={[
+                  styles.sectionTabText,
+                  activeSection === section && styles.activeTabText
+                ]}
+              >
+                {section}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
 
-      <ScrollView style={styles.scrollContainer}>
-        {sectionsToDisplay.map(section => {
-          const sectionTables = getTablesBySection(section);
-          
-          return (
-            <View key={section} style={styles.sectionContainer}>
-              <Text style={styles.sectionTitle}>{section}</Text>
-              {sectionTables.length === 0 ? (
-                <View style={styles.noTablesContainer}>
-                  <Text style={styles.noTablesText}>Aucune table dans cette section</Text>
-                  <Text style={styles.noTablesDetails}>
-                    Platform: {Platform.OS}, 
-                    Total Tables: {tables.length}, 
-                    Section: {section}
-                  </Text>
-                  <Pressable
-                    style={styles.sectionResetButton}
-                    onPress={handleResetAllTables}>
-                    <Text style={styles.sectionResetText}>
-                      Réinitialiser Toutes les Tables
-                    </Text>
-                  </Pressable>
-                </View>
-              ) : (
-                <View style={styles.tablesGrid}>
-                  {sectionTables.map((table) => (
-                    <Pressable
-                      key={table.id}
-                      style={[
-                        styles.table,
-                        { backgroundColor: getTableColor(table.status) },
-                      ]}
-                      onPress={() => openTable(table)}>
-                      <Text style={styles.tableNumber}>{table.name}</Text>
-                      <View style={styles.tableInfo}>
-                        <Users size={20} color="white" />
-                        <Text style={styles.seats}>
-                          {table.guests || 0}
+        <ScrollView style={styles.scrollContainer}>
+          <View style={styles.tablesContainer}>
+            {sectionsToDisplay.map(section => {
+              const sectionTables = getTablesBySection(section);
+              
+              return (
+                <View key={section} style={styles.sectionContainer}>
+                  <Text style={styles.sectionTitle}>{section}</Text>
+                  {sectionTables.length === 0 ? (
+                    <View style={styles.noTablesContainer}>
+                      <Text style={styles.noTablesText}>Aucune table dans cette section</Text>
+                      <Text style={styles.noTablesDetails}>
+                        Platform: {Platform.OS}, 
+                        Total Tables: {tables.length}, 
+                        Section: {section}
+                      </Text>
+                      <Pressable
+                        style={styles.sectionResetButton}
+                        onPress={handleResetAllTables}>
+                        <Text style={styles.sectionResetText}>
+                          Réinitialiser Toutes les Tables
                         </Text>
-                      </View>
-                      <Text style={styles.status}>{table.status}</Text>
-                      {table.order && table.order.items.length > 0 && (
-                        <Text style={styles.orderInfo}>
-                          {table.order.items.length} items - ${table.order.total.toFixed(2)}
-                        </Text>
-                      )}
-                    </Pressable>
-                  ))}
+                      </Pressable>
+                    </View>
+                  ) : (
+                    <View style={styles.tablesGrid}>
+                      {sectionTables.map((table) => (
+                        <Pressable
+                          key={table.id}
+                          style={[
+                            styles.table,
+                            { backgroundColor: getTableColor(table.status) },
+                          ]}
+                          onPress={() => openTable(table)}>
+                          <Text style={styles.tableNumber}>{table.name}</Text>
+                          <View style={styles.tableInfo}>
+                            <Users size={20} color="white" />
+                            <Text style={styles.seats}>
+                              {table.guests || 0}
+                            </Text>
+                          </View>
+                          <Text style={styles.status}>{table.status}</Text>
+                          {table.order && table.order.items.length > 0 && (
+                            <Text style={styles.orderInfo}>
+                              {table.order.items.length} items - ${table.order.total.toFixed(2)}
+                            </Text>
+                          )}
+                        </Pressable>
+                      ))}
+                    </View>
+                  )}
                 </View>
-              )}
-            </View>
-          );
-        })}
-      </ScrollView>
+              );
+            })}
+          </View>
+        </ScrollView>
+      </View>
     </View>
   );
 }
@@ -363,7 +361,7 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   header: {
-    padding: 20,
+    padding: 16,
     backgroundColor: 'white',
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
@@ -374,6 +372,10 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: 'bold',
+  },
+  mainContent: {
+    flex: 1,
+    flexDirection: 'row',
   },
   headerButtons: {
     flexDirection: 'row',
@@ -406,20 +408,19 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   sectionTabs: {
-    flexDirection: 'row',
+    width: 160,
     backgroundColor: 'white',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-    paddingHorizontal: 10,
-    flexWrap: 'wrap',
+    borderRightWidth: 1,
+    borderRightColor: '#e0e0e0',
+    padding: 10,
   },
   sectionTab: {
     padding: 12,
-    marginRight: 8,
+    marginBottom: 8,
+    borderRadius: 8,
   },
   activeTab: {
-    borderBottomWidth: 2,
-    borderBottomColor: '#2196F3',
+    backgroundColor: '#e3f2fd',
   },
   sectionTabText: {
     fontSize: 16,
@@ -433,15 +434,17 @@ const styles = StyleSheet.create({
   scrollContainer: {
     flex: 1,
   },
+  tablesContainer: {
+    flex: 1,
+    padding: 20,
+  },
   sectionContainer: {
     marginBottom: 20,
-    marginTop: 10,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
-    padding: 20,
-    paddingBottom: 10,
+    marginBottom: 12,
   },
   noTablesContainer: {
     padding: 20,
@@ -476,8 +479,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   tablesGrid: {
-    padding: 20,
-    paddingTop: 0,
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 20,

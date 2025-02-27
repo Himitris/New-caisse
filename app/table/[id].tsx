@@ -1,9 +1,9 @@
-// app/table/[id].tsx - Mise à jour pour utiliser ManjosPrice
+// app/table/[id].tsx - Version corrigée et optimisée pour le mode paysage fixe
 
 import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert } from 'react-native';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Users, Plus, Minus, Receipt, Split as Split2, CreditCard } from 'lucide-react-native';
+import { Users, Plus, Minus, Receipt, Split as Split2, CreditCard, ArrowLeft } from 'lucide-react-native';
 import { getTable, updateTable, OrderItem, Table } from '../../utils/storage';
 import priceData from '../../helpers/ManjosPrice';
 
@@ -13,22 +13,49 @@ interface MenuItem {
   price: number;
   category: string;
   type: 'resto' | 'boisson';
+  color: string; // Couleur pour la catégorie
 }
+
+interface CategoryInfo {
+  name: string;
+  color: string;
+  icon?: string;
+}
+
+// Définition des couleurs pour les catégories
+const CATEGORY_COLORS: { [key: string]: string } = {
+  // Resto
+  'Plats Principaux': '#FF9800',
+  'Plats Maxi': '#F44336',
+  'Salades': '#4CAF50',
+  'Accompagnements': '#CDDC39',
+  'Desserts': '#E91E63',
+  'Menu Enfant': '#8BC34A',
+  // Boissons
+  'Softs': '#03A9F4',
+  'Boissons Chaudes': '#795548',
+  'Bières': '#FFC107',
+  'Vins': '#9C27B0',
+  'Alcools': '#673AB7',
+  'Glaces': '#00BCD4',
+};
 
 export default function TableScreen() {
   const { id } = useLocalSearchParams();
   const tableId = parseInt(id as string, 10);
   const router = useRouter();
+  
   const [guestCount, setGuestCount] = useState(1);
   const [table, setTable] = useState<Table | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [activeType, setActiveType] = useState<'resto' | 'boisson' | null>('resto');
 
-  // Convertir les données de ManjosPrice en items de menu
-  const convertPriceDataToMenuItems = (): MenuItem[] => {
+  // Convertir les données de ManjosPrice en items de menu avec couleurs
+  const menuItems: MenuItem[] = useMemo(() => {
     return priceData.map(item => {
       // Déterminer la catégorie en fonction du type et du nom
-      let category = item.type === 'resto' ? 'Plats' : 'Boissons';
+      let category = item.type === 'resto' ? 'Plats Principaux' : 'Softs';
       
       // Pour les plats (resto)
       if (item.type === 'resto') {
@@ -42,8 +69,6 @@ export default function TableScreen() {
           category = 'Menu Enfant';
         } else if (item.name.toLowerCase().includes('maxi')) {
           category = 'Plats Maxi';
-        } else {
-          category = 'Plats Principaux';
         }
       }
       // Pour les boissons
@@ -58,8 +83,6 @@ export default function TableScreen() {
           category = 'Vins';
         } else if (item.name.toLowerCase().includes('apero') || item.name.toLowerCase().includes('digestif') || item.name.toLowerCase().includes('ricard') || item.name.toLowerCase().includes('alcool') || item.name.toLowerCase().includes('punch') || item.name.toLowerCase().includes('cocktail')) {
           category = 'Alcools';
-        } else {
-          category = 'Softs';
         }
       }
       
@@ -68,13 +91,29 @@ export default function TableScreen() {
         name: item.name,
         price: item.price,
         category,
-        type: item.type as 'resto' | 'boisson'
+        type: item.type as 'resto' | 'boisson',
+        color: CATEGORY_COLORS[category as keyof typeof CATEGORY_COLORS] || '#757575'
       };
     });
-  };
+  }, []);
 
-  const menuItems: MenuItem[] = convertPriceDataToMenuItems();
-  const categories = [...new Set(menuItems.map(item => item.category))].sort();
+  // Obtenir toutes les catégories uniques
+  const categories = useMemo(() => {
+    return [...new Set(menuItems.map(item => item.category))].sort();
+  }, [menuItems]);
+
+  // Obtenir les catégories par type
+  const categoriesByType = useMemo(() => {
+    const result = {
+      resto: categories.filter(cat => 
+        menuItems.some(item => item.category === cat && item.type === 'resto')
+      ),
+      boisson: categories.filter(cat => 
+        menuItems.some(item => item.category === cat && item.type === 'boisson')
+      )
+    };
+    return result;
+  }, [categories, menuItems]);
 
   useEffect(() => {
     loadTable();
@@ -93,6 +132,12 @@ export default function TableScreen() {
   // Fonction pour filtrer les éléments du menu par catégorie
   const getMenuItemsByCategory = (category: string) => {
     return menuItems.filter(item => item.category === category);
+  };
+
+  // Fonction pour filtrer les catégories par type
+  const getVisibleCategories = () => {
+    if (!activeType) return categories;
+    return categoriesByType[activeType];
   };
 
   // Fonction pour ajouter un item à la commande
@@ -274,9 +319,14 @@ export default function TableScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>{table.name}</Text>
-        <View style={styles.sectionBadge}>
-          <Text style={styles.sectionText}>{table.section}</Text>
+        <Pressable onPress={() => router.back()} style={styles.backLink}>
+          <ArrowLeft size={24} color="#333" />
+        </Pressable>
+        <View style={styles.headerTitleContainer}>
+          <Text style={styles.title}>{table.name}</Text>
+          <View style={styles.sectionBadge}>
+            <Text style={styles.sectionText}>{table.section}</Text>
+          </View>
         </View>
         <View style={styles.guestCounter}>
           <Users size={24} color="#666" />
@@ -291,11 +341,12 @@ export default function TableScreen() {
       </View>
 
       <View style={styles.content}>
+        {/* Section Commande Actuelle */}
         <View style={styles.orderSection}>
-          <Text style={styles.sectionTitle}>Current Order</Text>
+          <Text style={styles.sectionTitle}>Commande actuelle</Text>
           <ScrollView style={styles.orderList}>
             {orderItems.length === 0 ? (
-              <Text style={styles.emptyOrder}>No items in order. Add from the menu.</Text>
+              <Text style={styles.emptyOrder}>Aucun article dans la commande. Ajoutez-en depuis le menu.</Text>
             ) : (
               orderItems.map(item => (
                 <View key={item.id} style={styles.orderItem}>
@@ -315,7 +366,7 @@ export default function TableScreen() {
                     </View>
                     <TextInput
                       style={styles.notesInput}
-                      placeholder="Add notes..."
+                      placeholder="Ajouter des notes..."
                       value={item.notes}
                       onChangeText={(text) => updateItemNotes(item.id, text)}
                     />
@@ -333,32 +384,81 @@ export default function TableScreen() {
               style={[styles.paymentButton, { backgroundColor: '#4CAF50' }]}
               onPress={() => handlePayment('full')}>
               <CreditCard size={24} color="white" />
-              <Text style={styles.paymentButtonText}>Pay Full</Text>
+              <Text style={styles.paymentButtonText}>Paiement total</Text>
             </Pressable>
             <Pressable
               style={[styles.paymentButton, { backgroundColor: '#2196F3' }]}
               onPress={() => handlePayment('split')}>
               <Split2 size={24} color="white" />
-              <Text style={styles.paymentButtonText}>Split Bill</Text>
+              <Text style={styles.paymentButtonText}>Partager</Text>
             </Pressable>
             <Pressable
               style={[styles.paymentButton, { backgroundColor: '#FF9800' }]}
               onPress={() => handlePayment('custom')}>
               <Receipt size={24} color="white" />
-              <Text style={styles.paymentButtonText}>Custom Split</Text>
+              <Text style={styles.paymentButtonText}>Partage personnalisé</Text>
             </Pressable>
           </View>
         </View>
 
+        {/* Section Menu */}
         <View style={styles.menuSection}>
-          <Text style={styles.sectionTitle}>Menu</Text>
+          <View style={styles.menuHeader}>
+            <Text style={styles.sectionTitle}>Menu</Text>
+            {/* Boutons de filtre par type */}
+            <View style={styles.typeFilters}>
+              <Pressable
+                style={[
+                  styles.typeFilterButton,
+                  activeType === 'resto' && styles.activeTypeButton
+                ]}
+                onPress={() => setActiveType('resto')}>
+                <Text style={[
+                  styles.typeFilterText,
+                  activeType === 'resto' && styles.activeTypeText
+                ]}>
+                  Plats
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.typeFilterButton,
+                  activeType === 'boisson' && styles.activeTypeButton
+                ]}
+                onPress={() => setActiveType('boisson')}>
+                <Text style={[
+                  styles.typeFilterText,
+                  activeType === 'boisson' && styles.activeTypeText
+                ]}>
+                  Boissons
+                </Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.typeFilterButton,
+                  activeType === null && styles.activeTypeButton
+                ]}
+                onPress={() => setActiveType(null)}>
+                <Text style={[
+                  styles.typeFilterText,
+                  activeType === null && styles.activeTypeText
+                ]}>
+                  Tout
+                </Text>
+              </Pressable>
+            </View>
+          </View>
           
           {/* Onglets de catégories */}
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryTabs}>
+          <ScrollView 
+            horizontal 
+            showsHorizontalScrollIndicator={false} 
+            style={styles.categoryTabs}>
             <Pressable
               style={[
                 styles.categoryTab,
-                activeCategory === null && styles.activeCategoryTab
+                activeCategory === null && styles.activeCategoryTab,
+                activeCategory === null && { borderBottomColor: '#2196F3' }
               ]}
               onPress={() => setActiveCategory(null)}>
               <Text 
@@ -366,21 +466,23 @@ export default function TableScreen() {
                   styles.categoryTabText,
                   activeCategory === null && styles.activeCategoryTabText
                 ]}>
-                All
+                Tout
               </Text>
             </Pressable>
-            {categories.map(category => (
+            {getVisibleCategories().map(category => (
               <Pressable
                 key={category}
                 style={[
                   styles.categoryTab,
-                  activeCategory === category && styles.activeCategoryTab
+                  activeCategory === category && styles.activeCategoryTab,
+                  activeCategory === category && { borderBottomColor: CATEGORY_COLORS[category] || '#2196F3' }
                 ]}
                 onPress={() => setActiveCategory(category)}>
                 <Text 
                   style={[
                     styles.categoryTabText,
-                    activeCategory === category && styles.activeCategoryTabText
+                    activeCategory === category && styles.activeCategoryTabText,
+                    activeCategory === category && { color: CATEGORY_COLORS[category] || '#2196F3' }
                   ]}>
                   {category}
                 </Text>
@@ -388,21 +490,36 @@ export default function TableScreen() {
             ))}
           </ScrollView>
           
-          <ScrollView>
-            {(activeCategory ? [activeCategory] : categories).map(category => (
-              <View key={category} style={styles.categorySection}>
-                <Text style={styles.categoryTitle}>{category}</Text>
-                {getMenuItemsByCategory(category).map(item => (
-                  <Pressable
-                    key={item.id}
-                    style={styles.menuItem}
-                    onPress={() => addItemToOrder(item)}>
-                    <Text style={styles.menuItemName}>{item.name}</Text>
-                    <Text style={styles.menuItemPrice}>${item.price.toFixed(2)}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            ))}
+          <ScrollView style={styles.menuItems}>
+            <View style={styles.menuGrid}>
+              {(activeCategory 
+                ? [activeCategory] 
+                : getVisibleCategories()
+              ).map(category => (
+                <View key={category} style={styles.categorySection}>
+                  <Text style={[
+                    styles.categoryTitle,
+                    { color: CATEGORY_COLORS[category] || '#757575' }
+                  ]}>
+                    {category}
+                  </Text>
+                  <View style={styles.menuItemsGrid}>
+                    {getMenuItemsByCategory(category).map(item => (
+                      <Pressable
+                        key={item.id}
+                        style={[
+                          styles.menuItem,
+                          { borderLeftColor: item.color }
+                        ]}
+                        onPress={() => addItemToOrder(item)}>
+                        <Text style={styles.menuItemName}>{item.name}</Text>
+                        <Text style={styles.menuItemPrice}>${item.price.toFixed(2)}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+              ))}
+            </View>
           </ScrollView>
         </View>
       </View>
@@ -431,7 +548,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   header: {
-    padding: 20,
+    padding: 16,
     backgroundColor: 'white',
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
@@ -439,17 +556,24 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
+  backLink: {
+    marginRight: 12,
+  },
+  headerTitleContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
-    flex: 1,
+    marginRight: 12,
   },
   sectionBadge: {
     backgroundColor: '#E1F5FE',
     paddingHorizontal: 12,
     paddingVertical: 4,
     borderRadius: 16,
-    marginRight: 16,
   },
   sectionText: {
     color: '#0288D1',
@@ -472,15 +596,15 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+    padding: 12,
+    gap: 12,
     flexDirection: 'row',
-    padding: 20,
-    gap: 20,
   },
   orderSection: {
-    flex: 3,
+    flex: 2,
     backgroundColor: 'white',
     borderRadius: 12,
-    padding: 20,
+    padding: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -488,23 +612,52 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   menuSection: {
-    flex: 2,
+    flex: 3,
     backgroundColor: 'white',
     borderRadius: 12,
-    padding: 20,
+    padding: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 3.84,
     elevation: 5,
   },
+  menuHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  typeFilters: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  typeFilterButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 16,
+    backgroundColor: '#f0f0f0',
+  },
+  activeTypeButton: {
+    backgroundColor: '#2196F3',
+  },
+  typeFilterText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#666',
+  },
+  activeTypeText: {
+    color: 'white',
+    fontWeight: '600',
+  },
   sectionTitle: {
     fontSize: 20,
     fontWeight: '600',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   orderList: {
     flex: 1,
+    maxHeight: 300,
   },
   emptyOrder: {
     textAlign: 'center',
@@ -591,23 +744,22 @@ const styles = StyleSheet.create({
   },
   paymentButtonText: {
     color: 'white',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
   },
-  // Nouveaux styles pour les onglets de catégorie
+  // Styles pour les onglets de catégorie
   categoryTabs: {
-    flexDirection: 'row',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   categoryTab: {
     paddingHorizontal: 16,
     paddingVertical: 8,
     marginRight: 8,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 16,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
   },
   activeCategoryTab: {
-    backgroundColor: '#2196F3',
+    borderBottomWidth: 2,
   },
   categoryTabText: {
     fontSize: 14,
@@ -615,33 +767,46 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   activeCategoryTabText: {
-    color: 'white',
     fontWeight: '600',
+  },
+  menuItems: {
+    flex: 1,
+    maxHeight: 500,
+  },
+  menuGrid: {
+    paddingBottom: 16,
   },
   categorySection: {
-    marginBottom: 20,
+    marginBottom: 4,
   },
   categoryTitle: {
-    fontSize: 18,
+    fontSize: 14,
     fontWeight: '600',
-    marginBottom: 12,
-    color: '#666',
+    marginBottom: 4,
+    paddingLeft: 8,
+  },
+  menuItemsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 2,
   },
   menuItem: {
-    flexDirection: 'row',
+    width: '32%', // 3 par ligne
+    backgroundColor: '#f9f9f9',
+    borderRadius: 6,
+    padding: 6,
+    borderLeftWidth: 4,
     justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 12,
-    backgroundColor: '#f5f5f5',
-    borderRadius: 8,
-    marginBottom: 8,
+    marginBottom: 2,
+    height: 50, // Hauteur fixe pour tous les éléments
   },
   menuItemName: {
-    fontSize: 16,
+    fontSize: 12,
     fontWeight: '500',
+    marginBottom: 2,
   },
   menuItemPrice: {
-    fontSize: 16,
+    fontSize: 12,
     fontWeight: '600',
     color: '#4CAF50',
   },
