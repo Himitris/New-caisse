@@ -1,6 +1,9 @@
+// app/(tabs)/menu.tsx - Mise à jour avec les prix de Manjos
+
 import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { useState } from 'react';
 import { CirclePlus as PlusCircle, CircleMinus as MinusCircle, CreditCard as Edit } from 'lucide-react-native';
+import priceData from '../../helpers/ManjosPrice';
 
 interface MenuItem {
   id: number;
@@ -8,19 +11,71 @@ interface MenuItem {
   price: number;
   category: string;
   available: boolean;
+  type: 'resto' | 'boisson';
 }
 
 export default function MenuScreen() {
-  const [menuItems] = useState<MenuItem[]>([
-    { id: 1, name: 'Margherita Pizza', price: 12.99, category: 'Pizza', available: true },
-    { id: 2, name: 'Pepperoni Pizza', price: 14.99, category: 'Pizza', available: true },
-    { id: 3, name: 'Caesar Salad', price: 8.99, category: 'Salads', available: true },
-    { id: 4, name: 'Greek Salad', price: 9.99, category: 'Salads', available: false },
-    { id: 5, name: 'Spaghetti Carbonara', price: 13.99, category: 'Pasta', available: true },
-    { id: 6, name: 'Tiramisu', price: 6.99, category: 'Desserts', available: true },
-  ]);
+  // Convertir les données de ManjosPrice en items de menu
+  const convertedItems: MenuItem[] = priceData.map(item => ({
+    id: item.id,
+    name: item.name,
+    price: item.price,
+    category: item.type === 'resto' ? 'Plats' : 'Boissons',
+    available: true,
+    type: item.type as 'resto' | 'boisson'
+  }));
 
-  const categories = [...new Set(menuItems.map(item => item.category))];
+  // Organiser les items en catégories plus spécifiques
+  const organizeMenuItems = (items: MenuItem[]): MenuItem[] => {
+    return items.map(item => {
+      // Pour les plats (resto)
+      if (item.type === 'resto') {
+        if (item.name.toLowerCase().includes('salade')) {
+          return { ...item, category: 'Salades' };
+        } else if (item.name.toLowerCase().includes('dessert')) {
+          return { ...item, category: 'Desserts' };
+        } else if (item.name.toLowerCase().includes('frites')) {
+          return { ...item, category: 'Accompagnements' };
+        } else if (item.name.toLowerCase().includes('menu enfant')) {
+          return { ...item, category: 'Menu Enfant' };
+        } else if (item.name.toLowerCase().includes('maxi')) {
+          return { ...item, category: 'Plats Maxi' };
+        } else {
+          return { ...item, category: 'Plats Principaux' };
+        }
+      }
+      // Pour les boissons
+      else {
+        if (item.name.toLowerCase().includes('glace')) {
+          return { ...item, category: 'Glaces' };
+        } else if (item.name.toLowerCase().includes('thé') || item.name.toLowerCase().includes('café')) {
+          return { ...item, category: 'Boissons Chaudes' };
+        } else if (item.name.toLowerCase().includes('bière') || item.name.toLowerCase().includes('blonde') || item.name.toLowerCase().includes('ambree')) {
+          return { ...item, category: 'Bières' };
+        } else if (item.name.toLowerCase().includes('vin') || item.name.toLowerCase().includes('pichet') || item.name.toLowerCase().includes('btl')) {
+          return { ...item, category: 'Vins' };
+        } else if (item.name.toLowerCase().includes('apero') || item.name.toLowerCase().includes('digestif') || item.name.toLowerCase().includes('ricard') || item.name.toLowerCase().includes('alcool') || item.name.toLowerCase().includes('punch') || item.name.toLowerCase().includes('cocktail')) {
+          return { ...item, category: 'Alcools' };
+        } else {
+          return { ...item, category: 'Softs' };
+        }
+      }
+    });
+  };
+
+  const [menuItems, setMenuItems] = useState<MenuItem[]>(organizeMenuItems(convertedItems));
+
+  // Obtenir les catégories uniques et les trier
+  const categories = [...new Set(menuItems.map(item => item.category))].sort();
+
+  // Fonction pour marquer un item disponible/indisponible
+  const toggleItemAvailability = (itemId: number) => {
+    setMenuItems(prevItems => 
+      prevItems.map(item => 
+        item.id === itemId ? { ...item, available: !item.available } : item
+      )
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -48,7 +103,8 @@ export default function MenuScreen() {
                       style={[
                         styles.actionButton,
                         { backgroundColor: item.available ? '#f44336' : '#4CAF50' },
-                      ]}>
+                      ]}
+                      onPress={() => toggleItemAvailability(item.id)}>
                       {item.available ? (
                         <MinusCircle size={20} color="#fff" />
                       ) : (

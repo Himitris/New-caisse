@@ -1,16 +1,18 @@
-// app/table/[id].tsx - Fixed TypeScript errors
+// app/table/[id].tsx - Mise à jour pour utiliser ManjosPrice
 
 import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert } from 'react-native';
 import { useState, useEffect } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Users, Plus, Minus, Receipt, Split as Split2, CreditCard } from 'lucide-react-native';
 import { getTable, updateTable, OrderItem, Table } from '../../utils/storage';
+import priceData from '../../helpers/ManjosPrice';
 
 interface MenuItem {
   id: number;
   name: string;
   price: number;
   category: string;
+  type: 'resto' | 'boisson';
 }
 
 export default function TableScreen() {
@@ -20,22 +22,59 @@ export default function TableScreen() {
   const [guestCount, setGuestCount] = useState(1);
   const [table, setTable] = useState<Table | null>(null);
   const [loading, setLoading] = useState(true);
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
 
-  const menuItems: MenuItem[] = [
-    // Menu items remain the same
-    { id: 1, name: 'Margherita Pizza', price: 12.99, category: 'Pizza' },
-    { id: 2, name: 'Pepperoni Pizza', price: 14.99, category: 'Pizza' },
-    { id: 3, name: 'Caesar Salad', price: 8.99, category: 'Salads' },
-    { id: 4, name: 'Greek Salad', price: 9.99, category: 'Salads' },
-    { id: 5, name: 'Spaghetti Carbonara', price: 13.99, category: 'Pasta' },
-    { id: 6, name: 'Fettuccine Alfredo', price: 12.99, category: 'Pasta' },
-    { id: 7, name: 'Tiramisu', price: 6.99, category: 'Desserts' },
-    { id: 8, name: 'Cheesecake', price: 7.99, category: 'Desserts' },
-    { id: 9, name: 'Soda', price: 2.99, category: 'Drinks' },
-    { id: 10, name: 'Iced Tea', price: 2.49, category: 'Drinks' },
-  ];
+  // Convertir les données de ManjosPrice en items de menu
+  const convertPriceDataToMenuItems = (): MenuItem[] => {
+    return priceData.map(item => {
+      // Déterminer la catégorie en fonction du type et du nom
+      let category = item.type === 'resto' ? 'Plats' : 'Boissons';
+      
+      // Pour les plats (resto)
+      if (item.type === 'resto') {
+        if (item.name.toLowerCase().includes('salade')) {
+          category = 'Salades';
+        } else if (item.name.toLowerCase().includes('dessert')) {
+          category = 'Desserts';
+        } else if (item.name.toLowerCase().includes('frites')) {
+          category = 'Accompagnements';
+        } else if (item.name.toLowerCase().includes('menu enfant')) {
+          category = 'Menu Enfant';
+        } else if (item.name.toLowerCase().includes('maxi')) {
+          category = 'Plats Maxi';
+        } else {
+          category = 'Plats Principaux';
+        }
+      }
+      // Pour les boissons
+      else {
+        if (item.name.toLowerCase().includes('glace')) {
+          category = 'Glaces';
+        } else if (item.name.toLowerCase().includes('thé') || item.name.toLowerCase().includes('café')) {
+          category = 'Boissons Chaudes';
+        } else if (item.name.toLowerCase().includes('bière') || item.name.toLowerCase().includes('blonde') || item.name.toLowerCase().includes('ambree')) {
+          category = 'Bières';
+        } else if (item.name.toLowerCase().includes('vin') || item.name.toLowerCase().includes('pichet') || item.name.toLowerCase().includes('btl')) {
+          category = 'Vins';
+        } else if (item.name.toLowerCase().includes('apero') || item.name.toLowerCase().includes('digestif') || item.name.toLowerCase().includes('ricard') || item.name.toLowerCase().includes('alcool') || item.name.toLowerCase().includes('punch') || item.name.toLowerCase().includes('cocktail')) {
+          category = 'Alcools';
+        } else {
+          category = 'Softs';
+        }
+      }
+      
+      return {
+        id: item.id,
+        name: item.name,
+        price: item.price,
+        category,
+        type: item.type as 'resto' | 'boisson'
+      };
+    });
+  };
 
-  const categories = [...new Set(menuItems.map(item => item.category))];
+  const menuItems: MenuItem[] = convertPriceDataToMenuItems();
+  const categories = [...new Set(menuItems.map(item => item.category))].sort();
 
   useEffect(() => {
     loadTable();
@@ -51,13 +90,18 @@ export default function TableScreen() {
     setLoading(false);
   };
 
-  // Fixed function to handle TypeScript errors
+  // Fonction pour filtrer les éléments du menu par catégorie
+  const getMenuItemsByCategory = (category: string) => {
+    return menuItems.filter(item => item.category === category);
+  };
+
+  // Fonction pour ajouter un item à la commande
   const addItemToOrder = (item: MenuItem) => {
     if (!table || !table.order) return;
 
     const updatedTable = { ...table };
     
-    // Ensure order exists (TypeScript safety)
+    // Assurer que la commande existe
     if (!updatedTable.order) {
       updatedTable.order = {
         id: Date.now(),
@@ -69,15 +113,16 @@ export default function TableScreen() {
       };
     }
     
+    // Vérifier si l'item existe déjà
     const existingItem = updatedTable.order.items.find(
       orderItem => orderItem.name === item.name
     );
 
     if (existingItem) {
-      // Increment quantity if item already exists
+      // Incrémenter la quantité si l'item existe déjà
       existingItem.quantity += 1;
     } else {
-      // Add new item
+      // Ajouter un nouvel item
       updatedTable.order.items.push({
         id: Date.now(),
         name: item.name,
@@ -86,20 +131,20 @@ export default function TableScreen() {
       });
     }
 
-    // Recalculate total
+    // Recalculer le total
     updatedTable.order.total = calculateTotal(updatedTable.order.items);
     
     setTable(updatedTable);
     updateTable(updatedTable);
   };
 
-  // Fixed function to handle TypeScript errors
+  // Mettre à jour la quantité d'un item
   const updateItemQuantity = (itemId: number, increment: boolean) => {
     if (!table || !table.order) return;
 
     const updatedTable = { ...table };
     
-    // TypeScript safety
+    // Vérification TypeScript
     if (!updatedTable.order) return;
     
     const updatedItems = updatedTable.order.items.map(item =>
@@ -115,13 +160,13 @@ export default function TableScreen() {
     updateTable(updatedTable);
   };
 
-  // Fixed function to handle TypeScript errors
+  // Mettre à jour les notes d'un item
   const updateItemNotes = (itemId: number, notes: string) => {
     if (!table || !table.order) return;
 
     const updatedTable = { ...table };
     
-    // TypeScript safety
+    // Vérification TypeScript
     if (!updatedTable.order) return;
     
     updatedTable.order.items = updatedTable.order.items.map(item =>
@@ -132,11 +177,12 @@ export default function TableScreen() {
     updateTable(updatedTable);
   };
 
+  // Calculer le total de la commande
   const calculateTotal = (items: OrderItem[]): number => {
     return items.reduce((sum, item) => sum + item.price * item.quantity, 0);
   };
 
-  // Fixed function to handle TypeScript errors
+  // Mettre à jour le nombre de convives
   const updateGuestCount = (newCount: number) => {
     if (!table) return;
     
@@ -145,7 +191,7 @@ export default function TableScreen() {
     
     const updatedTable = { ...table, guests: updatedCount };
     
-    // TypeScript safety - check if order exists
+    // Vérification TypeScript
     if (updatedTable.order) {
       updatedTable.order.guests = updatedCount;
     }
@@ -154,6 +200,7 @@ export default function TableScreen() {
     updateTable(updatedTable);
   };
 
+  // Gérer le paiement
   const handlePayment = (type: 'full' | 'split' | 'custom') => {
     if (!table || !table.order) return;
     
@@ -243,7 +290,6 @@ export default function TableScreen() {
         </View>
       </View>
 
-      {/* Rest of the component remains the same */}
       <View style={styles.content}>
         <View style={styles.orderSection}>
           <Text style={styles.sectionTitle}>Current Order</Text>
@@ -306,21 +352,55 @@ export default function TableScreen() {
 
         <View style={styles.menuSection}>
           <Text style={styles.sectionTitle}>Menu</Text>
-          <ScrollView>
+          
+          {/* Onglets de catégories */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryTabs}>
+            <Pressable
+              style={[
+                styles.categoryTab,
+                activeCategory === null && styles.activeCategoryTab
+              ]}
+              onPress={() => setActiveCategory(null)}>
+              <Text 
+                style={[
+                  styles.categoryTabText,
+                  activeCategory === null && styles.activeCategoryTabText
+                ]}>
+                All
+              </Text>
+            </Pressable>
             {categories.map(category => (
+              <Pressable
+                key={category}
+                style={[
+                  styles.categoryTab,
+                  activeCategory === category && styles.activeCategoryTab
+                ]}
+                onPress={() => setActiveCategory(category)}>
+                <Text 
+                  style={[
+                    styles.categoryTabText,
+                    activeCategory === category && styles.activeCategoryTabText
+                  ]}>
+                  {category}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+          
+          <ScrollView>
+            {(activeCategory ? [activeCategory] : categories).map(category => (
               <View key={category} style={styles.categorySection}>
                 <Text style={styles.categoryTitle}>{category}</Text>
-                {menuItems
-                  .filter(item => item.category === category)
-                  .map(item => (
-                    <Pressable
-                      key={item.id}
-                      style={styles.menuItem}
-                      onPress={() => addItemToOrder(item)}>
-                      <Text style={styles.menuItemName}>{item.name}</Text>
-                      <Text style={styles.menuItemPrice}>${item.price.toFixed(2)}</Text>
-                    </Pressable>
-                  ))}
+                {getMenuItemsByCategory(category).map(item => (
+                  <Pressable
+                    key={item.id}
+                    style={styles.menuItem}
+                    onPress={() => addItemToOrder(item)}>
+                    <Text style={styles.menuItemName}>{item.name}</Text>
+                    <Text style={styles.menuItemPrice}>${item.price.toFixed(2)}</Text>
+                  </Pressable>
+                ))}
               </View>
             ))}
           </ScrollView>
@@ -330,7 +410,6 @@ export default function TableScreen() {
   );
 }
 
-// Styles remain the same
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -513,6 +592,30 @@ const styles = StyleSheet.create({
   paymentButtonText: {
     color: 'white',
     fontSize: 16,
+    fontWeight: '600',
+  },
+  // Nouveaux styles pour les onglets de catégorie
+  categoryTabs: {
+    flexDirection: 'row',
+    marginBottom: 16,
+  },
+  categoryTab: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginRight: 8,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 16,
+  },
+  activeCategoryTab: {
+    backgroundColor: '#2196F3',
+  },
+  categoryTabText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#666',
+  },
+  activeCategoryTabText: {
+    color: 'white',
     fontWeight: '600',
   },
   categorySection: {

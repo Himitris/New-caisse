@@ -1,4 +1,7 @@
+// utils/storage.ts - Version simplifiée avec une seule approche
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 
 export interface Table {
   id: number;
@@ -34,11 +37,13 @@ export interface Bill {
   items: number;
   status: 'pending' | 'paid' | 'split';
   timestamp: string;
+  tableName?: string;
+  section?: string;
 }
 
-// Keys for AsyncStorage
-const TABLES_STORAGE_KEY = 'restaurant_tables';
-const FIRST_LAUNCH_KEY = 'first_launch';
+// Clés pour AsyncStorage
+const TABLES_STORAGE_KEY = 'restaurant_tables_v3'; // Nouvelle clé pour éviter les conflits
+const FIRST_LAUNCH_KEY = 'first_launch_v3';
 const BILLS_STORAGE_KEY = 'restaurant_bills';
 
 export const TABLE_SECTIONS = {
@@ -46,7 +51,7 @@ export const TABLE_SECTIONS = {
   BUIS: 'Buis'
 };
 
-// Default tables data
+// Données par défaut pour les tables
 export const defaultTables: Table[] = [
   // EAU Section
   { id: 1, name: 'Doc 1', section: TABLE_SECTIONS.EAU, status: 'available', seats: 4 },
@@ -62,7 +67,7 @@ export const defaultTables: Table[] = [
   { id: 11, name: 'Ext 1', section: TABLE_SECTIONS.EAU, status: 'available', seats: 4 },
   { id: 12, name: 'Ext 2', section: TABLE_SECTIONS.EAU, status: 'available', seats: 4 },
   { id: 13, name: 'Ext Rge', section: TABLE_SECTIONS.EAU, status: 'available', seats: 6 },
-  
+
   // BUIS Section
   { id: 14, name: 'Bas 0', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
   { id: 15, name: 'Bas 1', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
@@ -90,152 +95,190 @@ export const defaultTables: Table[] = [
   { id: 37, name: 'Sous Cabane', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 6 },
 ];
 
-// Check if it's the first launch and initialize tables
+// Fonction simple de log
+const log = (message: string, data?: any) => {
+  console.log(`[${Platform.OS}] ${message}`, data ? data : '');
+};
+
+// Fonction pour initialiser les tables
 export const initializeTables = async (): Promise<Table[]> => {
   try {
-    const isFirstLaunch = await AsyncStorage.getItem(FIRST_LAUNCH_KEY);
-    
-    if (isFirstLaunch === null) {
-      // First launch - reset all tables
-      await AsyncStorage.setItem(TABLES_STORAGE_KEY, JSON.stringify(defaultTables));
-      await AsyncStorage.setItem(FIRST_LAUNCH_KEY, 'false');
-      return defaultTables;
-    } else {
-      // Not first launch - get stored tables
-      const storedTables = await AsyncStorage.getItem(TABLES_STORAGE_KEY);
-      if (storedTables) {
-        return JSON.parse(storedTables);
-      }
-      // If no stored tables (shouldn't happen, but as a fallback)
-      await AsyncStorage.setItem(TABLES_STORAGE_KEY, JSON.stringify(defaultTables));
-      return defaultTables;
-    }
+
+    // Sauvegarde directe des tables par défaut
+    await AsyncStorage.setItem(TABLES_STORAGE_KEY, JSON.stringify(defaultTables));
+    await AsyncStorage.setItem(FIRST_LAUNCH_KEY, 'false');
+
+    return defaultTables;
   } catch (error) {
-    console.error('Error initializing tables:', error);
+    log('Error initializing tables:', error);
+    // En cas d'erreur, retourner quand même les tables par défaut
     return defaultTables;
   }
 };
 
-// Save tables to AsyncStorage
+// Fonction pour obtenir toutes les tables
+export const getTables = async (): Promise<Table[]> => {
+  try {
+
+    // Récupérer les tables depuis AsyncStorage
+    const jsonValue = await AsyncStorage.getItem(TABLES_STORAGE_KEY);
+
+    // Si on trouve des tables stockées
+    if (jsonValue !== null) {
+      const parsedTables = JSON.parse(jsonValue);
+
+      // Vérification que les tables sont dans un format valide
+      if (Array.isArray(parsedTables) && parsedTables.length > 0) {
+        // Vérifier si chaque table a une section valide
+        const invalidTables = parsedTables.filter(table => !table.section);
+
+        if (invalidTables.length > 0) {
+
+          // Corriger les tables sans section
+          const fixedTables = parsedTables.map(table => {
+            if (!table.section) {
+              // Trouver la section par défaut basée sur l'ID
+              const defaultTable = defaultTables.find(t => t.id === table.id);
+              return {
+                ...table,
+                section: defaultTable ? defaultTable.section : TABLE_SECTIONS.EAU // Par défaut Eau si on ne trouve pas
+              };
+            }
+            return table;
+          });
+
+          // Sauvegarder les tables corrigées
+          await AsyncStorage.setItem(TABLES_STORAGE_KEY, JSON.stringify(fixedTables));
+          return fixedTables;
+        }
+
+        // Vérifier que nous avons des tables dans les deux sections
+        const eauTables = parsedTables.filter(t => t.section === TABLE_SECTIONS.EAU);
+        const buisTables = parsedTables.filter(t => t.section === TABLE_SECTIONS.BUIS);
+
+
+        // Si nous avons des tables dans les deux sections, tout va bien
+        if (eauTables.length > 0 && buisTables.length > 0) {
+          return parsedTables;
+        } else {
+          log("Missing tables in one or both sections. Reinitializing...");
+          // S'il manque des tables dans une section, on réinitialise
+          return await initializeTables();
+        }
+      }
+    }
+
+    // Si on arrive ici, c'est qu'il n'y a pas de tables valides en stockage
+    log("No valid tables found. Initializing...");
+    return await initializeTables();
+  } catch (error) {
+    log('Error retrieving tables:', error);
+    // En cas d'erreur, réinitialiser et renvoyer les tables par défaut
+    try {
+      return await initializeTables();
+    } catch (initError) {
+      log('Error initializing tables after get failure:', initError);
+      return defaultTables;
+    }
+  }
+};
+
+// Sauvegarder les tables
 export const saveTables = async (tables: Table[]): Promise<void> => {
   try {
     await AsyncStorage.setItem(TABLES_STORAGE_KEY, JSON.stringify(tables));
   } catch (error) {
-    console.error('Error saving tables:', error);
+    log('Error saving tables:', error);
+    throw error;
   }
 };
 
-// Get a specific table by ID
+// Récupérer une table spécifique par ID
 export const getTable = async (id: number): Promise<Table | null> => {
   try {
     const tables = await getTables();
     return tables.find(table => table.id === id) || null;
   } catch (error) {
-    console.error('Error getting table:', error);
-    return null;
+    log(`Error getting table ${id}:`, error);
+    // En cas d'erreur, chercher dans les tables par défaut
+    return defaultTables.find(table => table.id === id) || null;
   }
 };
 
-// Get all tables
-export const getTables = async (): Promise<Table[]> => {
-  try {
-    const storedTables = await AsyncStorage.getItem(TABLES_STORAGE_KEY);
-    if (storedTables) {
-      return JSON.parse(storedTables);
-    }
-    return defaultTables;
-  } catch (error) {
-    console.error('Error getting tables:', error);
-    return defaultTables;
-  }
-};
-
-// Update a specific table
+// Mettre à jour une table spécifique
 export const updateTable = async (updatedTable: Table): Promise<void> => {
   try {
     const tables = await getTables();
-    const updatedTables = tables.map(table => 
+    const updatedTables = tables.map(table =>
       table.id === updatedTable.id ? updatedTable : table
     );
     await saveTables(updatedTables);
   } catch (error) {
-    console.error('Error updating table:', error);
+    log(`Error updating table ${updatedTable.id}:`, error);
+    throw error;
   }
 };
 
-// Save bills to AsyncStorage
+// Sauvegarder les factures
 export const saveBills = async (bills: Bill[]): Promise<void> => {
   try {
     await AsyncStorage.setItem(BILLS_STORAGE_KEY, JSON.stringify(bills));
   } catch (error) {
-    console.error('Error saving bills:', error);
+    log('Error saving bills:', error);
+    throw error;
   }
 };
 
-// Get all bills
+// Récupérer toutes les factures
 export const getBills = async (): Promise<Bill[]> => {
   try {
-    const storedBills = await AsyncStorage.getItem(BILLS_STORAGE_KEY);
-    if (storedBills) {
-      return JSON.parse(storedBills);
-    }
-    return [];
+    const jsonValue = await AsyncStorage.getItem(BILLS_STORAGE_KEY);
+    return jsonValue !== null ? JSON.parse(jsonValue) : [];
   } catch (error) {
-    console.error('Error getting bills:', error);
+    log('Error getting bills:', error);
     return [];
   }
 };
 
-// Add a new bill
+// Ajouter une nouvelle facture
 export const addBill = async (bill: Bill): Promise<void> => {
   try {
     const bills = await getBills();
     bills.push(bill);
     await saveBills(bills);
   } catch (error) {
-    console.error('Error adding bill:', error);
+    log(`Error adding bill ${bill.id}:`, error);
+    throw error;
   }
 };
 
-// Reset a table to available status
+// Réinitialiser une table à l'état disponible
 export const resetTable = async (tableId: number): Promise<void> => {
   try {
     const tables = await getTables();
-    const tableToReset = tables.find(table => table.id === tableId);
-    
-    if (!tableToReset) return;
-    
-    const updatedTables = tables.map(table => 
-      table.id === tableId 
-        ? { 
-            ...table, 
-            status: 'available' as const, 
-            guests: undefined, 
-            order: undefined 
-          } 
+    const updatedTables = tables.map(table =>
+      table.id === tableId
+        ? {
+          ...table,
+          status: 'available' as const,
+          guests: undefined,
+          order: undefined
+        }
         : table
     );
-    
+
     await saveTables(updatedTables);
   } catch (error) {
-    console.error('Error resetting table:', error);
+    log(`Error resetting table ${tableId}:`, error);
+    throw error;
   }
 };
 
-// Reset all tables to their initial state
+// Réinitialiser toutes les tables à leur état initial
 export const resetAllTables = async (): Promise<void> => {
   try {
-    // Reset all tables to available but maintain their other properties
-    const tables = await getTables();
-    const resetTables = tables.map(table => ({
-      ...table,
-      status: 'available' as const,
-      guests: undefined,
-      order: undefined
-    }));
-    
-    await saveTables(resetTables);
+    await initializeTables();
   } catch (error) {
-    console.error('Error resetting all tables:', error);
+    throw error;
   }
 };

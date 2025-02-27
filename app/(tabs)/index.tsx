@@ -1,16 +1,30 @@
-// app/(tabs)/index.tsx - Fix tables display
+// app/(tabs)/index.tsx - Version avec deux modals pour la sélection des couverts
 
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, Alert, Platform } from 'react-native';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'expo-router';
 import { Users, RefreshCcw, Filter } from 'lucide-react-native';
-import { getTables, saveTables, Table, resetAllTables, TABLE_SECTIONS } from '../../utils/storage';
+import { 
+  getTables, 
+  saveTables, 
+  Table, 
+  resetAllTables, 
+  TABLE_SECTIONS, 
+} from '../../utils/storage';
+import CustomCoversModal from '../components/CustomCoversModal';
+import CoversSelectionModal from '../components/CoversSelectionModal';
 
 export default function TablesScreen() {
   const router = useRouter();
   const [tables, setTables] = useState<Table[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  
+  // États pour les modals
+  const [customCoversModalVisible, setCustomCoversModalVisible] = useState(false);
+  const [coversSelectionModalVisible, setCoversSelectionModalVisible] = useState(false);
+  const [selectedTable, setSelectedTable] = useState<Table | null>(null);
 
   useEffect(() => {
     loadTables();
@@ -18,14 +32,21 @@ export default function TablesScreen() {
 
   const loadTables = async () => {
     setLoading(true);
+    setError(null);
+    
     try {
+      
+      // Récupérer les tables depuis le stockage
       const loadedTables = await getTables();
-      console.log("Loaded tables:", loadedTables.length);
+      
+      // Logs pour le débogage
+      const eauTables = loadedTables.filter(t => t.section === TABLE_SECTIONS.EAU);
+      const buisTables = loadedTables.filter(t => t.section === TABLE_SECTIONS.BUIS);
+      
       setTables(loadedTables);
     } catch (error) {
       console.error("Error loading tables:", error);
-      // If error loading, use a fallback
-      setTables([]);
+      setError("Erreur lors du chargement des tables. Essayez de les réinitialiser.");
     } finally {
       setLoading(false);
     }
@@ -33,16 +54,25 @@ export default function TablesScreen() {
 
   const handleResetAllTables = async () => {
     Alert.alert(
-      'Reset All Tables',
-      'Are you sure you want to reset all tables to available?',
+      'Réinitialiser Toutes les Tables',
+      'Êtes-vous sûr de vouloir réinitialiser toutes les tables?',
       [
-        { text: 'Cancel', style: 'cancel' },
+        { text: 'Annuler', style: 'cancel' },
         { 
-          text: 'Reset', 
+          text: 'Réinitialiser', 
           style: 'destructive',
           onPress: async () => {
-            await resetAllTables();
-            loadTables();
+            setLoading(true);
+            try {
+              await resetAllTables();
+              await loadTables();
+              Alert.alert('Succès', 'Toutes les tables ont été réinitialisées.');
+            } catch (error) {
+              console.error("Error resetting tables:", error);
+              Alert.alert('Erreur', 'Un problème est survenu lors de la réinitialisation des tables.');
+            } finally {
+              setLoading(false);
+            }
           }
         }
       ]
@@ -51,43 +81,18 @@ export default function TablesScreen() {
 
   const openTable = (table: Table) => {
     if (table.status === 'available') {
-      // Use a more cross-platform approach with Alert.alert instead of Alert.prompt
-      Alert.alert(
-        'Open Table',
-        `Enter number of guests for ${table.name}:`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: '1 Guest',
-            onPress: async () => processOpenTable(table, 1)
-          },
-          {
-            text: '2 Guests',
-            onPress: async () => processOpenTable(table, 2)
-          },
-          {
-            text: '4 Guests',
-            onPress: async () => processOpenTable(table, 4)
-          },
-          {
-            text: 'Other...',
-            onPress: () => {
-              // For custom guest count in a real app, you'd use a modal with input
-              processOpenTable(table, 2);
-            }
-          }
-        ]
-      );
+      setSelectedTable(table);
+      setCoversSelectionModalVisible(true);
     } else if (table.status === 'occupied') {
       router.push(`/table/${table.id}`);
     } else if (table.status === 'reserved') {
       Alert.alert(
-        'Reserved Table',
-        `This table (${table.name}) is currently reserved. Would you like to change its status?`,
+        'Table Réservée',
+        `Cette table (${table.name}) est actuellement réservée. Que souhaitez-vous faire?`,
         [
-          { text: 'Cancel', style: 'cancel' },
+          { text: 'Annuler', style: 'cancel' },
           { 
-            text: 'Make Available', 
+            text: 'Rendre Disponible', 
             onPress: async () => {
               const updatedTable = { ...table, status: 'available' as const };
               const updatedTables = tables.map(t => 
@@ -98,7 +103,7 @@ export default function TablesScreen() {
             }
           },
           { 
-            text: 'Open Table', 
+            text: 'Ouvrir Table', 
             onPress: () => openTable({ ...table, status: 'available' }) 
           }
         ]
@@ -106,10 +111,31 @@ export default function TablesScreen() {
     }
   };
 
-  // Helper function to process opening a table with a specific guest count
+  // Gérer le nombre de couverts personnalisé
+  const handleCustomCovers = (covers: number) => {
+    if (selectedTable) {
+      processOpenTable(selectedTable, covers);
+    }
+  };
+
+  // Gérer la sélection d'un nombre de couverts prédéfini
+  const handleSelectCovers = (covers: number) => {
+    if (selectedTable) {
+      setCoversSelectionModalVisible(false);
+      processOpenTable(selectedTable, covers);
+    }
+  };
+
+  // Ouvrir le modal de couverts personnalisés
+  const handleCustomCoversOpen = () => {
+    setCoversSelectionModalVisible(false);
+    setCustomCoversModalVisible(true);
+  };
+
+  // Traiter l'ouverture d'une table avec un nombre spécifique de couverts
   const processOpenTable = async (table: Table, guestNumber: number) => {
     try {
-      // Update table status
+      // Mettre à jour le statut de la table
       const updatedTable: Table = {
         ...table,
         status: 'occupied',
@@ -124,18 +150,18 @@ export default function TablesScreen() {
         }
       };
 
-      // Update tables in state and storage
+      // Mettre à jour les tables dans l'état et le stockage
       const updatedTables = tables.map(t => 
         t.id === table.id ? updatedTable : t
       );
       setTables(updatedTables);
       await saveTables(updatedTables);
 
-      // Navigate to table detail
+      // Naviguer vers la page de détail de la table
       router.push(`/table/${table.id}`);
     } catch (error) {
       console.error("Error opening table:", error);
-      Alert.alert("Error", "Could not open table. Please try again.");
+      Alert.alert("Erreur", "Impossible d'ouvrir la table. Veuillez réessayer.");
     }
   };
 
@@ -157,8 +183,11 @@ export default function TablesScreen() {
 
   // Filter tables by section
   const getTablesBySection = (section: string) => {
-    console.log("Filtering tables by section:", section);
-    return tables.filter(table => table.section === section);
+    const filtered = tables.filter(table => {
+      if (!table.section) return false;
+      return table.section.toLowerCase() === section.toLowerCase();
+    });
+    return filtered;
   };
 
   // Toggle section filtering
@@ -176,20 +205,22 @@ export default function TablesScreen() {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <Text>Loading tables...</Text>
+        <Text>Chargement des tables...</Text>
       </View>
     );
   }
 
-  // Debug check - no tables
-  if (tables.length === 0) {
+  if (error || tables.length === 0) {
     return (
       <View style={styles.loadingContainer}>
-        <Text>No tables found. Please initialize your database.</Text>
+        {error && <Text style={styles.errorText}>{error}</Text>}
+        {tables.length === 0 && <Text style={styles.errorText}>Aucune table trouvée. Veuillez initialiser la base de données.</Text>}
+        
         <Pressable 
-          style={styles.resetButtonBig} 
+          style={styles.resetButton} 
           onPress={handleResetAllTables}>
-          <Text style={styles.resetButtonText}>Reset Tables</Text>
+          <RefreshCcw size={20} color="white" />
+          <Text style={styles.resetButtonText}>Réinitialiser Toutes les Tables</Text>
         </Pressable>
       </View>
     );
@@ -197,18 +228,39 @@ export default function TablesScreen() {
 
   return (
     <View style={styles.container}>
+      {/* Modal pour le choix du nombre de couverts */}
+      <CoversSelectionModal
+        visible={coversSelectionModalVisible}
+        onClose={() => setCoversSelectionModalVisible(false)}
+        onSelectCovers={handleSelectCovers}
+        onCustomCovers={handleCustomCoversOpen}
+        tableName={selectedTable?.name || ''}
+      />
+      
+      {/* Modal pour le nombre de couverts personnalisé */}
+      <CustomCoversModal
+        visible={customCoversModalVisible}
+        onClose={() => setCustomCoversModalVisible(false)}
+        onConfirm={handleCustomCovers}
+        tableName={selectedTable?.name || ''}
+      />
+
       <View style={styles.header}>
-        <Text style={styles.title}>Restaurant Floor Plan</Text>
+        <Text style={styles.title}>Plan du Restaurant</Text>
         <View style={styles.headerButtons}>
-          <Pressable style={styles.filterButton} onPress={() => setActiveSection(null)}>
+          <Pressable 
+            style={styles.filterButton} 
+            onPress={() => setActiveSection(null)}>
             <Filter size={20} color={activeSection ? '#666' : '#2196F3'} />
             <Text style={[styles.filterButtonText, { color: activeSection ? '#666' : '#2196F3' }]}>
-              All
+              Tout
             </Text>
           </Pressable>
-          <Pressable style={styles.resetButton} onPress={handleResetAllTables}>
+          <Pressable 
+            style={styles.resetButton} 
+            onPress={handleResetAllTables}>
             <RefreshCcw size={20} color="white" />
-            <Text style={styles.resetButtonText}>Reset All</Text>
+            <Text style={styles.resetButtonText}>Réinitialiser</Text>
           </Pressable>
         </View>
       </View>
@@ -243,7 +295,21 @@ export default function TablesScreen() {
             <View key={section} style={styles.sectionContainer}>
               <Text style={styles.sectionTitle}>{section}</Text>
               {sectionTables.length === 0 ? (
-                <Text style={styles.noTablesText}>No tables in this section</Text>
+                <View style={styles.noTablesContainer}>
+                  <Text style={styles.noTablesText}>Aucune table dans cette section</Text>
+                  <Text style={styles.noTablesDetails}>
+                    Platform: {Platform.OS}, 
+                    Total Tables: {tables.length}, 
+                    Section: {section}
+                  </Text>
+                  <Pressable
+                    style={styles.sectionResetButton}
+                    onPress={handleResetAllTables}>
+                    <Text style={styles.sectionResetText}>
+                      Réinitialiser Toutes les Tables
+                    </Text>
+                  </Pressable>
+                </View>
               ) : (
                 <View style={styles.tablesGrid}>
                   {sectionTables.map((table) => (
@@ -258,7 +324,7 @@ export default function TablesScreen() {
                       <View style={styles.tableInfo}>
                         <Users size={20} color="white" />
                         <Text style={styles.seats}>
-                          {table.guests || 0}/{table.seats}
+                          {table.guests || 0}
                         </Text>
                       </View>
                       <Text style={styles.status}>{table.status}</Text>
@@ -290,12 +356,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
   },
-  resetButtonBig: {
-    marginTop: 20,
-    backgroundColor: '#F44336',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 8,
+  errorText: {
+    fontSize: 16,
+    color: '#F44336',
+    textAlign: 'center',
+    marginBottom: 20,
   },
   header: {
     padding: 20,
@@ -346,6 +411,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
     paddingHorizontal: 10,
+    flexWrap: 'wrap',
   },
   sectionTab: {
     padding: 12,
@@ -377,11 +443,37 @@ const styles = StyleSheet.create({
     padding: 20,
     paddingBottom: 10,
   },
+  noTablesContainer: {
+    padding: 20,
+    alignItems: 'center',
+    backgroundColor: '#FFF3CD',
+    margin: 10,
+    borderRadius: 8,
+  },
   noTablesText: {
     textAlign: 'center',
-    padding: 20,
-    color: '#666',
+    color: '#856404',
     fontStyle: 'italic',
+    fontSize: 16,
+    marginBottom: 8,
+    fontWeight: 'bold',
+  },
+  noTablesDetails: {
+    textAlign: 'center',
+    color: '#856404',
+    fontSize: 12,
+    marginBottom: 10,
+  },
+  sectionResetButton: {
+    backgroundColor: '#F44336',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+  },
+  sectionResetText: {
+    color: 'white',
+    fontWeight: 'bold',
+    fontSize: 14,
   },
   tablesGrid: {
     padding: 20,
