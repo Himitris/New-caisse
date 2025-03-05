@@ -1,8 +1,9 @@
-// utils/storage.ts - Version simplifiée avec une seule approche
+// utils/storage.ts - Version optimisée avec système de stockage structuré
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
+// Types d'entités
 export interface Table {
   id: number;
   name: string;
@@ -39,6 +40,7 @@ export interface Bill {
   timestamp: string;
   tableName?: string;
   section?: string;
+  paymentMethod?: 'card' | 'cash';
 }
 
 export interface MenuItemAvailability {
@@ -48,16 +50,94 @@ export interface MenuItemAvailability {
   price: number;
 }
 
-// Clés pour AsyncStorage
-const TABLES_STORAGE_KEY = 'restaurant_tables_v3'; // Nouvelle clé pour éviter les conflits
-const FIRST_LAUNCH_KEY = 'first_launch_v3';
-const BILLS_STORAGE_KEY = 'restaurant_bills';
-const MENU_AVAILABILITY_KEY = 'restaurant_menu_availability';
-
+// Constantes
 export const TABLE_SECTIONS = {
   EAU: 'Eau',
   BUIS: 'Buis'
 };
+
+// Clés pour AsyncStorage - utiliser un préfixe commun pour faciliter la gestion
+const STORAGE_PREFIX = 'manjo_carn_';
+const STORAGE_KEYS = {
+  TABLES: `${STORAGE_PREFIX}tables_v3`,
+  BILLS: `${STORAGE_PREFIX}bills`,
+  MENU_AVAILABILITY: `${STORAGE_PREFIX}menu_availability`,
+  FIRST_LAUNCH: `${STORAGE_PREFIX}first_launch_v3`,
+  APP_VERSION: `${STORAGE_PREFIX}app_version`,
+  LAST_SYNC: `${STORAGE_PREFIX}last_sync`,
+};
+
+// Version de l'application pour la gestion des migrations
+const CURRENT_APP_VERSION = '1.0.0';
+
+// Fonction améliorée de log avec horodatage
+const log = (message: string, data?: any) => {
+  const timestamp = new Date().toISOString();
+  const platform = Platform.OS;
+  console.log(`[${timestamp}][${platform}] ${message}`, data || '');
+};
+
+// Classe utilitaire pour gérer le stockage
+class StorageManager {
+  // Méthode générique pour sauvegarder des données
+  static async save<T>(key: string, data: T): Promise<void> {
+    try {
+      const jsonValue = JSON.stringify(data);
+      await AsyncStorage.setItem(key, jsonValue);
+      log(`Saved data to ${key}`);
+    } catch (error) {
+      log(`Error saving data to ${key}:`, error);
+      throw error;
+    }
+  }
+
+  // Méthode générique pour charger des données
+  static async load<T>(key: string, defaultValue: T): Promise<T> {
+    try {
+      const jsonValue = await AsyncStorage.getItem(key);
+      if (jsonValue === null) {
+        log(`No data found for ${key}, using default value`);
+        return defaultValue;
+      }
+      return JSON.parse(jsonValue) as T;
+    } catch (error) {
+      log(`Error loading data from ${key}:`, error);
+      return defaultValue;
+    }
+  }
+
+  // Méthode pour vérifier si c'est le premier lancement
+  static async isFirstLaunch(): Promise<boolean> {
+    const value = await AsyncStorage.getItem(STORAGE_KEYS.FIRST_LAUNCH);
+    return value === null || value === 'true';
+  }
+
+  // Méthode pour marquer que l'application a été lancée
+  static async markAppLaunched(): Promise<void> {
+    await AsyncStorage.setItem(STORAGE_KEYS.FIRST_LAUNCH, 'false');
+    await AsyncStorage.setItem(STORAGE_KEYS.APP_VERSION, CURRENT_APP_VERSION);
+  }
+
+  // Méthode pour vérifier si une migration est nécessaire
+  static async checkForMigrations(): Promise<boolean> {
+    const storedVersion = await AsyncStorage.getItem(STORAGE_KEYS.APP_VERSION);
+    return storedVersion !== CURRENT_APP_VERSION;
+  }
+
+  // Méthode pour nettoyer le stockage (utile pour le débogage ou reset complet)
+  static async clearAllData(): Promise<void> {
+    try {
+      // Récupération de toutes les clés commençant par le préfixe
+      const allKeys = await AsyncStorage.getAllKeys();
+      const keysToRemove = allKeys.filter(key => key.startsWith(STORAGE_PREFIX));
+      await AsyncStorage.multiRemove(keysToRemove);
+      log(`Cleared ${keysToRemove.length} storage keys`);
+    } catch (error) {
+      log('Error clearing data:', error);
+      throw error;
+    }
+  }
+}
 
 // Données par défaut pour les tables
 export const defaultTables: Table[] = [
@@ -103,217 +183,174 @@ export const defaultTables: Table[] = [
   { id: 37, name: 'Sous Cabane', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 6 },
 ];
 
-// Fonction simple de log
-const log = (message: string, data?: any) => {
-  console.log(`[${Platform.OS}] ${message}`, data ? data : '');
-};
-
-// Fonction pour initialiser les tables
-export const initializeTables = async (): Promise<Table[]> => {
-  try {
-
-    // Sauvegarde directe des tables par défaut
-    await AsyncStorage.setItem(TABLES_STORAGE_KEY, JSON.stringify(defaultTables));
-    await AsyncStorage.setItem(FIRST_LAUNCH_KEY, 'false');
-
-    return defaultTables;
-  } catch (error) {
-    log('Error initializing tables:', error);
-    // En cas d'erreur, retourner quand même les tables par défaut
-    return defaultTables;
-  }
-};
-
-// Fonction pour obtenir toutes les tables
-export const getTables = async (): Promise<Table[]> => {
-  try {
-
-    // Récupérer les tables depuis AsyncStorage
-    const jsonValue = await AsyncStorage.getItem(TABLES_STORAGE_KEY);
-
-    // Si on trouve des tables stockées
-    if (jsonValue !== null) {
-      const parsedTables = JSON.parse(jsonValue);
-
-      // Vérification que les tables sont dans un format valide
-      if (Array.isArray(parsedTables) && parsedTables.length > 0) {
-        // Vérifier si chaque table a une section valide
-        const invalidTables = parsedTables.filter(table => !table.section);
-
-        if (invalidTables.length > 0) {
-
-          // Corriger les tables sans section
-          const fixedTables = parsedTables.map(table => {
-            if (!table.section) {
-              // Trouver la section par défaut basée sur l'ID
-              const defaultTable = defaultTables.find(t => t.id === table.id);
-              return {
-                ...table,
-                section: defaultTable ? defaultTable.section : TABLE_SECTIONS.EAU // Par défaut Eau si on ne trouve pas
-              };
-            }
-            return table;
-          });
-
-          // Sauvegarder les tables corrigées
-          await AsyncStorage.setItem(TABLES_STORAGE_KEY, JSON.stringify(fixedTables));
-          return fixedTables;
-        }
-
-        // Vérifier que nous avons des tables dans les deux sections
-        const eauTables = parsedTables.filter(t => t.section === TABLE_SECTIONS.EAU);
-        const buisTables = parsedTables.filter(t => t.section === TABLE_SECTIONS.BUIS);
-
-
-        // Si nous avons des tables dans les deux sections, tout va bien
-        if (eauTables.length > 0 && buisTables.length > 0) {
-          return parsedTables;
-        } else {
-          log("Missing tables in one or both sections. Reinitializing...");
-          // S'il manque des tables dans une section, on réinitialise
-          return await initializeTables();
-        }
-      }
-    }
-
-    // Si on arrive ici, c'est qu'il n'y a pas de tables valides en stockage
-    log("No valid tables found. Initializing...");
-    return await initializeTables();
-  } catch (error) {
-    log('Error retrieving tables:', error);
-    // En cas d'erreur, réinitialiser et renvoyer les tables par défaut
+// Classe de gestion des tables
+class TableManager {
+  // Initialiser les tables
+  static async initializeTables(): Promise<Table[]> {
     try {
-      return await initializeTables();
-    } catch (initError) {
-      log('Error initializing tables after get failure:', initError);
+      log('Initializing tables with default data');
+      await StorageManager.save(STORAGE_KEYS.TABLES, defaultTables);
+      await StorageManager.markAppLaunched();
+      return defaultTables;
+    } catch (error) {
+      log('Error initializing tables:', error);
       return defaultTables;
     }
   }
-};
 
-// Sauvegarder les tables
-export const saveTables = async (tables: Table[]): Promise<void> => {
-  try {
-    await AsyncStorage.setItem(TABLES_STORAGE_KEY, JSON.stringify(tables));
-  } catch (error) {
-    log('Error saving tables:', error);
-    throw error;
+  // Obtenir toutes les tables
+  static async getTables(): Promise<Table[]> {
+    try {
+      // Récupérer les tables depuis AsyncStorage
+      let tables = await StorageManager.load<Table[]>(STORAGE_KEYS.TABLES, []);
+
+      // Si aucune table n'est trouvée, initialiser avec les valeurs par défaut
+      if (tables.length === 0) {
+        log('No tables found, initializing with defaults');
+        return await TableManager.initializeTables();
+      }
+
+      // Vérifier la validité des tables et corriger si nécessaire
+      const needsCorrection = tables.some(table => !table.section);
+      if (needsCorrection) {
+        log('Found tables with missing section, correcting...');
+        tables = tables.map(table => {
+          if (!table.section) {
+            const defaultTable = defaultTables.find(t => t.id === table.id);
+            return {
+              ...table,
+              section: defaultTable?.section || TABLE_SECTIONS.EAU
+            };
+          }
+          return table;
+        });
+        await StorageManager.save(STORAGE_KEYS.TABLES, tables);
+      }
+
+      // Vérifier que toutes les sections sont représentées
+      const eauTables = tables.filter(t => t.section === TABLE_SECTIONS.EAU);
+      const buisTables = tables.filter(t => t.section === TABLE_SECTIONS.BUIS);
+
+      if (eauTables.length === 0 || buisTables.length === 0) {
+        log('Missing tables in one or both sections, reinitializing...');
+        return await TableManager.initializeTables();
+      }
+
+      return tables;
+    } catch (error) {
+      log('Error retrieving tables:', error);
+      // En cas d'erreur, renvoyer les tables par défaut
+      return defaultTables;
+    }
   }
-};
 
-// Récupérer une table spécifique par ID
-export const getTable = async (id: number): Promise<Table | null> => {
-  try {
-    const tables = await getTables();
+  // Sauvegarder les tables
+  static async saveTables(tables: Table[]): Promise<void> {
+    return StorageManager.save(STORAGE_KEYS.TABLES, tables);
+  }
+
+  // Obtenir une table spécifique
+  static async getTable(id: number): Promise<Table | null> {
+    const tables = await TableManager.getTables();
     return tables.find(table => table.id === id) || null;
-  } catch (error) {
-    log(`Error getting table ${id}:`, error);
-    // En cas d'erreur, chercher dans les tables par défaut
-    return defaultTables.find(table => table.id === id) || null;
   }
-};
 
-// Mettre à jour une table spécifique
-export const updateTable = async (updatedTable: Table): Promise<void> => {
-  try {
-    const tables = await getTables();
+  // Mettre à jour une table spécifique
+  static async updateTable(updatedTable: Table): Promise<void> {
+    const tables = await TableManager.getTables();
     const updatedTables = tables.map(table =>
       table.id === updatedTable.id ? updatedTable : table
     );
-    await saveTables(updatedTables);
-  } catch (error) {
-    log(`Error updating table ${updatedTable.id}:`, error);
-    throw error;
+    await TableManager.saveTables(updatedTables);
   }
-};
 
-// Sauvegarder les factures
-export const saveBills = async (bills: Bill[]): Promise<void> => {
-  try {
-    await AsyncStorage.setItem(BILLS_STORAGE_KEY, JSON.stringify(bills));
-  } catch (error) {
-    log('Error saving bills:', error);
-    throw error;
-  }
-};
-
-// Récupérer toutes les factures
-export const getBills = async (): Promise<Bill[]> => {
-  try {
-    const jsonValue = await AsyncStorage.getItem(BILLS_STORAGE_KEY);
-    return jsonValue !== null ? JSON.parse(jsonValue) : [];
-  } catch (error) {
-    log('Error getting bills:', error);
-    return [];
-  }
-};
-
-// Ajouter une nouvelle facture
-export const addBill = async (bill: Bill): Promise<void> => {
-  try {
-    const bills = await getBills();
-    bills.push(bill);
-    await saveBills(bills);
-  } catch (error) {
-    log(`Error adding bill ${bill.id}:`, error);
-    throw error;
-  }
-};
-
-// Réinitialiser une table à l'état disponible
-export const resetTable = async (tableId: number): Promise<void> => {
-  try {
-    const tables = await getTables();
+  // Réinitialiser une table à l'état disponible
+  static async resetTable(tableId: number): Promise<void> {
+    const tables = await TableManager.getTables();
     const updatedTables = tables.map(table =>
       table.id === tableId
         ? {
-          ...table,
-          status: 'available' as const,
-          guests: undefined,
-          order: undefined
-        }
+            ...table,
+            status: 'available' as const,
+            guests: undefined,
+            order: undefined
+          }
         : table
     );
-
-    await saveTables(updatedTables);
-  } catch (error) {
-    log(`Error resetting table ${tableId}:`, error);
-    throw error;
+    await TableManager.saveTables(updatedTables);
   }
-};
 
-// Réinitialiser toutes les tables à leur état initial
-export const resetAllTables = async (): Promise<void> => {
-  try {
-    await initializeTables();
-  } catch (error) {
-    throw error;
+  // Réinitialiser toutes les tables
+  static async resetAllTables(): Promise<void> {
+    await TableManager.initializeTables();
+    log('All tables have been reset to default state');
   }
-};
-export const getMenuAvailability = async (): Promise<MenuItemAvailability[]> => {
-  try {
-    const storedStatus = await AsyncStorage.getItem(MENU_AVAILABILITY_KEY);
-    if (storedStatus) {
-      const parsedStatus = JSON.parse(storedStatus);
-      // Vérifier qu'on a bien un tableau
-      if (Array.isArray(parsedStatus)) {
-        return parsedStatus;
-      }
+}
+
+// Classe de gestion des factures
+class BillManager {
+  // Obtenir toutes les factures
+  static async getBills(): Promise<Bill[]> {
+    return StorageManager.load<Bill[]>(STORAGE_KEYS.BILLS, []);
+  }
+
+  // Sauvegarder les factures
+  static async saveBills(bills: Bill[]): Promise<void> {
+    return StorageManager.save(STORAGE_KEYS.BILLS, bills);
+  }
+
+  // Ajouter une nouvelle facture
+  static async addBill(bill: Bill): Promise<void> {
+    const bills = await BillManager.getBills();
+    bills.push(bill);
+    await BillManager.saveBills(bills);
+    log(`Added new bill ID ${bill.id} for table ${bill.tableNumber}`);
+  }
+
+  // Supprimer une facture
+  static async deleteBill(billId: number): Promise<void> {
+    const bills = await BillManager.getBills();
+    const updatedBills = bills.filter(bill => bill.id !== billId);
+    
+    if (bills.length !== updatedBills.length) {
+      await BillManager.saveBills(updatedBills);
+      log(`Deleted bill ID ${billId}`);
+    } else {
+      log(`Bill ID ${billId} not found for deletion`);
     }
-    return []; // Retourner un tableau vide par défaut
-  } catch (error) {
-    console.error('Error loading menu availability:', error);
-    return [];
-  }
-};
-// Fonction pour sauvegarder les disponibilités des articles
-export const saveMenuAvailability = async (items: MenuItemAvailability[]): Promise<void> => {
-  if (!Array.isArray(items)) {
-    console.error('Invalid items format - expected array');
-    return;
   }
 
-  try {
+  // Obtenir les factures pour une table spécifique
+  static async getBillsForTable(tableId: number): Promise<Bill[]> {
+    const bills = await BillManager.getBills();
+    return bills.filter(bill => bill.tableNumber === tableId);
+  }
+
+  // Obtenir les factures par date
+  static async getBillsByDate(date: Date): Promise<Bill[]> {
+    const bills = await BillManager.getBills();
+    const startOfDay = new Date(date);
+    startOfDay.setHours(0, 0, 0, 0);
+    
+    const endOfDay = new Date(date);
+    endOfDay.setHours(23, 59, 59, 999);
+    
+    return bills.filter(bill => {
+      const billDate = new Date(bill.timestamp);
+      return billDate >= startOfDay && billDate <= endOfDay;
+    });
+  }
+}
+
+// Classe de gestion de la disponibilité des articles du menu
+class MenuManager {
+  // Obtenir la disponibilité des articles
+  static async getMenuAvailability(): Promise<MenuItemAvailability[]> {
+    return StorageManager.load<MenuItemAvailability[]>(STORAGE_KEYS.MENU_AVAILABILITY, []);
+  }
+
+  // Sauvegarder la disponibilité des articles
+  static async saveMenuAvailability(items: MenuItemAvailability[]): Promise<void> {
     // Valider les données avant sauvegarde
     const validItems = items.filter(item =>
       typeof item.id === 'number' &&
@@ -322,12 +359,52 @@ export const saveMenuAvailability = async (items: MenuItemAvailability[]): Promi
       typeof item.price === 'number'
     );
 
-    // Sauvegarder uniquement si nous avons des éléments valides
     if (validItems.length > 0) {
-      await AsyncStorage.setItem(MENU_AVAILABILITY_KEY, JSON.stringify(validItems));
+      await StorageManager.save(STORAGE_KEYS.MENU_AVAILABILITY, validItems);
+      log(`Saved availability status for ${validItems.length} menu items`);
+    } else {
+      log('No valid menu items to save');
     }
-  } catch (error) {
-    console.error('Error saving menu availability:', error);
-    throw error;
   }
+
+  // Mettre à jour la disponibilité d'un article spécifique
+  static async updateItemAvailability(itemId: number, available: boolean): Promise<void> {
+    const items = await MenuManager.getMenuAvailability();
+    const existingItemIndex = items.findIndex(item => item.id === itemId);
+    
+    if (existingItemIndex >= 0) {
+      // Mettre à jour l'article existant
+      items[existingItemIndex].available = available;
+    } else {
+      // L'article n'existe pas dans la liste - impossible de mettre à jour
+      log(`Cannot update availability for item ${itemId} - not found in availability list`);
+      return;
+    }
+    
+    await MenuManager.saveMenuAvailability(items);
+    log(`Updated availability of item ${itemId} to ${available}`);
+  }
+}
+
+// Exporter les classes de gestion pour utilisation dans l'application
+export {
+  StorageManager,
+  TableManager,
+  BillManager,
+  MenuManager,
 };
+
+// Pour maintenir la compatibilité avec le code existant, réexporter les fonctions
+// avec les mêmes noms que dans l'ancien système
+export const initializeTables = TableManager.initializeTables;
+export const getTables = TableManager.getTables;
+export const saveTables = TableManager.saveTables;
+export const getTable = TableManager.getTable;
+export const updateTable = TableManager.updateTable;
+export const resetTable = TableManager.resetTable;
+export const resetAllTables = TableManager.resetAllTables;
+export const getBills = BillManager.getBills;
+export const saveBills = BillManager.saveBills;
+export const addBill = BillManager.addBill;
+export const getMenuAvailability = MenuManager.getMenuAvailability;
+export const saveMenuAvailability = MenuManager.saveMenuAvailability;
