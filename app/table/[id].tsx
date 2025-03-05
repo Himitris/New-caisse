@@ -1,9 +1,9 @@
-// app/table/[id].tsx - Version corrigée et optimisée pour le mode paysage fixe
+// app/table/[id].tsx
 
-import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { useState, useEffect, useMemo } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Users, Plus, Minus, Receipt, Split as Split2, CreditCard, ArrowLeft } from 'lucide-react-native';
+import { Users, Plus, Minus, Receipt, Split as Split2, CreditCard, ArrowLeft, Save } from 'lucide-react-native';
 import { getTable, updateTable, OrderItem, Table } from '../../utils/storage';
 import priceData from '../../helpers/ManjosPrice';
 import { getMenuAvailability, MenuItemAvailability } from '../../utils/storage';
@@ -15,12 +15,6 @@ interface MenuItem {
   category: string;
   type: 'resto' | 'boisson';
   color: string; // Couleur pour la catégorie
-}
-
-interface CategoryInfo {
-  name: string;
-  color: string;
-  icon?: string;
 }
 
 // Définition des couleurs pour les catégories
@@ -46,13 +40,14 @@ export default function TableScreen() {
   const tableId = parseInt(id as string, 10);
   const router = useRouter();
 
-
   const [unavailableItems, setUnavailableItems] = useState<number[]>([]);
   const [guestCount, setGuestCount] = useState(1);
   const [table, setTable] = useState<Table | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [activeType, setActiveType] = useState<'resto' | 'boisson' | null>('resto');
+  const [saveInProgress, setSaveInProgress] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   // Convertir les données de ManjosPrice en items de menu avec couleurs
   const menuItems: MenuItem[] = useMemo(() => {

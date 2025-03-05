@@ -1,8 +1,8 @@
-// app/(tabs)/index.tsx - Optimisé pour le mode paysage
+// app/(tabs)/index.tsx - Optimisé pour rafraichissement des données et affichage des items
 
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert, Platform } from 'react-native';
-import { useState, useEffect } from 'react';
-import { useRouter } from 'expo-router';
+import { View, Text, StyleSheet, ScrollView, Pressable, Alert, Platform, ActivityIndicator } from 'react-native';
+import { useState, useEffect, useCallback } from 'react';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Users, RefreshCcw, Filter } from 'lucide-react-native';
 import { 
   getTables, 
@@ -18,32 +18,73 @@ export default function TablesScreen() {
   const router = useRouter();
   const [tables, setTables] = useState<Table[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [activeSection, setActiveSection] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   
   // États pour les modals
   const [customCoversModalVisible, setCustomCoversModalVisible] = useState(false);
   const [coversSelectionModalVisible, setCoversSelectionModalVisible] = useState(false);
   const [selectedTable, setSelectedTable] = useState<Table | null>(null);
 
+  // Chargement initial des tables
   useEffect(() => {
     loadTables();
   }, []);
 
-  const loadTables = async () => {
-    setLoading(true);
-    setError(null);
+  // Rafraîchir les tables à chaque fois que l'écran redevient actif
+  useFocusEffect(
+    useCallback(() => {
+      console.log("Plan du restaurant en focus - rafraîchissement des données");
+      loadTables();
+      return () => {
+        // Fonction de nettoyage si nécessaire
+      };
+    }, [])
+  );
+
+  const loadTables = async (showLoading = true) => {
+    if (showLoading) {
+      setLoading(true);
+      setError(null);
+    } else {
+      setRefreshing(true);
+    }
     
     try {
       // Récupérer les tables depuis le stockage
       const loadedTables = await getTables();
+      
+      // Ajouter des logs pour comprendre ce qui est chargé
+      const occupiedCount = loadedTables.filter(t => t.status === 'occupied').length;
+      const withOrdersCount = loadedTables.filter(t => t.order && t.order.items.length > 0).length;
+      
+      console.log(`Tables chargées: ${loadedTables.length} au total, ${occupiedCount} occupées, ${withOrdersCount} avec commandes`);
+      
+      // Afficher les détails des tables avec commandes
+      loadedTables
+        .filter(t => t.order && t.order.items.length > 0)
+        .forEach(t => {
+          console.log(`Table ${t.id} (${t.name}): ${t.order?.items.length || 0} items, total: ${t.order?.total.toFixed(2) || 0}€`);
+        });
+      
       setTables(loadedTables);
+      setLastRefresh(new Date());
     } catch (error) {
       console.error("Error loading tables:", error);
       setError("Erreur lors du chargement des tables. Essayez de les réinitialiser.");
     } finally {
-      setLoading(false);
+      if (showLoading) {
+        setLoading(false);
+      } else {
+        setRefreshing(false);
+      }
     }
+  };
+
+  const handleRefreshTables = () => {
+    loadTables();
   };
 
   const handleResetAllTables = async () => {
@@ -199,7 +240,8 @@ export default function TablesScreen() {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <Text>Chargement des tables...</Text>
+        <ActivityIndicator size="large" color="#4CAF50" />
+        <Text style={styles.loadingText}>Chargement des tables...</Text>
       </View>
     );
   }
@@ -242,6 +284,15 @@ export default function TablesScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>Plan du Restaurant</Text>
         <View style={styles.headerButtons}>
+          {refreshing && (
+            <ActivityIndicator size="small" color="#2196F3" style={{ marginRight: 10 }} />
+          )}
+          <Pressable 
+            style={styles.refreshButton} 
+            onPress={handleRefreshTables}>
+            <RefreshCcw size={20} color="#2196F3" />
+            <Text style={styles.refreshButtonText}>Rafraîchir</Text>
+          </Pressable>
           <Pressable 
             style={styles.filterButton} 
             onPress={() => setActiveSection(null)}>
@@ -354,6 +405,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 20,
   },
+  loadingText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#666',
+  },
   errorText: {
     fontSize: 16,
     color: '#F44336',
@@ -392,6 +448,20 @@ const styles = StyleSheet.create({
   },
   resetButtonText: {
     color: 'white',
+    fontWeight: '600',
+  },
+  refreshButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+    borderRadius: 8,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#2196F3',
+    backgroundColor: 'white',
+  },
+  refreshButtonText: {
+    color: '#2196F3',
     fontWeight: '600',
   },
   filterButton: {

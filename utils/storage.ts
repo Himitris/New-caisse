@@ -1,4 +1,4 @@
-// utils/storage.ts - Version optimisée avec système de stockage structuré
+// utils/storage.ts - Version optimisée avec système de stockage structuré et persistant
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
@@ -185,10 +185,18 @@ export const defaultTables: Table[] = [
 
 // Classe de gestion des tables
 class TableManager {
-  // Initialiser les tables
+  // Initialiser les tables - ne remplace que si aucune table n'existe
   static async initializeTables(): Promise<Table[]> {
     try {
-      log('Initializing tables with default data');
+      // Vérifier si des tables existent déjà
+      const existingTables = await StorageManager.load<Table[]>(STORAGE_KEYS.TABLES, []);
+      
+      if (existingTables.length > 0) {
+        log('Tables already exist, skipping initialization');
+        return existingTables;
+      }
+      
+      log('First initialization of tables with default data');
       await StorageManager.save(STORAGE_KEYS.TABLES, defaultTables);
       await StorageManager.markAppLaunched();
       return defaultTables;
@@ -227,15 +235,6 @@ class TableManager {
         await StorageManager.save(STORAGE_KEYS.TABLES, tables);
       }
 
-      // Vérifier que toutes les sections sont représentées
-      const eauTables = tables.filter(t => t.section === TABLE_SECTIONS.EAU);
-      const buisTables = tables.filter(t => t.section === TABLE_SECTIONS.BUIS);
-
-      if (eauTables.length === 0 || buisTables.length === 0) {
-        log('Missing tables in one or both sections, reinitializing...');
-        return await TableManager.initializeTables();
-      }
-
       return tables;
     } catch (error) {
       log('Error retrieving tables:', error);
@@ -251,39 +250,92 @@ class TableManager {
 
   // Obtenir une table spécifique
   static async getTable(id: number): Promise<Table | null> {
-    const tables = await TableManager.getTables();
-    return tables.find(table => table.id === id) || null;
+    try {
+      const tables = await TableManager.getTables();
+      return tables.find(table => table.id === id) || null;
+    } catch (error) {
+      log(`Error getting table ${id}:`, error);
+      return null;
+    }
   }
 
   // Mettre à jour une table spécifique
   static async updateTable(updatedTable: Table): Promise<void> {
-    const tables = await TableManager.getTables();
-    const updatedTables = tables.map(table =>
-      table.id === updatedTable.id ? updatedTable : table
-    );
-    await TableManager.saveTables(updatedTables);
+    try {
+      const tables = await TableManager.getTables();
+      
+      // Vérifier si la table existe déjà
+      const existingIndex = tables.findIndex(table => table.id === updatedTable.id);
+      
+      if (existingIndex >= 0) {
+        // Remplacer la table existante par la version mise à jour
+        tables[existingIndex] = updatedTable;
+      } else {
+        // Ajouter la nouvelle table si elle n'existe pas
+        tables.push(updatedTable);
+      }
+      
+      // Sauvegarder toutes les tables
+      await TableManager.saveTables(tables);
+      log(`Updated table ${updatedTable.id} successfully`);
+    } catch (error) {
+      log(`Error updating table ${updatedTable.id}:`, error);
+      throw error;
+    }
   }
 
   // Réinitialiser une table à l'état disponible
   static async resetTable(tableId: number): Promise<void> {
-    const tables = await TableManager.getTables();
-    const updatedTables = tables.map(table =>
-      table.id === tableId
-        ? {
-            ...table,
-            status: 'available' as const,
-            guests: undefined,
-            order: undefined
-          }
-        : table
-    );
-    await TableManager.saveTables(updatedTables);
+    try {
+      const tables = await TableManager.getTables();
+      const tableIndex = tables.findIndex(table => table.id === tableId);
+      
+      if (tableIndex >= 0) {
+        // Récupérer la configuration par défaut pour cette table
+        const defaultTable = defaultTables.find(t => t.id === tableId);
+        
+        // Mettre à jour la table tout en conservant son nom et sa section d'origine
+        tables[tableIndex] = {
+          ...defaultTable || tables[tableIndex],
+          name: tables[tableIndex].name,
+          section: tables[tableIndex].section,
+          status: 'available',
+          guests: undefined,
+          order: undefined
+        };
+        
+        await TableManager.saveTables(tables);
+        log(`Reset table ${tableId} to available state`);
+      } else {
+        log(`Table ${tableId} not found for reset`);
+      }
+    } catch (error) {
+      log(`Error resetting table ${tableId}:`, error);
+      throw error;
+    }
   }
 
-  // Réinitialiser toutes les tables
+  // Réinitialiser toutes les tables à leur état initial
   static async resetAllTables(): Promise<void> {
-    await TableManager.initializeTables();
-    log('All tables have been reset to default state');
+    try {
+      const currentTables = await TableManager.getTables();
+      
+      // Créer un tableau de tables réinitialisées en conservant les noms et sections personnalisés
+      const resetTables = defaultTables.map(defaultTable => {
+        const existingTable = currentTables.find(t => t.id === defaultTable.id);
+        return {
+          ...defaultTable,
+          name: existingTable?.name || defaultTable.name,
+          section: existingTable?.section || defaultTable.section
+        };
+      });
+      
+      await TableManager.saveTables(resetTables);
+      log('All tables have been reset to default state');
+    } catch (error) {
+      log('Error resetting all tables:', error);
+      throw error;
+    }
   }
 }
 
@@ -301,44 +353,64 @@ class BillManager {
 
   // Ajouter une nouvelle facture
   static async addBill(bill: Bill): Promise<void> {
-    const bills = await BillManager.getBills();
-    bills.push(bill);
-    await BillManager.saveBills(bills);
-    log(`Added new bill ID ${bill.id} for table ${bill.tableNumber}`);
+    try {
+      const bills = await BillManager.getBills();
+      bills.push(bill);
+      await BillManager.saveBills(bills);
+      log(`Added new bill ID ${bill.id} for table ${bill.tableNumber}`);
+    } catch (error) {
+      log(`Error adding bill:`, error);
+      throw error;
+    }
   }
 
   // Supprimer une facture
   static async deleteBill(billId: number): Promise<void> {
-    const bills = await BillManager.getBills();
-    const updatedBills = bills.filter(bill => bill.id !== billId);
-    
-    if (bills.length !== updatedBills.length) {
-      await BillManager.saveBills(updatedBills);
-      log(`Deleted bill ID ${billId}`);
-    } else {
-      log(`Bill ID ${billId} not found for deletion`);
+    try {
+      const bills = await BillManager.getBills();
+      const updatedBills = bills.filter(bill => bill.id !== billId);
+      
+      if (bills.length !== updatedBills.length) {
+        await BillManager.saveBills(updatedBills);
+        log(`Deleted bill ID ${billId}`);
+      } else {
+        log(`Bill ID ${billId} not found for deletion`);
+      }
+    } catch (error) {
+      log(`Error deleting bill ${billId}:`, error);
+      throw error;
     }
   }
 
   // Obtenir les factures pour une table spécifique
   static async getBillsForTable(tableId: number): Promise<Bill[]> {
-    const bills = await BillManager.getBills();
-    return bills.filter(bill => bill.tableNumber === tableId);
+    try {
+      const bills = await BillManager.getBills();
+      return bills.filter(bill => bill.tableNumber === tableId);
+    } catch (error) {
+      log(`Error getting bills for table ${tableId}:`, error);
+      return [];
+    }
   }
 
   // Obtenir les factures par date
   static async getBillsByDate(date: Date): Promise<Bill[]> {
-    const bills = await BillManager.getBills();
-    const startOfDay = new Date(date);
-    startOfDay.setHours(0, 0, 0, 0);
-    
-    const endOfDay = new Date(date);
-    endOfDay.setHours(23, 59, 59, 999);
-    
-    return bills.filter(bill => {
-      const billDate = new Date(bill.timestamp);
-      return billDate >= startOfDay && billDate <= endOfDay;
-    });
+    try {
+      const bills = await BillManager.getBills();
+      const startOfDay = new Date(date);
+      startOfDay.setHours(0, 0, 0, 0);
+      
+      const endOfDay = new Date(date);
+      endOfDay.setHours(23, 59, 59, 999);
+      
+      return bills.filter(bill => {
+        const billDate = new Date(bill.timestamp);
+        return billDate >= startOfDay && billDate <= endOfDay;
+      });
+    } catch (error) {
+      log(`Error getting bills by date:`, error);
+      return [];
+    }
   }
 }
 
@@ -351,38 +423,48 @@ class MenuManager {
 
   // Sauvegarder la disponibilité des articles
   static async saveMenuAvailability(items: MenuItemAvailability[]): Promise<void> {
-    // Valider les données avant sauvegarde
-    const validItems = items.filter(item =>
-      typeof item.id === 'number' &&
-      typeof item.available === 'boolean' &&
-      typeof item.name === 'string' &&
-      typeof item.price === 'number'
-    );
+    try {
+      // Valider les données avant sauvegarde
+      const validItems = items.filter(item =>
+        typeof item.id === 'number' &&
+        typeof item.available === 'boolean' &&
+        typeof item.name === 'string' &&
+        typeof item.price === 'number'
+      );
 
-    if (validItems.length > 0) {
-      await StorageManager.save(STORAGE_KEYS.MENU_AVAILABILITY, validItems);
-      log(`Saved availability status for ${validItems.length} menu items`);
-    } else {
-      log('No valid menu items to save');
+      if (validItems.length > 0) {
+        await StorageManager.save(STORAGE_KEYS.MENU_AVAILABILITY, validItems);
+        log(`Saved availability status for ${validItems.length} menu items`);
+      } else {
+        log('No valid menu items to save');
+      }
+    } catch (error) {
+      log(`Error saving menu availability:`, error);
+      throw error;
     }
   }
 
   // Mettre à jour la disponibilité d'un article spécifique
   static async updateItemAvailability(itemId: number, available: boolean): Promise<void> {
-    const items = await MenuManager.getMenuAvailability();
-    const existingItemIndex = items.findIndex(item => item.id === itemId);
-    
-    if (existingItemIndex >= 0) {
-      // Mettre à jour l'article existant
-      items[existingItemIndex].available = available;
-    } else {
-      // L'article n'existe pas dans la liste - impossible de mettre à jour
-      log(`Cannot update availability for item ${itemId} - not found in availability list`);
-      return;
+    try {
+      const items = await MenuManager.getMenuAvailability();
+      const existingItemIndex = items.findIndex(item => item.id === itemId);
+      
+      if (existingItemIndex >= 0) {
+        // Mettre à jour l'article existant
+        items[existingItemIndex].available = available;
+      } else {
+        // L'article n'existe pas dans la liste - impossible de mettre à jour
+        log(`Cannot update availability for item ${itemId} - not found in availability list`);
+        return;
+      }
+      
+      await MenuManager.saveMenuAvailability(items);
+      log(`Updated availability of item ${itemId} to ${available}`);
+    } catch (error) {
+      log(`Error updating item availability:`, error);
+      throw error;
     }
-    
-    await MenuManager.saveMenuAvailability(items);
-    log(`Updated availability of item ${itemId} to ${available}`);
   }
 }
 

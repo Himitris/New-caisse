@@ -1,11 +1,11 @@
-// app/_layout.tsx - Mise à jour pour rendre tous les onglets fonctionnels
+// app/_layout.tsx - Mise à jour pour une initialisation correcte des données
 
 import { useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { View, Text, ActivityIndicator } from 'react-native';
-import { initializeTables } from '../utils/storage';
+import { initializeTables, StorageManager } from '../utils/storage';
 
 declare global {
   interface Window {
@@ -20,8 +20,17 @@ export default function RootLayout() {
     // Initialize app data
     const setupApp = async () => {
       try {
-        // Initialize tables with default values if it's the first launch
+        // Vérifier si c'est le premier lancement
+        const isFirstLaunch = await StorageManager.isFirstLaunch();
+        
+        // Initialiser les tables seulement si nécessaire
         await initializeTables();
+        
+        // Marquer l'application comme lancée si c'est le premier lancement
+        if (isFirstLaunch) {
+          await StorageManager.markAppLaunched();
+        }
+        
         setInitialized(true);
       } catch (error) {
         console.error('Error initializing app:', error);
