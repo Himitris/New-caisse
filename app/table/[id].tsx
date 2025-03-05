@@ -3,10 +3,9 @@
 import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { useState, useEffect, useMemo } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Users, Plus, Minus, Receipt, Split as Split2, CreditCard, ArrowLeft, Save, X } from 'lucide-react-native';
-import { getTable, updateTable, OrderItem, Table, resetTable } from '../../utils/storage';
+import { Users, Plus, Minus, Receipt, Split as Split2, CreditCard, ArrowLeft, Save, X, Printer } from 'lucide-react-native';
+import { getTable, updateTable, OrderItem, Table, resetTable, getMenuAvailability, MenuItemAvailability, getCustomMenuItems, CustomMenuItem } from '../../utils/storage';
 import priceData from '../../helpers/ManjosPrice';
-import { getMenuAvailability, MenuItemAvailability } from '../../utils/storage';
 
 interface MenuItem {
   id: number;
@@ -35,6 +34,67 @@ const CATEGORY_COLORS: { [key: string]: string } = {
   'Glaces': '#00BCD4',
 };
 
+// Fonction pour fermer la table
+const handleCloseTable = async (tableId: number, table: Table | null, router: any, setSaveInProgress: (value: boolean) => void) => {
+  if (!table) return;
+
+  Alert.alert(
+    'Fermer la table',
+    `Êtes-vous sûr de vouloir fermer la table "${table.name}" ? Toutes les commandes non payées seront perdues.`,
+    [
+      {
+        text: 'Annuler',
+        style: 'cancel'
+      },
+      {
+        text: 'Fermer',
+        style: 'destructive',
+        onPress: async () => {
+          setSaveInProgress(true);
+          try {
+            await resetTable(tableId);
+            Alert.alert(
+              'Table fermée',
+              'La table a été réinitialisée avec succès.',
+              [
+                {
+                  text: 'OK',
+                  onPress: () => router.back()
+                }
+              ]
+            );
+          } catch (error) {
+            console.error('Erreur lors de la fermeture de la table:', error);
+            Alert.alert('Erreur', 'Impossible de fermer la table. Veuillez réessayer.');
+          } finally {
+            setSaveInProgress(false);
+          }
+        }
+      }
+    ]
+  );
+};
+
+// Fonction pour imprimer la facture
+const handlePrintBill = (table: Table | null, router: any, tableId: number) => {
+  if (!table || !table.order || table.order.items.length === 0) {
+    Alert.alert('Information', 'Il n\'y a aucun article à imprimer.');
+    return;
+  }
+
+  // Naviguer vers l'écran de prévisualisation d'impression avec les détails de la table
+  router.push({
+    pathname: '/print-preview',
+    params: {
+      tableId: tableId.toString(),
+      total: (table.order.total || 0).toString(),
+      items: JSON.stringify(table.order.items),
+      isPreview: 'true',  // Ajouter ce paramètre pour indiquer que c'est juste une prévisualisation
+      tableName: table.name
+    }
+  });
+};
+
 export default function TableScreen() {
   const { id } = useLocalSearchParams();
   const tableId = parseInt(id as string, 10);
@@ -48,10 +108,25 @@ export default function TableScreen() {
   const [activeType, setActiveType] = useState<'resto' | 'boisson' | null>('resto');
   const [saveInProgress, setSaveInProgress] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [customMenuItems, setCustomMenuItems] = useState<CustomMenuItem[]>([]);
+
+  useEffect(() => {
+    const loadCustomMenuItems = async () => {
+      try {
+        const items = await getCustomMenuItems();
+        setCustomMenuItems(items);
+      } catch (error) {
+        console.error('Error loading custom menu items:', error);
+      }
+    };
+
+    loadCustomMenuItems();
+  }, []);
 
   // Convertir les données de ManjosPrice en items de menu avec couleurs
   const menuItems: MenuItem[] = useMemo(() => {
-    return priceData.map(item => {
+    // Commencer avec les articles standard de priceData
+    const standardItems = priceData.map(item => {
       // Déterminer la catégorie en fonction du type et du nom
       let category = item.type === 'resto' ? 'Plats Principaux' : 'Softs';
 
@@ -93,65 +168,20 @@ export default function TableScreen() {
         color: CATEGORY_COLORS[category as keyof typeof CATEGORY_COLORS] || '#757575'
       };
     });
-  }, []);
 
-  const handleCloseTable = async () => {
-    if (!table) return;
+    // Ajouter les articles personnalisés
+    const customItems = customMenuItems.map(item => ({
+      id: item.id,
+      name: item.name,
+      price: item.price,
+      category: item.category,
+      type: item.type,
+      color: CATEGORY_COLORS[item.category as keyof typeof CATEGORY_COLORS] || '#757575'
+    }));
 
-    Alert.alert(
-      'Fermer la table',
-      `Êtes-vous sûr de vouloir fermer la table "${table.name}" ? Toutes les commandes non payées seront perdues.`,
-      [
-        {
-          text: 'Annuler',
-          style: 'cancel'
-        },
-        {
-          text: 'Fermer',
-          style: 'destructive',
-          onPress: async () => {
-            setSaveInProgress(true);
-            try {
-              await resetTable(tableId);
-              Alert.alert(
-                'Table fermée',
-                'La table a été réinitialisée avec succès.',
-                [
-                  {
-                    text: 'OK',
-                    onPress: () => router.back()
-                  }
-                ]
-              );
-            } catch (error) {
-              console.error('Erreur lors de la fermeture de la table:', error);
-              Alert.alert('Erreur', 'Impossible de fermer la table. Veuillez réessayer.');
-            } finally {
-              setSaveInProgress(false);
-            }
-          }
-        }
-      ]
-    );
-  };
-
-  // Obtenir toutes les catégories uniques
-  const categories = useMemo(() => {
-    return [...new Set(menuItems.map(item => item.category))].sort();
-  }, [menuItems]);
-
-  // Obtenir les catégories par type
-  const categoriesByType = useMemo(() => {
-    const result = {
-      resto: categories.filter(cat =>
-        menuItems.some(item => item.category === cat && item.type === 'resto')
-      ),
-      boisson: categories.filter(cat =>
-        menuItems.some(item => item.category === cat && item.type === 'boisson')
-      )
-    };
-    return result;
-  }, [categories, menuItems]);
+    // Combiner les deux listes d'articles
+    return [...standardItems, ...customItems];
+  }, [customMenuItems]);
 
   useEffect(() => {
     loadTable();
@@ -179,6 +209,24 @@ export default function TableScreen() {
 
     loadUnavailableItems();
   }, []);
+
+  // Obtenir toutes les catégories uniques
+  const categories = useMemo(() => {
+    return [...new Set(menuItems.map(item => item.category))].sort();
+  }, [menuItems]);
+
+  // Obtenir les catégories par type
+  const categoriesByType = useMemo(() => {
+    const result = {
+      resto: categories.filter(cat =>
+        menuItems.some(item => item.category === cat && item.type === 'resto')
+      ),
+      boisson: categories.filter(cat =>
+        menuItems.some(item => item.category === cat && item.type === 'boisson')
+      )
+    };
+    return result;
+  }, [categories, menuItems]);
 
   // Fonction pour filtrer les éléments du menu par catégorie
   const getMenuItemsByCategory = (category: string) => {
@@ -397,6 +445,12 @@ export default function TableScreen() {
             <Plus size={24} color="#666" />
           </Pressable>
         </View>
+        <Pressable
+          style={[styles.paymentButton, { backgroundColor: '#F44336', marginLeft: 40 }]}
+          onPress={() => handleCloseTable(tableId, table, router, setSaveInProgress)}>
+          <X size={24} color="white" />
+          <Text style={styles.paymentButtonText}>Fermer table</Text>
+        </Pressable>
       </View>
 
       <View style={styles.content}>
@@ -439,7 +493,7 @@ export default function TableScreen() {
             <Text style={styles.totalAmount}>{total.toFixed(2)} €</Text>
           </View>
           <View style={styles.paymentActions}>
-            <View style={ styles.generalButton }>
+            <View style={styles.paymentActionsRow}>
               <Pressable
                 style={[styles.paymentButton, { backgroundColor: '#4CAF50' }]}
                 onPress={() => handlePayment('full')}>
@@ -453,7 +507,7 @@ export default function TableScreen() {
                 <Text style={styles.paymentButtonText}>Partager</Text>
               </Pressable>
             </View>
-            <View style={ styles.generalButton }>
+            <View style={styles.paymentActionsRow}>
               <Pressable
                 style={[styles.paymentButton, { backgroundColor: '#FF9800' }]}
                 onPress={() => handlePayment('custom')}>
@@ -461,10 +515,10 @@ export default function TableScreen() {
                 <Text style={styles.paymentButtonText}>Partage personnalisé</Text>
               </Pressable>
               <Pressable
-                style={[styles.paymentButton, { backgroundColor: '#F44336' }]}
-                onPress={handleCloseTable}>
-                <X size={24} color="white" />
-                <Text style={styles.paymentButtonText}>Fermer table</Text>
+                style={[styles.paymentButton, { backgroundColor: '#9C27B0' }]}
+                onPress={() => handlePrintBill(table, router, tableId)}>
+                <Printer size={24} color="white" />
+                <Text style={styles.paymentButtonText}>Imprimer note</Text>
               </Pressable>
             </View>
           </View>
@@ -635,7 +689,7 @@ const styles = StyleSheet.create({
     marginRight: 12,
   },
   headerTitleContainer: {
-    flex: 1,
+    flex: 4,
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -806,7 +860,7 @@ const styles = StyleSheet.create({
     color: '#4CAF50',
   },
   paymentActions: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     gap: 12,
     marginTop: 16,
     flex: 4,
@@ -901,7 +955,12 @@ const styles = StyleSheet.create({
     color: '#999',
   },
   generalButton: {
-    flex: 1, 
+    flex: 1,
     gap: 30
+  },
+  paymentActionsRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 12,
   },
 });

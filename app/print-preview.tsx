@@ -1,14 +1,14 @@
 // app/print-preview.tsx - Mis à jour pour afficher le nom de la table
 
 import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Printer, Download, Share, Home } from 'lucide-react-native';
+import { Printer, Share, Home } from 'lucide-react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 
 export default function PrintPreviewScreen() {
-  const { tableId, total, items, paymentMethod, isPartial, remaining, tableName } = useLocalSearchParams();
+  const { tableId, total, items, paymentMethod, isPartial, remaining, tableName, isPreview } = useLocalSearchParams();
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 
@@ -18,6 +18,7 @@ export default function PrintPreviewScreen() {
   const isPartialPayment = isPartial === 'true';
   const remainingAmount = remaining ? parseFloat(remaining as string) : 0;
   const displayName = tableName || `Table ${tableIdNum}`;
+  const isPreviewMode = isPreview === 'true';
 
   const restaurantInfo = {
     name: 'Manjo Carn',
@@ -39,7 +40,18 @@ export default function PrintPreviewScreen() {
     remaining: remainingAmount,
     isPartial: isPartialPayment,
     paymentMethod: paymentMethod || 'Carte',
-    timestamp: new Date().toLocaleString(),
+    timestamp: new Date().toLocaleString('fr-FR', {
+      weekday: 'long', // Jour de la semaine (ex: lundi)
+      day: '2-digit', // Jour (ex: 05)
+      month: 'long', // Mois en lettres (ex: mars)
+      year: 'numeric', // Année (ex: 2025)
+      hour: '2-digit', // Heure
+      minute: '2-digit', // Minutes
+      second: '2-digit', // Secondes
+      hour12: false, // Format 24h
+      timeZone: 'Europe/Paris' // Fuseau horaire français
+    }),
+    
   };
 
   const generateHTML = () => {
@@ -78,6 +90,7 @@ export default function PrintPreviewScreen() {
           </style>
         </head>
         <body>
+          ${isPreviewMode ? '<div class="preview">PRÉVISUALISATION - NON PAYÉ</div>' : ''}
           <div class="header">
             <h1>${restaurantInfo.name}</h1>
             <p>${restaurantInfo.address}</p>
@@ -151,7 +164,10 @@ export default function PrintPreviewScreen() {
   };
 
   const handleDone = () => {
-    if (isPartialPayment) {
+    if (isPreviewMode) {
+      // En mode prévisualisation, retourner simplement à la table
+      router.push(`/table/${tableId}`);
+    } else if (isPartialPayment) {
       router.push(`/table/${tableId}`);
     } else {
       router.push('/');
@@ -161,9 +177,14 @@ export default function PrintPreviewScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Reçu - {displayName}</Text>
+        <Text style={styles.title}>
+          {isPreviewMode ? 'Prévisualisation - ' : 'Reçu - '}{displayName}
+        </Text>
         {isPartialPayment && (
           <Text style={styles.partialBadge}>Paiement partiel</Text>
+        )}
+        {isPreviewMode && (
+          <Text style={styles.previewBadge}>PRÉVISUALISATION</Text>
         )}
       </View>
 
@@ -217,10 +238,10 @@ export default function PrintPreviewScreen() {
 
         <View style={styles.paymentInfo}>
           <Text style={styles.paymentMethod}>
-            Méthode de paiement: {order.paymentMethod === 'card' ? 'Carte bancaire' : 'Espèces'}
+            {isPreviewMode ? '' : `Méthode de paiement: ${order.paymentMethod === 'card' ? 'Carte bancaire' : 'Espèces'}`}
           </Text>
           <Text style={styles.paymentStatus}>
-            Statut: {isPartialPayment ? 'Paiement partiel' : 'Payé en totalité'}
+            Statut: {isPreviewMode ? 'Prévisualisation - Non payé' : (isPartialPayment ? 'Paiement partiel' : 'Payé en totalité')}
           </Text>
         </View>
 
@@ -246,7 +267,9 @@ export default function PrintPreviewScreen() {
           style={[styles.actionButton, { backgroundColor: '#FF9800' }]}
           onPress={handleDone}>
           <Home size={24} color="white" />
-          <Text style={styles.actionText}>Terminé</Text>
+          <Text style={styles.actionText}>
+            {isPreviewMode ? 'Retour à la Table' : 'Terminé'}
+          </Text>
         </Pressable>
       </View>
     </View>
@@ -427,5 +450,15 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: '600',
+  },
+  previewBadge: {
+    backgroundColor: '#9C27B0',
+    color: 'white',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    fontWeight: '600',
+    fontSize: 14,
+    marginLeft: 10,
   },
 });

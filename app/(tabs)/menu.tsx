@@ -1,9 +1,19 @@
 // app/(tabs)/menu.tsx - Pleinement fonctionnel avec tous les boutons actifs
 import { View, Text, StyleSheet, ScrollView, Pressable, Alert, TextInput, Modal } from 'react-native';
 import { useState, useMemo, useEffect } from 'react';
-import { CirclePlus as PlusCircle, CircleMinus as MinusCircle, CreditCard as Edit, X, Save, Plus } from 'lucide-react-native';
+import { CirclePlus as PlusCircle, CircleMinus as MinusCircle, CreditCard as Edit, X, Save, Plus, Trash2 } from 'lucide-react-native';
 import priceData from '../../helpers/ManjosPrice';
-import { getMenuAvailability, saveMenuAvailability, MenuItemAvailability } from '../../utils/storage';
+import {
+  getMenuAvailability,
+  saveMenuAvailability,
+  MenuItemAvailability,
+  getCustomMenuItems,
+  addCustomMenuItem,
+  updateCustomMenuItem,
+  deleteCustomMenuItem,
+  CustomMenuItem,
+  saveCustomMenuItems
+} from '../../utils/storage';
 
 interface MenuItem {
   id: number;
@@ -313,6 +323,7 @@ export default function MenuScreen() {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [originalItems, setOriginalItems] = useState<MenuItem[]>([]);
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
+  const [customItems, setCustomItems] = useState<CustomMenuItem[]>([]);
   const [editItem, setEditItem] = useState<MenuItem | null>(null);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [addModalVisible, setAddModalVisible] = useState(false);
@@ -322,15 +333,45 @@ export default function MenuScreen() {
     loadMenuItemsStatus();
   }, []);
 
-  const handleSaveNewItem = (newItem: MenuItem) => {
-    setMenuItems(prev => {
-      const updated = [...prev, newItem];
+  const handleSaveNewItem = async (newItem: MenuItem) => {
+    try {
+      // Créer un nouvel article personnalisé
+      const customMenuItem: CustomMenuItem = {
+        id: newItem.id,
+        name: newItem.name,
+        price: newItem.price,
+        category: newItem.category,
+        type: newItem.type,
+        available: newItem.available
+      };
 
-      // Sauvegarder le changement dans AsyncStorage
-      setTimeout(() => saveMenuItemsStatus(), 100);
+      // Sauvegarder dans le stockage personnalisé
+      await addCustomMenuItem(customMenuItem);
 
-      return updated;
-    });
+      // Ajouter à l'état local
+      setCustomItems(prev => [...prev, customMenuItem]);
+
+      // Mettre à jour les menuItems
+      setMenuItems(prev => {
+        const updated = [...prev, newItem];
+        return updated;
+      });
+
+      // Sauvegarder dans la disponibilité du menu
+      const itemStatus: MenuItemAvailability = {
+        id: newItem.id,
+        available: newItem.available,
+        name: newItem.name,
+        price: newItem.price
+      };
+
+      const currentAvailability = await getMenuAvailability();
+      await saveMenuAvailability([...currentAvailability, itemStatus]);
+
+    } catch (error) {
+      console.error('Error saving new menu item:', error);
+      Alert.alert('Erreur', 'Impossible de sauvegarder le nouvel article.');
+    }
   };
 
   // Sauvegarde des statuts de disponibilité
@@ -353,9 +394,10 @@ export default function MenuScreen() {
   const loadMenuItemsStatus = async () => {
     try {
       const itemsStatus = await getMenuAvailability();
+      const customItems = await getCustomMenuItems(); // Charger les articles personnalisés
 
       // Convertir les données de ManjosPrice en items de menu
-      const initialItems = priceData.map(item => {
+      let initialItems = priceData.map(item => {
         // Déterminer la catégorie en fonction du type et du nom
         let category = item.type === 'resto' ? 'Plats Principaux' : 'Softs';
 
@@ -402,8 +444,28 @@ export default function MenuScreen() {
         };
       });
 
+      // Ajouter les articles personnalisés à la liste
+      const customMenuItems = customItems.map(item => {
+        // Vérifier si on a un statut sauvegardé pour cet article personnalisé
+        const savedStatus = itemsStatus.find((status) => status.id === item.id);
+
+        return {
+          id: item.id,
+          name: item.name,
+          price: item.price,
+          category: item.category,
+          available: savedStatus ? savedStatus.available : item.available,
+          type: item.type,
+          color: CATEGORY_COLORS[item.category as keyof typeof CATEGORY_COLORS] || '#757575'
+        };
+      });
+
+      // Combiner les articles standard et personnalisés
+      initialItems = [...initialItems, ...customMenuItems];
+
       setOriginalItems(initialItems);
       setMenuItems(initialItems);
+      setCustomItems(customItems);
     } catch (error) {
       console.error('Error loading menu items status:', error);
       // En cas d'erreur, initialiser avec tous les items disponibles
@@ -411,51 +473,93 @@ export default function MenuScreen() {
     }
   };
 
-
   // Initialiser les items de menu si pas de données sauvegardées
-  const initializeMenuItems = () => {
-    const initialItems = priceData.map(item => {
-      let category = item.type === 'resto' ? 'Plats Principaux' : 'Softs';
+  const initializeMenuItems = async () => {
+    try {
+      // Charger les articles personnalisés même en cas d'initialisation
+      const customItems = await getCustomMenuItems();
 
-      if (item.type === 'resto') {
-        if (item.name.toLowerCase().includes('salade')) {
-          category = 'Salades';
-        } else if (item.name.toLowerCase().includes('dessert')) {
-          category = 'Desserts';
-        } else if (item.name.toLowerCase().includes('frites')) {
-          category = 'Accompagnements';
-        } else if (item.name.toLowerCase().includes('menu enfant')) {
-          category = 'Menu Enfant';
-        } else if (item.name.toLowerCase().includes('maxi')) {
-          category = 'Plats Maxi';
+      let initialItems = priceData.map(item => {
+        let category = item.type === 'resto' ? 'Plats Principaux' : 'Softs';
+
+        if (item.type === 'resto') {
+          if (item.name.toLowerCase().includes('salade')) {
+            category = 'Salades';
+          } else if (item.name.toLowerCase().includes('dessert')) {
+            category = 'Desserts';
+          } else if (item.name.toLowerCase().includes('frites')) {
+            category = 'Accompagnements';
+          } else if (item.name.toLowerCase().includes('menu enfant')) {
+            category = 'Menu Enfant';
+          } else if (item.name.toLowerCase().includes('maxi')) {
+            category = 'Plats Maxi';
+          }
+        } else {
+          if (item.name.toLowerCase().includes('glace')) {
+            category = 'Glaces';
+          } else if (item.name.toLowerCase().includes('thé') || item.name.toLowerCase().includes('café')) {
+            category = 'Boissons Chaudes';
+          } else if (item.name.toLowerCase().includes('bière') || item.name.toLowerCase().includes('blonde') || item.name.toLowerCase().includes('ambree')) {
+            category = 'Bières';
+          } else if (item.name.toLowerCase().includes('vin') || item.name.toLowerCase().includes('pichet') || item.name.toLowerCase().includes('btl')) {
+            category = 'Vins';
+          } else if (item.name.toLowerCase().includes('apero') || item.name.toLowerCase().includes('digestif') || item.name.toLowerCase().includes('ricard') || item.name.toLowerCase().includes('alcool') || item.name.toLowerCase().includes('punch') || item.name.toLowerCase().includes('cocktail')) {
+            category = 'Alcools';
+          }
         }
-      } else {
-        if (item.name.toLowerCase().includes('glace')) {
-          category = 'Glaces';
-        } else if (item.name.toLowerCase().includes('thé') || item.name.toLowerCase().includes('café')) {
-          category = 'Boissons Chaudes';
-        } else if (item.name.toLowerCase().includes('bière') || item.name.toLowerCase().includes('blonde') || item.name.toLowerCase().includes('ambree')) {
-          category = 'Bières';
-        } else if (item.name.toLowerCase().includes('vin') || item.name.toLowerCase().includes('pichet') || item.name.toLowerCase().includes('btl')) {
-          category = 'Vins';
-        } else if (item.name.toLowerCase().includes('apero') || item.name.toLowerCase().includes('digestif') || item.name.toLowerCase().includes('ricard') || item.name.toLowerCase().includes('alcool') || item.name.toLowerCase().includes('punch') || item.name.toLowerCase().includes('cocktail')) {
-          category = 'Alcools';
-        }
-      }
 
-      return {
-        id: item.id,
-        name: item.name,
-        price: item.price,
-        category,
-        available: true, // Tous les articles disponibles par défaut
-        type: item.type as 'resto' | 'boisson',
-        color: CATEGORY_COLORS[category] || '#757575'
-      };
-    });
+        return {
+          id: item.id,
+          name: item.name,
+          price: item.price,
+          category,
+          available: true, // Tous les articles disponibles par défaut
+          type: item.type as 'resto' | 'boisson',
+          color: CATEGORY_COLORS[category] || '#757575'
+        };
+      });
 
-    setOriginalItems(initialItems);
-    setMenuItems(initialItems);
+      // Ajouter les articles personnalisés à la liste
+      const customMenuItems = customItems.map(item => {
+        return {
+          id: item.id,
+          name: item.name,
+          price: item.price,
+          category: item.category,
+          available: item.available,
+          type: item.type,
+          color: CATEGORY_COLORS[item.category as keyof typeof CATEGORY_COLORS] || '#757575'
+        };
+      });
+
+      // Combiner les articles standard et personnalisés
+      initialItems = [...initialItems, ...customMenuItems];
+
+      setOriginalItems(initialItems);
+      setMenuItems(initialItems);
+      setCustomItems(customItems);
+    } catch (error) {
+      console.error('Error initializing menu items:', error);
+
+      // En dernier recours, charger seulement les articles standards
+      const standardItems = priceData.map(item => {
+        let category = item.type === 'resto' ? 'Plats Principaux' : 'Softs';
+        // Déterminer la catégorie (même logique que précédemment)
+
+        return {
+          id: item.id,
+          name: item.name,
+          price: item.price,
+          category,
+          available: true,
+          type: item.type as 'resto' | 'boisson',
+          color: CATEGORY_COLORS[category] || '#757575'
+        };
+      });
+
+      setOriginalItems(standardItems);
+      setMenuItems(standardItems);
+    }
   };
 
   // Obtenir toutes les catégories uniques
@@ -478,25 +582,53 @@ export default function MenuScreen() {
       // Trouver l'item à modifier
       const itemToToggle = menuItems.find(item => item.id === itemId);
       if (!itemToToggle) return;
-      
+
       // Créer un nouveau tableau avec l'item modifié
       const updated = menuItems.map(item =>
         item.id === itemId ? { ...item, available: !item.available } : item
       );
-      
+
       // Mettre à jour l'état local immédiatement
       setMenuItems(updated);
-      
-      // Sauvegarder le changement dans AsyncStorage de manière asynchrone
-      const itemStatus: MenuItemAvailability[] = updated.map(item => ({
-        id: item.id,
-        available: item.available,
-        name: item.name,
-        price: item.price
-      }));
-      
-      await saveMenuAvailability(itemStatus);
-      
+
+      // Si c'est un article personnalisé, mettre à jour aussi dans customItems
+      const isCustomItem = customItems.some(item => item.id === itemId);
+      if (isCustomItem) {
+        const updatedCustomItems = customItems.map(item =>
+          item.id === itemId ? { ...item, available: !item.available } : item
+        );
+        setCustomItems(updatedCustomItems);
+
+        // Sauvegarder les modifications dans le stockage des articles personnalisés
+        await saveCustomMenuItems(updatedCustomItems);
+      }
+
+      // Sauvegarder le changement dans AsyncStorage pour la disponibilité
+      const availability = await getMenuAvailability();
+      const existingItemIndex = availability.findIndex(item => item.id === itemId);
+
+      let updatedAvailability;
+      if (existingItemIndex >= 0) {
+        // Mettre à jour l'article existant
+        updatedAvailability = availability.map(item =>
+          item.id === itemId ? {
+            ...item,
+            available: !item.available
+          } : item
+        );
+      } else {
+        // Ajouter l'article s'il n'existe pas
+        const newAvailabilityItem = {
+          id: itemId,
+          available: !itemToToggle.available,
+          name: itemToToggle.name,
+          price: itemToToggle.price
+        };
+        updatedAvailability = [...availability, newAvailabilityItem];
+      }
+
+      await saveMenuAvailability(updatedAvailability);
+
       // Facultatif: Ajouter un feedback visuel
       const updatedItem = updated.find(item => item.id === itemId);
       const status = updatedItem?.available ? 'disponible' : 'indisponible';
@@ -515,17 +647,115 @@ export default function MenuScreen() {
   };
 
   // Sauvegarder les modifications
-  const handleSaveEdit = (updatedItem: MenuItem) => {
-    setMenuItems(prev => {
-      const updated = prev.map(item =>
-        item.id === updatedItem.id ? updatedItem : item
+  const handleSaveEdit = async (updatedItem: MenuItem) => {
+    try {
+      // Vérifier si c'est un article personnalisé
+      const isCustomItem = customItems.some(item => item.id === updatedItem.id);
+
+      if (isCustomItem) {
+        // Mettre à jour l'article personnalisé
+        const customMenuItem: CustomMenuItem = {
+          id: updatedItem.id,
+          name: updatedItem.name,
+          price: updatedItem.price,
+          category: updatedItem.category,
+          type: updatedItem.type,
+          available: updatedItem.available
+        };
+
+        await updateCustomMenuItem(customMenuItem);
+
+        // Mettre à jour l'état local des articles personnalisés
+        setCustomItems(prev => prev.map(item =>
+          item.id === updatedItem.id ? customMenuItem : item
+        ));
+      }
+
+      // Continuer avec votre code existant pour l'état local et la disponibilité
+      setMenuItems(prev => {
+        const updated = prev.map(item =>
+          item.id === updatedItem.id ? updatedItem : item
+        );
+        return updated;
+      });
+
+      // Mettre à jour la disponibilité
+      const availability = await getMenuAvailability();
+      const updatedAvailability = availability.map(item =>
+        item.id === updatedItem.id
+          ? {
+            id: updatedItem.id,
+            available: updatedItem.available,
+            name: updatedItem.name,
+            price: updatedItem.price
+          }
+          : item
       );
 
-      // Sauvegarder le changement dans AsyncStorage
-      setTimeout(() => saveMenuItemsStatus(), 100);
+      // Si l'article n'existe pas encore dans la disponibilité, l'ajouter
+      const itemExists = updatedAvailability.some(item => item.id === updatedItem.id);
+      if (!itemExists) {
+        updatedAvailability.push({
+          id: updatedItem.id,
+          available: updatedItem.available,
+          name: updatedItem.name,
+          price: updatedItem.price
+        });
+      }
 
-      return updated;
-    });
+      await saveMenuAvailability(updatedAvailability);
+
+    } catch (error) {
+      console.error('Error updating menu item:', error);
+      Alert.alert('Erreur', 'Impossible de mettre à jour l\'article.');
+    }
+  };
+
+  // Fonction pour supprimer un article personnalisé
+  const handleDeleteMenuItem = (itemId: number) => {
+    // Vérifier si c'est un article personnalisé
+    const isCustomItem = customItems.some(item => item.id === itemId);
+
+    if (!isCustomItem) {
+      Alert.alert('Information', 'Seuls les articles personnalisés peuvent être supprimés.');
+      return;
+    }
+
+    Alert.alert(
+      'Supprimer l\'article',
+      'Êtes-vous sûr de vouloir supprimer cet article du menu ? Cette action est irréversible.',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Supprimer',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              // Supprimer l'article du stockage
+              await deleteCustomMenuItem(itemId);
+
+              // Mettre à jour la liste des articles personnalisés
+              const updatedCustomItems = customItems.filter(item => item.id !== itemId);
+              setCustomItems(updatedCustomItems);
+
+              // Mettre à jour la liste complète des articles
+              const updatedMenuItems = menuItems.filter(item => item.id !== itemId);
+              setMenuItems(updatedMenuItems);
+
+              // Supprimer également de la liste de disponibilité
+              const availability = await getMenuAvailability();
+              const updatedAvailability = availability.filter(item => item.id !== itemId);
+              await saveMenuAvailability(updatedAvailability);
+
+              Alert.alert('Succès', 'L\'article a été supprimé avec succès.');
+            } catch (error) {
+              console.error('Erreur lors de la suppression de l\'article:', error);
+              Alert.alert('Erreur', 'Impossible de supprimer l\'article. Veuillez réessayer.');
+            }
+          }
+        }
+      ]
+    );
   };
 
   // Filtrer par catégorie
@@ -546,6 +776,21 @@ export default function MenuScreen() {
     }
 
     return filtered;
+  };
+
+  // Fonction de débugage pour afficher l'état actuel des articles (utile pour le débogage)
+  const debugMenuItems = () => {
+    console.log('Standard menu items:', priceData.length);
+    console.log('Custom menu items:', customItems.length);
+    console.log('Total menu items:', menuItems.length);
+
+    // Afficher les détails des articles personnalisés
+    if (customItems.length > 0) {
+      console.log('Custom items details:');
+      customItems.forEach(item => {
+        console.log(`ID: ${item.id}, Name: ${item.name}, Type: ${item.type}, Category: ${item.category}, Available: ${item.available}`);
+      });
+    }
   };
 
   return (
@@ -627,41 +872,57 @@ export default function MenuScreen() {
         <View style={styles.menuItemsContainer}>
           <ScrollView>
             <View style={styles.menuItemsGrid}>
-              {getFilteredItems().map(item => (
-                <View key={item.id} style={[
-                  styles.menuItem,
-                  { borderLeftColor: item.color }
-                ]}>
-                  <View style={styles.itemInfo}>
-                    <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
-                    <Text style={styles.itemPrice}>{item.price.toFixed(2)} €</Text>
-                  </View>
-                  <View style={styles.itemActions}>
-                    <Pressable
-                      style={[
-                        styles.actionButton,
-                        { backgroundColor: item.available ? '#f44336' : '#4CAF50' },
-                      ]}
-                      onPress={() => toggleItemAvailability(item.id)}>
-                      {item.available ? (
-                        <MinusCircle size={16} color="#fff" />
-                      ) : (
-                        <PlusCircle size={16} color="#fff" />
+              {getFilteredItems().map(item => {
+                // Vérifier si c'est un article personnalisé
+                const isCustomItem = customItems.some(customItem => customItem.id === item.id);
+
+                return (
+                  <View key={item.id} style={[
+                    styles.menuItem,
+                    { borderLeftColor: item.color }
+                  ]}>
+                    <View style={styles.itemInfo}>
+                      <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
+                      <Text style={styles.itemPrice}>{item.price.toFixed(2)} €</Text>
+                    </View>
+                    <View style={styles.itemActions}>
+                      <Pressable
+                        style={[
+                          styles.actionButton,
+                          { backgroundColor: item.available ? '#f44336' : '#4CAF50' },
+                        ]}
+                        onPress={() => toggleItemAvailability(item.id)}>
+                        {item.available ? (
+                          <MinusCircle size={16} color="#fff" />
+                        ) : (
+                          <PlusCircle size={16} color="#fff" />
+                        )}
+                        <Text style={styles.actionButtonText}>
+                          {item.available ? 'Indisponible' : 'Disponible'}
+                        </Text>
+                      </Pressable>
+                      <Pressable
+                        style={[styles.actionButton, { backgroundColor: '#2196F3' }]}
+                        onPress={() => handleEdit(item)}
+                      >
+                        <Edit size={16} color="#fff" />
+                        <Text style={styles.actionButtonText}>Modifier</Text>
+                      </Pressable>
+
+                      {/* Bouton Supprimer pour les articles personnalisés uniquement */}
+                      {isCustomItem && (
+                        <Pressable
+                          style={[styles.actionButton, { backgroundColor: '#F44336' }]}
+                          onPress={() => handleDeleteMenuItem(item.id)}
+                        >
+                          <Trash2 size={16} color="#fff" />
+                          <Text style={styles.actionButtonText}>Supprimer</Text>
+                        </Pressable>
                       )}
-                      <Text style={styles.actionButtonText}>
-                        {item.available ? 'Indisponible' : 'Disponible'}
-                      </Text>
-                    </Pressable>
-                    <Pressable
-                      style={[styles.actionButton, { backgroundColor: '#2196F3' }]}
-                      onPress={() => handleEdit(item)}
-                    >
-                      <Edit size={16} color="#fff" />
-                      <Text style={styles.actionButtonText}>Modifier</Text>
-                    </Pressable>
+                    </View>
                   </View>
-                </View>
-              ))}
+                );
+              })}
             </View>
           </ScrollView>
         </View>

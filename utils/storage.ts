@@ -50,6 +50,15 @@ export interface MenuItemAvailability {
   price: number;
 }
 
+export interface CustomMenuItem {
+  id: number;
+  name: string;
+  price: number;
+  category: string;
+  type: 'resto' | 'boisson';
+  available: boolean;
+}
+
 // Constantes
 export const TABLE_SECTIONS = {
   EAU: 'Eau',
@@ -65,6 +74,7 @@ const STORAGE_KEYS = {
   FIRST_LAUNCH: `${STORAGE_PREFIX}first_launch_v3`,
   APP_VERSION: `${STORAGE_PREFIX}app_version`,
   LAST_SYNC: `${STORAGE_PREFIX}last_sync`,
+  CUSTOM_MENU_ITEMS: `${STORAGE_PREFIX}custom_menu_items`,
 };
 
 // Version de l'application pour la gestion des migrations
@@ -468,12 +478,76 @@ class MenuManager {
   }
 }
 
+class CustomMenuManager {
+  // Obtenir tous les articles personnalisés
+  static async getCustomMenuItems(): Promise<CustomMenuItem[]> {
+    return StorageManager.load<CustomMenuItem[]>(STORAGE_KEYS.CUSTOM_MENU_ITEMS, []);
+  }
+
+  // Sauvegarder les articles personnalisés
+  static async saveCustomMenuItems(items: CustomMenuItem[]): Promise<void> {
+    return StorageManager.save(STORAGE_KEYS.CUSTOM_MENU_ITEMS, items);
+  }
+
+  // Ajouter un nouvel article personnalisé
+  static async addCustomMenuItem(item: CustomMenuItem): Promise<void> {
+    try {
+      const items = await CustomMenuManager.getCustomMenuItems();
+      items.push(item);
+      await CustomMenuManager.saveCustomMenuItems(items);
+      log(`Added new custom menu item ID ${item.id}: ${item.name}`);
+    } catch (error) {
+      log(`Error adding custom menu item:`, error);
+      throw error;
+    }
+  }
+
+  // Mettre à jour un article personnalisé
+  static async updateCustomMenuItem(updatedItem: CustomMenuItem): Promise<void> {
+    try {
+      const items = await CustomMenuManager.getCustomMenuItems();
+      const index = items.findIndex(item => item.id === updatedItem.id);
+      
+      if (index >= 0) {
+        items[index] = updatedItem;
+        await CustomMenuManager.saveCustomMenuItems(items);
+        log(`Updated custom menu item ID ${updatedItem.id}`);
+      } else {
+        log(`Custom menu item ID ${updatedItem.id} not found for update`);
+      }
+    } catch (error) {
+      log(`Error updating custom menu item:`, error);
+      throw error;
+    }
+  }
+
+  // Supprimer un article personnalisé
+  static async deleteCustomMenuItem(itemId: number): Promise<void> {
+    try {
+      const items = await CustomMenuManager.getCustomMenuItems();
+      const updatedItems = items.filter(item => item.id !== itemId);
+      
+      if (items.length !== updatedItems.length) {
+        await CustomMenuManager.saveCustomMenuItems(updatedItems);
+        log(`Deleted custom menu item ID ${itemId}`);
+      } else {
+        log(`Custom menu item ID ${itemId} not found for deletion`);
+      }
+    } catch (error) {
+      log(`Error deleting custom menu item ${itemId}:`, error);
+      throw error;
+    }
+  }
+}
+
+
 // Exporter les classes de gestion pour utilisation dans l'application
 export {
   StorageManager,
   TableManager,
   BillManager,
   MenuManager,
+  CustomMenuManager,
 };
 
 // Pour maintenir la compatibilité avec le code existant, réexporter les fonctions
@@ -490,3 +564,8 @@ export const saveBills = BillManager.saveBills;
 export const addBill = BillManager.addBill;
 export const getMenuAvailability = MenuManager.getMenuAvailability;
 export const saveMenuAvailability = MenuManager.saveMenuAvailability;
+export const getCustomMenuItems = CustomMenuManager.getCustomMenuItems;
+export const saveCustomMenuItems = CustomMenuManager.saveCustomMenuItems;
+export const addCustomMenuItem = CustomMenuManager.addCustomMenuItem;
+export const updateCustomMenuItem = CustomMenuManager.updateCustomMenuItem;
+export const deleteCustomMenuItem = CustomMenuManager.deleteCustomMenuItem;
