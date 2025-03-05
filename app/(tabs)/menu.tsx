@@ -473,17 +473,39 @@ export default function MenuScreen() {
   }, [menuItems, activeType]);
 
   // Fonction pour marquer un item disponible/indisponible
-  const toggleItemAvailability = (itemId: number) => {
-    setMenuItems(prev => {
-      const updated = prev.map(item =>
+  const toggleItemAvailability = async (itemId: number) => {
+    try {
+      // Trouver l'item à modifier
+      const itemToToggle = menuItems.find(item => item.id === itemId);
+      if (!itemToToggle) return;
+      
+      // Créer un nouveau tableau avec l'item modifié
+      const updated = menuItems.map(item =>
         item.id === itemId ? { ...item, available: !item.available } : item
       );
-
-      // Sauvegarder le changement dans AsyncStorage
-      setTimeout(() => saveMenuItemsStatus(), 100);
-
-      return updated;
-    });
+      
+      // Mettre à jour l'état local immédiatement
+      setMenuItems(updated);
+      
+      // Sauvegarder le changement dans AsyncStorage de manière asynchrone
+      const itemStatus: MenuItemAvailability[] = updated.map(item => ({
+        id: item.id,
+        available: item.available,
+        name: item.name,
+        price: item.price
+      }));
+      
+      await saveMenuAvailability(itemStatus);
+      
+      // Facultatif: Ajouter un feedback visuel
+      const updatedItem = updated.find(item => item.id === itemId);
+      const status = updatedItem?.available ? 'disponible' : 'indisponible';
+      console.log(`Article ${updatedItem?.name} maintenant ${status}`);
+    } catch (error) {
+      console.error('Erreur lors de la mise à jour de la disponibilité:', error);
+      // Réinitialiser l'état en cas d'erreur d'enregistrement
+      Alert.alert('Erreur', 'Impossible de mettre à jour la disponibilité de l\'article.');
+    }
   };
 
   // Ouvrir la modal d'édition

@@ -44,7 +44,7 @@ export interface Bill {
 export interface MenuItemAvailability {
   id: number;
   available: boolean;
-  name: string; 
+  name: string;
   price: number;
 }
 
@@ -294,19 +294,38 @@ export const getMenuAvailability = async (): Promise<MenuItemAvailability[]> => 
   try {
     const storedStatus = await AsyncStorage.getItem(MENU_AVAILABILITY_KEY);
     if (storedStatus) {
-      return JSON.parse(storedStatus);
+      const parsedStatus = JSON.parse(storedStatus);
+      // Vérifier qu'on a bien un tableau
+      if (Array.isArray(parsedStatus)) {
+        return parsedStatus;
+      }
     }
-    return [];
+    return []; // Retourner un tableau vide par défaut
   } catch (error) {
     console.error('Error loading menu availability:', error);
     return [];
   }
 };
-
 // Fonction pour sauvegarder les disponibilités des articles
 export const saveMenuAvailability = async (items: MenuItemAvailability[]): Promise<void> => {
+  if (!Array.isArray(items)) {
+    console.error('Invalid items format - expected array');
+    return;
+  }
+
   try {
-    await AsyncStorage.setItem(MENU_AVAILABILITY_KEY, JSON.stringify(items));
+    // Valider les données avant sauvegarde
+    const validItems = items.filter(item =>
+      typeof item.id === 'number' &&
+      typeof item.available === 'boolean' &&
+      typeof item.name === 'string' &&
+      typeof item.price === 'number'
+    );
+
+    // Sauvegarder uniquement si nous avons des éléments valides
+    if (validItems.length > 0) {
+      await AsyncStorage.setItem(MENU_AVAILABILITY_KEY, JSON.stringify(validItems));
+    }
   } catch (error) {
     console.error('Error saving menu availability:', error);
     throw error;
