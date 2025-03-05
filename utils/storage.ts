@@ -14,11 +14,6 @@ export interface Table {
   order?: Order;
 }
 
-export interface TaxSettings {
-  enabled: boolean;
-  rate: number;
-}
-
 export interface OrderItem {
   id: number;
   name: string;
@@ -546,59 +541,6 @@ class CustomMenuManager {
   }
 }
 
-class TaxManager {
-  // Obtenir les paramètres de taxe actuels
-  static async getTaxSettings(): Promise<TaxSettings> {
-    try {
-      // Charger depuis les paramètres du restaurant
-      const configData = await StorageManager.load(STORAGE_KEYS.SETTINGS_STORAGE_KEY, {}) as any;
-      
-      // Si les paramètres de taxe existent, les renvoyer
-      if (configData && configData.taxSettings) {
-        return configData.taxSettings;
-      }
-      
-      // Sinon, renvoyer les valeurs par défaut
-      return {
-        enabled: false,
-        rate: 0
-      };
-    } catch (error) {
-      log('Error loading tax settings:', error);
-      // En cas d'erreur, renvoyer les valeurs par défaut
-      return {
-        enabled: false,
-        rate: 0
-      };
-    }
-  }
-
-  // Calculer le montant de taxe pour un prix donné
-  static calculateTax(price: number, taxSettings?: TaxSettings): { subtotal: number, tax: number, total: number } {
-    // Si les paramètres de taxe ne sont pas fournis, utiliser les valeurs par défaut
-    const settings = taxSettings || { enabled: false, rate: 0 };
-    
-    // Si les taxes sont désactivées, renvoyer zéro taxe
-    if (!settings.enabled || settings.rate <= 0) {
-      return {
-        subtotal: price,
-        tax: 0,
-        total: price
-      };
-    }
-    
-    // Calculer la taxe et le total
-    const subtotal = price / (1 + (settings.rate / 100));
-    const tax = price - subtotal;
-    
-    return {
-      subtotal: parseFloat(subtotal.toFixed(2)),
-      tax: parseFloat(tax.toFixed(2)),
-      total: price
-    };
-  }
-}
-
 
 // Exporter les classes de gestion pour utilisation dans l'application
 export {
@@ -606,8 +548,7 @@ export {
   TableManager,
   BillManager,
   MenuManager,
-  CustomMenuManager,
-  TaxManager
+  CustomMenuManager
 };
 
 // Pour maintenir la compatibilité avec le code existant, réexporter les fonctions

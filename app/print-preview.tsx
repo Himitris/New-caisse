@@ -1,4 +1,4 @@
-// app/print-preview.tsx - Mis à jour pour afficher le nom de la table
+// app/print-preview.tsx - Mis à jour pour enlever la TVA
 
 import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { useEffect, useState } from 'react';
@@ -6,16 +6,15 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Printer, Share, Home } from 'lucide-react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
-import { TaxManager } from '../utils/storage';
 
 export default function PrintPreviewScreen() {
   const { tableId, total, items, paymentMethod, isPartial, remaining, tableName, isPreview } = useLocalSearchParams();
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const [taxSettings, setTaxSettings] = useState({ enabled: false, rate: 0 });
+  // Suppression des états liés à la TVA
   const tableIdNum = parseInt(tableId as string, 10);
   const totalAmount = parseFloat(total as string);
-  const { subtotal, tax, total: calculatedTotal } = TaxManager.calculateTax(totalAmount, taxSettings);
+  // Suppression du calcul des valeurs liées à la TVA
   const orderItems = items ? JSON.parse(items as string) : [];
   const isPartialPayment = isPartial === 'true';
   const remainingAmount = remaining ? parseFloat(remaining as string) : 0;
@@ -27,30 +26,18 @@ export default function PrintPreviewScreen() {
     address: 'Route de la Corniche, 82140 Saint Antonin Noble Val',
     siret: 'Siret N° 803 520 998 00011',
     phone: 'Tel : 0563682585',
-    taxInfo: taxSettings.enabled ? `TVA ${taxSettings.rate.toFixed(2)}%` : 'TVA non applicable - art.293B du CGI',
+    taxInfo: 'TVA non applicable - art.293B du CGI', // Toujours cette valeur maintenant
     owner: 'Virginie',
   };
 
-  useEffect(() => {
-    const loadTaxSettings = async () => {
-      try {
-        const settings = await TaxManager.getTaxSettings();
-        setTaxSettings(settings);
-      } catch (error) {
-        console.error('Erreur lors du chargement des paramètres de taxe:', error);
-      }
-    };
-
-    loadTaxSettings();
-  }, []);
+  // Suppression du chargement des paramètres de TVA
 
   const order = {
     tableNumber: tableIdNum,
     tableName: displayName,
     guests: 4,
     items: orderItems,
-    subtotal: subtotal,
-    tax: tax,
+    // Suppression des valeurs liées à la TVA
     total: totalAmount,
     remaining: remainingAmount,
     isPartial: isPartialPayment,
@@ -89,10 +76,8 @@ export default function PrintPreviewScreen() {
       `;
     }).join('');
 
-    // Information sur la TVA à afficher dans l'en-tête
-    const taxInfo = taxSettings.enabled
-      ? `TVA ${taxSettings.rate.toFixed(2)}%`
-      : 'TVA non applicable - art.293B du CGI';
+    // Information sur la TVA (maintenant toujours la même)
+    const taxInfo = 'TVA non applicable - art.293B du CGI';
 
     return `
       <html>
@@ -134,13 +119,7 @@ export default function PrintPreviewScreen() {
           </table>
   
           <div class="totals">
-            ${taxSettings.enabled ? `
-              <p>Sous-total HT: ${order.subtotal.toFixed(2)} €</p>
-              <p>TVA (${taxSettings.rate.toFixed(2)}%): ${order.tax.toFixed(2)} €</p>
-              <h2>Total TTC: ${order.total.toFixed(2)} €</h2>
-            ` : `
-              <h2>Total: ${order.total.toFixed(2)} €</h2>
-            `}
+            <h2>Total: ${order.total.toFixed(2)} €</h2>
             ${order.isPartial ? `<p class="partial">Solde restant: ${order.remaining.toFixed(2)} €</p>` : ''}
           </div>
   
@@ -239,27 +218,10 @@ export default function PrintPreviewScreen() {
         </View>
 
         <View style={styles.totals}>
-          {taxSettings.enabled ? (
-            <>
-              <View style={styles.totalRow}>
-                <Text style={styles.totalLabel}>Sous-total HT</Text>
-                <Text style={styles.totalValue}>{order.subtotal.toFixed(2)} €</Text>
-              </View>
-              <View style={styles.totalRow}>
-                <Text style={styles.totalLabel}>TVA ({taxSettings.rate.toFixed(2)}%)</Text>
-                <Text style={styles.totalValue}>{order.tax.toFixed(2)} €</Text>
-              </View>
-              <View style={[styles.totalRow, styles.finalTotal]}>
-                <Text style={styles.totalLabel}>Total TTC</Text>
-                <Text style={styles.totalValue}>{order.total.toFixed(2)} €</Text>
-              </View>
-            </>
-          ) : (
-            <View style={[styles.totalRow, styles.finalTotal]}>
-              <Text style={styles.totalLabel}>Total</Text>
-              <Text style={styles.totalValue}>{order.total.toFixed(2)} €</Text>
-            </View>
-          )}
+          <View style={[styles.totalRow, styles.finalTotal]}>
+            <Text style={styles.totalLabel}>Total</Text>
+            <Text style={styles.totalValue}>{order.total.toFixed(2)} €</Text>
+          </View>
 
           {isPartialPayment && (
             <View style={[styles.totalRow, styles.remainingRow]}>
@@ -309,9 +271,7 @@ export default function PrintPreviewScreen() {
   );
 }
 
-// Les styles restent les mêmes
 const styles = StyleSheet.create({
-  // Styles existants de improved-print-preview
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',

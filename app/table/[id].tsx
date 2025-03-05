@@ -1,4 +1,4 @@
-// app/table/[id].tsx
+// Modification de app/table/[id].tsx pour supprimer les fonctionnalités de TVA
 
 import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { useState, useEffect, useMemo } from 'react';
@@ -6,7 +6,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Users, Plus, Minus, Receipt, Split as Split2, CreditCard, ArrowLeft, Save, X, Printer } from 'lucide-react-native';
 import { getTable, updateTable, OrderItem, Table, resetTable, getMenuAvailability, MenuItemAvailability, getCustomMenuItems, CustomMenuItem } from '../../utils/storage';
 import priceData from '../../helpers/ManjosPrice';
-import { TaxManager } from '../../utils/storage';
+// Suppression de l'import TaxManager
 
 interface MenuItem {
   id: number;
@@ -110,17 +110,14 @@ export default function TableScreen() {
   const [saveInProgress, setSaveInProgress] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [customMenuItems, setCustomMenuItems] = useState<CustomMenuItem[]>([]);
-  const [taxSettings, setTaxSettings] = useState({ enabled: false, rate: 0 });
+  // Suppression des états liés à la TVA
 
   useEffect(() => {
     const loadData = async () => {
       try {
-        const [items, settings] = await Promise.all([
-          getCustomMenuItems(),
-          TaxManager.getTaxSettings()
-        ]);
+        const items = await getCustomMenuItems();
         setCustomMenuItems(items);
-        setTaxSettings(settings);
+        // Suppression du chargement des paramètres de TVA
       } catch (error) {
         console.error('Error loading data:', error);
       }
@@ -496,24 +493,9 @@ export default function TableScreen() {
             )}
           </ScrollView>
           <View style={styles.totalSection}>
-            {taxSettings.enabled && (
-              <>
-                <View style={styles.taxRow}>
-                  <Text style={styles.taxLabel}>Sous-total HT:</Text>
-                  <Text style={styles.taxValue}>
-                    {TaxManager.calculateTax(total, taxSettings).subtotal.toFixed(2)} €
-                  </Text>
-                </View>
-                <View style={styles.taxRow}>
-                  <Text style={styles.taxLabel}>TVA ({taxSettings.rate.toFixed(2)}%):</Text>
-                  <Text style={styles.taxValue}>
-                    {TaxManager.calculateTax(total, taxSettings).tax.toFixed(2)} €
-                  </Text>
-                </View>
-              </>
-            )}
+            {/* Suppression de l'affichage des informations TVA */}
             <View style={styles.finalTotal}>
-              <Text style={styles.totalLabel}>Total{taxSettings.enabled ? ' TTC' : ''}:</Text>
+              <Text style={styles.totalLabel}>Total:</Text>
               <Text style={styles.totalAmount}>{total.toFixed(2)} €</Text>
             </View>
           </View>
@@ -988,20 +970,6 @@ const styles = StyleSheet.create({
     gap: 12,
     marginBottom: 12,
   },
-  taxRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  taxLabel: {
-    fontSize: 14,
-    color: '#666',
-  },
-  taxValue: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#666',
-  },
   finalTotal: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1009,5 +977,5 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: '#e0e0e0',
-  },
+  }
 });

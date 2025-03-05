@@ -18,11 +18,6 @@ interface Setting {
   category: 'general' | 'restaurant' | 'payment' | 'security';
 }
 
-interface TaxSettings {
-  enabled: boolean;
-  rate: number;
-}
-
 interface TimeRange {
   open: string;
   close: string;
@@ -50,14 +45,6 @@ interface ConfigData {
     card: boolean;
     mobilePayment: boolean;
   };
-  taxSettings: TaxSettings;
-}
-
-interface TaxModalProps {
-  visible: boolean;
-  onClose: () => void;
-  taxSettings: TaxSettings;
-  onSave: (settings: TaxSettings) => void;
 }
 
 interface InfoModalProps {
@@ -84,103 +71,6 @@ interface PaymentModalProps {
   };
   onSave: (methods: any) => void;
 }
-
-const TaxSettingsModal: React.FC<TaxModalProps> = ({
-  visible,
-  onClose,
-  taxSettings = { enabled: false, rate: 0 },
-  onSave
-}) => {
-  const [enabled, setEnabled] = useState(taxSettings?.enabled ?? false);
-  const [rate, setRate] = useState(taxSettings?.rate?.toString() ?? "0");
-
-
-  useEffect(() => {
-    if (taxSettings) {
-      setEnabled(taxSettings.enabled ?? false);
-      setRate(taxSettings.rate !== undefined ? taxSettings.rate.toString() : "0");
-    }
-  }, [taxSettings]);
-
-  const handleSave = () => {
-    const parsedRate = parseFloat(rate);
-    if (isNaN(parsedRate) || parsedRate < 0 || parsedRate > 100) {
-      Alert.alert('Erreur', 'Veuillez entrer un taux de TVA valide entre 0 et 100.');
-      return;
-    }
-
-    onSave({
-      enabled: parsedRate > 0, // Activer automatiquement si le taux est supérieur à 0
-      rate: parsedRate
-    });
-    onClose();
-  };
-
-  const handleRateChange = (text: string) => {
-    setRate(text);
-
-    // Ne pas désactiver la TVA si l'utilisateur tape temporairement un nombre incomplet
-    const parsedRate = parseFloat(text);
-    if (!isNaN(parsedRate)) {
-      setEnabled(parsedRate > 0);
-    }
-  };
-
-
-  return (
-    <Modal
-      visible={visible}
-      transparent={true}
-      animationType="fade"
-      onRequestClose={onClose}
-    >
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Configuration des Taxes</Text>
-            <Pressable onPress={onClose} style={styles.closeButton}>
-              <X size={24} color="#666" />
-            </Pressable>
-          </View>
-
-          <View style={styles.formGroup}>
-            <Text style={styles.label}>Activer la TVA:</Text>
-            <Switch
-              value={enabled}
-              onValueChange={setEnabled}
-              trackColor={{ false: '#e0e0e0', true: '#4CAF50' }}
-            />
-            <Text style={styles.taxNote}>
-              {enabled
-                ? "La TVA sera affichée sur les factures et reçus"
-                : "La TVA ne sera pas affichée (art.293B du CGI)"}
-            </Text>
-          </View>
-
-          <View style={styles.formGroup}>
-            <Text style={styles.label}>Taux de TVA (%):</Text>
-            <TextInput
-              style={[
-                styles.input,
-                !enabled ? styles.disabledInput : null
-              ]}
-              value={rate}
-              onChangeText={handleRateChange}
-              keyboardType="numeric"
-              placeholder="0.0"
-              editable={true} // Le champ est toujours éditable
-            />
-          </View>
-
-          <Pressable style={styles.saveButton} onPress={handleSave}>
-            <Save size={20} color="white" />
-            <Text style={styles.saveButtonText}>Enregistrer</Text>
-          </Pressable>
-        </View>
-      </View>
-    </Modal>
-  );
-};
 
 // Modal de configuration des informations du restaurant
 const RestaurantInfoModal: React.FC<InfoModalProps> = ({
@@ -476,7 +366,6 @@ export default function SettingsScreen() {
   const [activeCategory, setActiveCategory] = useState<string>('general');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [taxModalVisible, setTaxModalVisible] = useState(false);
 
   // États pour les modals
   const [restaurantInfoModalVisible, setRestaurantInfoModalVisible] = useState(false);
@@ -507,10 +396,6 @@ export default function SettingsScreen() {
       cash: true,
       card: true,
       mobilePayment: false,
-    },
-    taxSettings: {
-      enabled: false,
-      rate: 0
     }
   };
 
@@ -583,14 +468,6 @@ export default function SettingsScreen() {
       icon: DollarSign,
       category: 'payment',
     },
-    {
-      id: 'taxes',
-      title: 'Taxes et frais',
-      description: 'Configurer les taux de TVA et autres frais',
-      type: 'action',
-      icon: DollarSign,
-      category: 'payment',
-    },
 
     // Sécurité
     {
@@ -653,16 +530,6 @@ export default function SettingsScreen() {
     loadSettings();
   }, []);
 
-  const handleSaveTaxSettings = (settings: TaxSettings) => {
-    setConfig(prev => ({
-      ...prev,
-      taxSettings: settings
-    }));
-
-    // Sauvegarder automatiquement
-    setTimeout(saveSettings, 100);
-  };
-
   // Sauvegarder les paramètres
   const saveSettings = async () => {
     try {
@@ -709,9 +576,6 @@ export default function SettingsScreen() {
         break;
       case 'tables':
         Alert.alert('Information', 'Configuration des tables disponible dans une future mise à jour.');
-        break;
-      case 'taxes':
-        setTaxModalVisible(true);
         break;
       case 'security':
         Alert.alert('Information', 'Paramètres de sécurité disponibles dans une future mise à jour.');
@@ -861,13 +725,6 @@ export default function SettingsScreen() {
         onClose={() => setPaymentModalVisible(false)}
         paymentMethods={config.paymentMethods}
         onSave={handleSavePaymentMethods}
-      />
-
-      <TaxSettingsModal
-        visible={taxModalVisible}
-        onClose={() => setTaxModalVisible(false)}
-        taxSettings={config.taxSettings ?? { enabled: false, rate: 0 }} // 👈 Valeur par défaut
-        onSave={handleSaveTaxSettings}
       />
 
       {/* Indicateur de sauvegarde */}
@@ -1118,12 +975,6 @@ const styles = StyleSheet.create({
     color: 'white',
     marginTop: 12,
     fontSize: 16,
-  },
-  taxNote: {
-    marginTop: 8,
-    fontSize: 14,
-    color: '#666',
-    fontStyle: 'italic',
   },
   disabledInput: {
     backgroundColor: '#f0f0f0',

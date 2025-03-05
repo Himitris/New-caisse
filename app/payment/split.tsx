@@ -1,10 +1,10 @@
-// app/payment/split.tsx - Écran de paiement partagé mis à jour avec gestion des taxes
+// app/payment/split.tsx - Écran de paiement partagé mis à jour
 
 import { View, Text, StyleSheet, ScrollView, Pressable, Alert } from 'react-native';
 import { useState, useEffect } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { CreditCard, Wallet, Home } from 'lucide-react-native';
-import { getTable, updateTable, addBill, resetTable, TaxManager } from '../../utils/storage';
+import { getTable, updateTable, addBill, resetTable } from '../../utils/storage';
 
 export default function SplitBillScreen() {
   const { tableId, total, guests, items } = useLocalSearchParams();
@@ -15,16 +15,9 @@ export default function SplitBillScreen() {
   const orderItems = items ? JSON.parse(items as string) : [];
   const [tableName, setTableName] = useState("");
   const [tableSection, setTableSection] = useState("");
-  const [taxSettings, setTaxSettings] = useState({ enabled: false, rate: 0 });
-  const [remainingTotal, setRemainingTotal] = useState(totalAmount);
 
   // Montant partagé par invité (partage égal)
   const splitAmount = totalAmount / guestCount;
-
-  // Calculer les détails de taxe
-  const { subtotal, tax } = TaxManager.calculateTax(totalAmount, taxSettings);
-  const splitSubtotal = subtotal / guestCount;
-  const splitTax = tax / guestCount;
 
   // Récupérer les détails de la table au chargement
   useEffect(() => {
@@ -39,20 +32,6 @@ export default function SplitBillScreen() {
     fetchTableDetails();
   }, [tableIdNum]);
 
-  // Charger les paramètres de taxe
-  useEffect(() => {
-    const loadTaxSettings = async () => {
-      try {
-        const settings = await TaxManager.getTaxSettings();
-        setTaxSettings(settings);
-      } catch (error) {
-        console.error('Erreur lors du chargement des paramètres de taxe:', error);
-      }
-    };
-    
-    loadTaxSettings();
-  }, []);
-
   const [payments, setPayments] = useState<Array<{
     id: number;
     amount: number;
@@ -65,6 +44,9 @@ export default function SplitBillScreen() {
       paid: false,
     }))
   );
+
+  // Suivre le total restant
+  const [remainingTotal, setRemainingTotal] = useState(totalAmount);
 
   // Mettre à jour le total restant lorsque les paiements changent
   useEffect(() => {
@@ -98,8 +80,6 @@ export default function SplitBillScreen() {
         items: orderItems.length,
         status: 'split' as 'split',
         timestamp: new Date().toISOString(),
-        paymentMethod: method,
-        taxSettings: taxSettings.enabled ? taxSettings : undefined
       };
 
       // Ajouter à l'historique des factures
@@ -167,12 +147,6 @@ export default function SplitBillScreen() {
         <Text style={styles.subtitle}>
           Total : {totalAmount.toFixed(2)} € • {guestCount} Invités
         </Text>
-        {taxSettings.enabled && (
-          <View style={styles.taxInfo}>
-            <Text style={styles.taxDetail}>TVA ({taxSettings.rate.toFixed(2)}%) : {tax.toFixed(2)} €</Text>
-            <Text style={styles.taxDetail}>Sous-total HT : {subtotal.toFixed(2)} €</Text>
-          </View>
-        )}
       </View>
 
       <ScrollView style={styles.content}>
@@ -182,13 +156,6 @@ export default function SplitBillScreen() {
               <Text style={styles.guestTitle}>Invité {payment.id}</Text>
               <Text style={styles.amount}>{payment.amount.toFixed(2)} €</Text>
             </View>
-            
-            {taxSettings.enabled && (
-              <View style={styles.splitTaxDetails}>
-                <Text style={styles.splitTaxText}>HT: {splitSubtotal.toFixed(2)} € • TVA: {splitTax.toFixed(2)} €</Text>
-              </View>
-            )}
-            
             {!payment.paid ? (
               <View style={styles.paymentActions}>
                 <Pressable
@@ -271,16 +238,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#666',
   },
-  taxInfo: {
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-  },
-  taxDetail: {
-    fontSize: 14,
-    color: '#666',
-  },
   content: {
     flex: 1,
     padding: 20,
@@ -300,7 +257,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 16,
   },
   guestTitle: {
     fontSize: 18,
@@ -310,16 +267,6 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
     color: '#4CAF50',
-  },
-  splitTaxDetails: {
-    marginBottom: 16,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-  },
-  splitTaxText: {
-    fontSize: 14,
-    color: '#666',
   },
   paymentActions: {
     flexDirection: 'row',
