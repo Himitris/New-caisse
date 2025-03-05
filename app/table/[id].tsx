@@ -269,9 +269,12 @@ export default function TableScreen() {
       };
     }
 
-    // Vérifier si l'item existe déjà
+    console.log(item.price)
+    console.log(updatedTable.order.items)
+
+    // Vérifier si l'item existe déjà en comparant à la fois le nom ET le prix
     const existingItem = updatedTable.order.items.find(
-      orderItem => orderItem.name === item.name
+      orderItem => orderItem.name === item.name && orderItem.price === item.price
     );
 
     if (existingItem) {
