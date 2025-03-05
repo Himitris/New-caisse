@@ -6,6 +6,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Users, Plus, Minus, Receipt, Split as Split2, CreditCard, ArrowLeft, Save, X, Printer } from 'lucide-react-native';
 import { getTable, updateTable, OrderItem, Table, resetTable, getMenuAvailability, MenuItemAvailability, getCustomMenuItems, CustomMenuItem } from '../../utils/storage';
 import priceData from '../../helpers/ManjosPrice';
+import { TaxManager } from '../../utils/storage';
 
 interface MenuItem {
   id: number;
@@ -109,19 +110,25 @@ export default function TableScreen() {
   const [saveInProgress, setSaveInProgress] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [customMenuItems, setCustomMenuItems] = useState<CustomMenuItem[]>([]);
+  const [taxSettings, setTaxSettings] = useState({ enabled: false, rate: 0 });
 
   useEffect(() => {
-    const loadCustomMenuItems = async () => {
+    const loadData = async () => {
       try {
-        const items = await getCustomMenuItems();
+        const [items, settings] = await Promise.all([
+          getCustomMenuItems(),
+          TaxManager.getTaxSettings()
+        ]);
         setCustomMenuItems(items);
+        setTaxSettings(settings);
       } catch (error) {
-        console.error('Error loading custom menu items:', error);
+        console.error('Error loading data:', error);
       }
     };
 
-    loadCustomMenuItems();
+    loadData();
   }, []);
+
 
   // Convertir les données de ManjosPrice en items de menu avec couleurs
   const menuItems: MenuItem[] = useMemo(() => {
@@ -489,8 +496,26 @@ export default function TableScreen() {
             )}
           </ScrollView>
           <View style={styles.totalSection}>
-            <Text style={styles.totalLabel}>Total</Text>
-            <Text style={styles.totalAmount}>{total.toFixed(2)} €</Text>
+            {taxSettings.enabled && (
+              <>
+                <View style={styles.taxRow}>
+                  <Text style={styles.taxLabel}>Sous-total HT:</Text>
+                  <Text style={styles.taxValue}>
+                    {TaxManager.calculateTax(total, taxSettings).subtotal.toFixed(2)} €
+                  </Text>
+                </View>
+                <View style={styles.taxRow}>
+                  <Text style={styles.taxLabel}>TVA ({taxSettings.rate.toFixed(2)}%):</Text>
+                  <Text style={styles.taxValue}>
+                    {TaxManager.calculateTax(total, taxSettings).tax.toFixed(2)} €
+                  </Text>
+                </View>
+              </>
+            )}
+            <View style={styles.finalTotal}>
+              <Text style={styles.totalLabel}>Total{taxSettings.enabled ? ' TTC' : ''}:</Text>
+              <Text style={styles.totalAmount}>{total.toFixed(2)} €</Text>
+            </View>
           </View>
           <View style={styles.paymentActions}>
             <View style={styles.paymentActionsRow}>
@@ -962,5 +987,27 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     marginBottom: 12,
+  },
+  taxRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  taxLabel: {
+    fontSize: 14,
+    color: '#666',
+  },
+  taxValue: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#666',
+  },
+  finalTotal: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
   },
 });

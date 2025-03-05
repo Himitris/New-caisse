@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { CreditCard, Wallet, Receipt, ArrowLeft } from 'lucide-react-native';
 import { getTable, updateTable, resetTable, addBill } from '../../utils/storage';
+import { TaxManager } from '../../utils/storage';
 
 export default function FullPaymentScreen() {
   const { tableId, total, items } = useLocalSearchParams();
@@ -12,10 +13,12 @@ export default function FullPaymentScreen() {
   const [printReceipt, setPrintReceipt] = useState(true);
   const [processing, setProcessing] = useState(false);
   const [tableName, setTableName] = useState('');
-  
+
   const tableIdNum = parseInt(tableId as string, 10);
   const totalAmount = parseFloat(total as string);
   const orderItems = items ? JSON.parse(items as string) : [];
+  const [taxSettings, setTaxSettings] = useState({ enabled: false, rate: 0 });
+  const { subtotal, tax } = TaxManager.calculateTax(totalAmount, taxSettings);
 
   // Get table name on load
   useEffect(() => {
@@ -25,26 +28,39 @@ export default function FullPaymentScreen() {
         setTableName(tableData.name);
       }
     };
-    
+
     fetchTableName();
   }, [tableIdNum]);
+
+  useEffect(() => {
+    const loadTaxSettings = async () => {
+      try {
+        const settings = await TaxManager.getTaxSettings();
+        setTaxSettings(settings);
+      } catch (error) {
+        console.error('Erreur lors du chargement des paramètres de taxe:', error);
+      }
+    };
+
+    loadTaxSettings();
+  }, []);
 
   // Rest of the payment handling code...
   const handlePayment = async (method: 'cash' | 'card') => {
     if (processing) return;
-    
+
     setProcessing(true);
-    
+
     try {
       // Get the latest table data
       const table = await getTable(tableIdNum);
-      
+
       if (!table || !table.order) {
         Alert.alert('Error', 'Could not find table information');
         setProcessing(false);
         return;
       }
-      
+
       // Create a bill record
       const bill = {
         id: Date.now(),
@@ -56,22 +72,22 @@ export default function FullPaymentScreen() {
         status: 'paid' as 'paid',
         timestamp: new Date().toISOString(),
       };
-      
+
       // Add to bills history
       await addBill(bill);
-      
+
       // Check if this payment completes the bill
       if (totalAmount >= table.order.total) {
         // Reset the table if payment covers full amount
         await resetTable(tableIdNum);
-        
+
         // Show success message
         Alert.alert(
           'Payment Successful',
           `${table.name} has been paid in full with ${method}.`,
           [
-            { 
-              text: 'OK', 
+            {
+              text: 'OK',
               onPress: () => {
                 if (printReceipt) {
                   router.push({
@@ -101,16 +117,16 @@ export default function FullPaymentScreen() {
             total: remainingAmount
           }
         };
-        
+
         await updateTable(updatedTable);
-        
+
         // Show success message for partial payment
         Alert.alert(
           'Partial Payment Successful',
           `Paid ${method}: ${totalAmount.toFixed(2)} €\nRemaining: ${remainingAmount.toFixed(2)} €`,
           [
-            { 
-              text: 'OK', 
+            {
+              text: 'OK',
               onPress: () => {
                 if (printReceipt) {
                   router.push({
@@ -155,7 +171,13 @@ export default function FullPaymentScreen() {
         <View style={styles.amountCard}>
           <Text style={styles.amountLabel}>Montant total</Text>
           <Text style={styles.amount}>{totalAmount.toFixed(2)} €</Text>
-          
+          {taxSettings.enabled && (
+            <View style={styles.taxDetails}>
+              <Text style={styles.taxLabel}>Détails TVA ({taxSettings.rate.toFixed(2)}%):</Text>
+              <Text style={styles.taxValue}>HT: {subtotal.toFixed(2)} €</Text>
+              <Text style={styles.taxValue}>TVA: {tax.toFixed(2)} €</Text>
+            </View>
+          )}
           <View style={styles.printOption}>
             <Text style={styles.printLabel}>Imprimer le ticket</Text>
             <Switch
@@ -267,5 +289,20 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 20,
     fontWeight: '600',
+  },
+  taxDetails: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  taxLabel: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 4,
+  },
+  taxValue: {
+    fontSize: 13,
+    color: '#666',
   },
 });

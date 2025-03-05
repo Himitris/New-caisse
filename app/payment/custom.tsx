@@ -1,10 +1,10 @@
-// app/payment/custom.tsx - Fonctionnalité de partage personnalisé
+// app/payment/custom.tsx - Fonctionnalité de partage personnalisé avec gestion des taxes
 
 import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert } from 'react-native';
 import { useState, useEffect } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { ArrowLeft, CreditCard, Wallet, Save, CheckCircle } from 'lucide-react-native';
-import { getTable, updateTable, addBill, resetTable } from '../../utils/storage';
+import { getTable, updateTable, addBill, resetTable, TaxManager } from '../../utils/storage';
 
 export default function CustomSplitScreen() {
   const { tableId, total, items } = useLocalSearchParams();
@@ -16,6 +16,7 @@ export default function CustomSplitScreen() {
   // Ajouter un état pour le nom et la section de la table
   const [tableName, setTableName] = useState("");
   const [tableSection, setTableSection] = useState("");
+  const [taxSettings, setTaxSettings] = useState({ enabled: false, rate: 0 });
 
   // Récupérer les détails de la table au chargement
   useEffect(() => {
@@ -29,6 +30,23 @@ export default function CustomSplitScreen() {
 
     fetchTableDetails();
   }, [tableIdNum]);
+
+  // Charger les paramètres de taxe
+  useEffect(() => {
+    const loadTaxSettings = async () => {
+      try {
+        const settings = await TaxManager.getTaxSettings();
+        setTaxSettings(settings);
+      } catch (error) {
+        console.error('Erreur lors du chargement des paramètres de taxe:', error);
+      }
+    };
+    
+    loadTaxSettings();
+  }, []);
+
+  // Calculer les montants HT et TVA
+  const { subtotal: totalSubtotal, tax: totalTax } = TaxManager.calculateTax(totalAmount, taxSettings);
 
   // État pour les montants de partage personnalisés
   const [splitAmounts, setSplitAmounts] = useState<string[]>(['']);
@@ -164,6 +182,11 @@ export default function CustomSplitScreen() {
           continue;
         }
 
+        // Calculer la portion de HT et TVA pour ce montant
+        const ratio = amount / totalAmount;
+        const splitSubtotal = totalSubtotal * ratio;
+        const splitTax = totalTax * ratio;
+
         // Créer un enregistrement de facture
         const bill = {
           id: Date.now() + i,
@@ -174,7 +197,10 @@ export default function CustomSplitScreen() {
           items: orderItems.length,
           status: 'split' as 'split',
           timestamp: new Date().toISOString(),
-          paymentMethod: method
+          paymentMethod: method,
+          taxSettings: taxSettings.enabled ? taxSettings : undefined,
+          subtotal: splitSubtotal,
+          tax: splitTax
         };
 
         // Ajouter à l'historique des factures
@@ -218,6 +244,20 @@ export default function CustomSplitScreen() {
     }
   };
 
+  // Calculer le montant HT et la TVA pour un montant donné
+  const calculateTaxForAmount = (amount: string) => {
+    const parsedAmount = parseFloat(amount || '0');
+    if (isNaN(parsedAmount) || parsedAmount === 0) {
+      return { subtotal: 0, tax: 0 };
+    }
+    
+    const ratio = parsedAmount / totalAmount;
+    return {
+      subtotal: totalSubtotal * ratio,
+      tax: totalTax * ratio
+    };
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -237,6 +277,13 @@ export default function CustomSplitScreen() {
           <Text style={styles.totalLabel}>Montant total de la facture</Text>
           <Text style={styles.totalAmount}>{totalAmount.toFixed(2)} €</Text>
 
+          {taxSettings.enabled && (
+            <View style={styles.taxDetails}>
+              <Text style={styles.taxDetailText}>TVA ({taxSettings.rate.toFixed(2)}%): {totalTax.toFixed(2)} €</Text>
+              <Text style={styles.taxDetailText}>Sous-total HT: {totalSubtotal.toFixed(2)} €</Text>
+            </View>
+          )}
+
           {errorMessage && (
             <Text style={[
               styles.errorMessage,
@@ -253,59 +300,72 @@ export default function CustomSplitScreen() {
         </View>
 
         <ScrollView style={styles.splitAmountsList}>
-          {splitAmounts.map((amount, index) => (
-            <View key={index} style={styles.splitRow}>
-              <View style={styles.splitInputContainer}>
-                <Text style={styles.splitLabel}>Partage {index + 1}</Text>
-                <View style={styles.amountInputContainer}>
-                  <Text style={styles.currencySymbol}>€</Text>
-                  <TextInput
-                    style={styles.amountInput}
-                    keyboardType="decimal-pad"
-                    value={amount}
-                    onChangeText={(value) => updateSplitAmount(index, value)}
-                    placeholder="0.00"
-                  />
+          {splitAmounts.map((amount, index) => {
+            // Calculer les montants HT et TVA pour ce montant spécifique
+            const { subtotal, tax } = calculateTaxForAmount(amount);
+            
+            return (
+              <View key={index} style={styles.splitRow}>
+                <View style={styles.splitInputContainer}>
+                  <Text style={styles.splitLabel}>Partage {index + 1}</Text>
+                  <View style={styles.amountInputContainer}>
+                    <Text style={styles.currencySymbol}>€</Text>
+                    <TextInput
+                      style={styles.amountInput}
+                      keyboardType="decimal-pad"
+                      value={amount}
+                      onChangeText={(value) => updateSplitAmount(index, value)}
+                      placeholder="0.00"
+                    />
+                  </View>
+                  
+                  {taxSettings.enabled && parseFloat(amount) > 0 && (
+                    <View style={styles.splitTaxInfo}>
+                      <Text style={styles.splitTaxText}>
+                        HT: {subtotal.toFixed(2)} € • TVA: {tax.toFixed(2)} €
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                <View style={styles.paymentMethodsRow}>
+                  <Pressable
+                    style={[
+                      styles.methodButton,
+                      paymentMethods[index] === 'card' ? styles.selectedMethodButton : null
+                    ]}
+                    onPress={() => setPaymentMethod(index, 'card')}>
+                    <CreditCard size={20} color={paymentMethods[index] === 'card' ? 'white' : '#333'} />
+                    <Text style={[
+                      styles.methodText,
+                      paymentMethods[index] === 'card' ? styles.selectedMethodText : null
+                    ]}>Carte</Text>
+                  </Pressable>
+
+                  <Pressable
+                    style={[
+                      styles.methodButton,
+                      paymentMethods[index] === 'cash' ? styles.selectedMethodButton : null
+                    ]}
+                    onPress={() => setPaymentMethod(index, 'cash')}>
+                    <Wallet size={20} color={paymentMethods[index] === 'cash' ? 'white' : '#333'} />
+                    <Text style={[
+                      styles.methodText,
+                      paymentMethods[index] === 'cash' ? styles.selectedMethodText : null
+                    ]}>Espèces</Text>
+                  </Pressable>
+
+                  {splitAmounts.length > 1 && (
+                    <Pressable
+                      style={styles.removeButton}
+                      onPress={() => removeSplitAmount(index)}>
+                      <Text style={styles.removeButtonText}>Supprimer</Text>
+                    </Pressable>
+                  )}
                 </View>
               </View>
-
-              <View style={styles.paymentMethodsRow}>
-                <Pressable
-                  style={[
-                    styles.methodButton,
-                    paymentMethods[index] === 'card' && styles.selectedMethodButton
-                  ]}
-                  onPress={() => setPaymentMethod(index, 'card')}>
-                  <CreditCard size={20} color={paymentMethods[index] === 'card' ? 'white' : '#333'} />
-                  <Text style={[
-                    styles.methodText,
-                    paymentMethods[index] === 'card' && styles.selectedMethodText
-                  ]}>Carte</Text>
-                </Pressable>
-
-                <Pressable
-                  style={[
-                    styles.methodButton,
-                    paymentMethods[index] === 'cash' && styles.selectedMethodButton
-                  ]}
-                  onPress={() => setPaymentMethod(index, 'cash')}>
-                  <Wallet size={20} color={paymentMethods[index] === 'cash' ? 'white' : '#333'} />
-                  <Text style={[
-                    styles.methodText,
-                    paymentMethods[index] === 'cash' && styles.selectedMethodText
-                  ]}>Espèces</Text>
-                </Pressable>
-
-                {splitAmounts.length > 1 && (
-                  <Pressable
-                    style={styles.removeButton}
-                    onPress={() => removeSplitAmount(index)}>
-                    <Text style={styles.removeButtonText}>Supprimer</Text>
-                  </Pressable>
-                )}
-              </View>
-            </View>
-          ))}
+            );
+          })}
 
           <View style={styles.actionsContainer}>
             <Pressable style={styles.addButton} onPress={addSplitAmount}>
@@ -323,7 +383,7 @@ export default function CustomSplitScreen() {
           <Pressable
             style={[
               styles.processButton,
-              (currentTotal === 0 || errorMessage.includes('dépasse')) && styles.disabledButton
+              (currentTotal === 0 || errorMessage.includes('dépasse')) ? styles.disabledButton : null
             ]}
             onPress={processPayments}
             disabled={currentTotal === 0 || errorMessage.includes('dépasse')}>
@@ -394,7 +454,17 @@ const styles = StyleSheet.create({
     fontSize: 32,
     fontWeight: 'bold',
     color: '#4CAF50',
+    marginBottom: 8,
+  },
+  taxDetails: {
     marginBottom: 16,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  taxDetailText: {
+    fontSize: 14,
+    color: '#666',
   },
   errorMessage: {
     fontSize: 16,
@@ -468,6 +538,16 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 18,
     height: 50,
+  },
+  splitTaxInfo: {
+    marginTop: 8,
+    padding: 8,
+    backgroundColor: '#f9f9f9',
+    borderRadius: 4,
+  },
+  splitTaxText: {
+    fontSize: 12,
+    color: '#666',
   },
   paymentMethodsRow: {
     flexDirection: 'row',

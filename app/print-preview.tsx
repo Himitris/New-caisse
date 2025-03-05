@@ -1,19 +1,21 @@
 // app/print-preview.tsx - Mis à jour pour afficher le nom de la table
 
 import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Printer, Share, Home } from 'lucide-react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { TaxManager } from '../utils/storage';
 
 export default function PrintPreviewScreen() {
   const { tableId, total, items, paymentMethod, isPartial, remaining, tableName, isPreview } = useLocalSearchParams();
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-
+  const [taxSettings, setTaxSettings] = useState({ enabled: false, rate: 0 });
   const tableIdNum = parseInt(tableId as string, 10);
   const totalAmount = parseFloat(total as string);
+  const { subtotal, tax, total: calculatedTotal } = TaxManager.calculateTax(totalAmount, taxSettings);
   const orderItems = items ? JSON.parse(items as string) : [];
   const isPartialPayment = isPartial === 'true';
   const remainingAmount = remaining ? parseFloat(remaining as string) : 0;
@@ -25,33 +27,45 @@ export default function PrintPreviewScreen() {
     address: 'Route de la Corniche, 82140 Saint Antonin Noble Val',
     siret: 'Siret N° 803 520 998 00011',
     phone: 'Tel : 0563682585',
-    taxInfo: 'TVA non applicable - art.293B du CGI',
+    taxInfo: taxSettings.enabled ? `TVA ${taxSettings.rate.toFixed(2)}%` : 'TVA non applicable - art.293B du CGI',
     owner: 'Virginie',
   };
+
+  useEffect(() => {
+    const loadTaxSettings = async () => {
+      try {
+        const settings = await TaxManager.getTaxSettings();
+        setTaxSettings(settings);
+      } catch (error) {
+        console.error('Erreur lors du chargement des paramètres de taxe:', error);
+      }
+    };
+
+    loadTaxSettings();
+  }, []);
 
   const order = {
     tableNumber: tableIdNum,
     tableName: displayName,
     guests: 4,
     items: orderItems,
-    subtotal: totalAmount * 0.9, // Supposons une taxe de 10% pour la démo
-    tax: totalAmount * 0.1,
+    subtotal: subtotal,
+    tax: tax,
     total: totalAmount,
     remaining: remainingAmount,
     isPartial: isPartialPayment,
     paymentMethod: paymentMethod || 'Carte',
     timestamp: new Date().toLocaleString('fr-FR', {
-      weekday: 'long', // Jour de la semaine (ex: lundi)
-      day: '2-digit', // Jour (ex: 05)
-      month: 'long', // Mois en lettres (ex: mars)
-      year: 'numeric', // Année (ex: 2025)
-      hour: '2-digit', // Heure
-      minute: '2-digit', // Minutes
-      second: '2-digit', // Secondes
-      hour12: false, // Format 24h
-      timeZone: 'Europe/Paris' // Fuseau horaire français
+      weekday: 'long',
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+      timeZone: 'Europe/Paris'
     }),
-    
   };
 
   const generateHTML = () => {
@@ -75,6 +89,11 @@ export default function PrintPreviewScreen() {
       `;
     }).join('');
 
+    // Information sur la TVA à afficher dans l'en-tête
+    const taxInfo = taxSettings.enabled
+      ? `TVA ${taxSettings.rate.toFixed(2)}%`
+      : 'TVA non applicable - art.293B du CGI';
+
     return `
       <html>
         <head>
@@ -95,14 +114,15 @@ export default function PrintPreviewScreen() {
             <h1>${restaurantInfo.name}</h1>
             <p>${restaurantInfo.address}</p>
             <p>${restaurantInfo.siret}</p>
+            <p>${taxInfo}</p>
           </div>
-
+  
           <div class="info">
             <p><strong>${order.tableName}</strong></p>
             <p>Date: ${order.timestamp}</p>
             ${order.isPartial ? `<p class="partial">PAIEMENT PARTIEL</p>` : ''}
           </div>
-
+  
           <table class="items">
             <tr>
               <th>Description</th>
@@ -112,22 +132,26 @@ export default function PrintPreviewScreen() {
             </tr>
             ${itemsHTML}
           </table>
-
+  
           <div class="totals">
-            <p>Sous-total: ${order.subtotal.toFixed(2)} €</p>
-            <p>Taxe: ${order.tax.toFixed(2)} €</p>
-            <h2>Total à payer: ${order.total.toFixed(2)} €</h2>
+            ${taxSettings.enabled ? `
+              <p>Sous-total HT: ${order.subtotal.toFixed(2)} €</p>
+              <p>TVA (${taxSettings.rate.toFixed(2)}%): ${order.tax.toFixed(2)} €</p>
+              <h2>Total TTC: ${order.total.toFixed(2)} €</h2>
+            ` : `
+              <h2>Total: ${order.total.toFixed(2)} €</h2>
+            `}
             ${order.isPartial ? `<p class="partial">Solde restant: ${order.remaining.toFixed(2)} €</p>` : ''}
           </div>
-
+  
           <div class="payment-info">
             <p>Méthode de paiement: ${order.paymentMethod === 'card' ? 'Carte bancaire' : 'Espèces'}</p>
             <p>Montant payé: ${order.total.toFixed(2)} €</p>
             <p>Statut: ${order.isPartial ? 'Paiement partiel' : 'Payé en totalité'}</p>
           </div>
-
+  
           <div class="footer">
-            <p>${restaurantInfo.taxInfo}</p>
+            <p>${taxInfo}</p>
             <p>Merci de votre visite !</p>
             <p>À bientôt,<br>${restaurantInfo.owner}<br>${restaurantInfo.phone}</p>
           </div>
@@ -215,18 +239,27 @@ export default function PrintPreviewScreen() {
         </View>
 
         <View style={styles.totals}>
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Sous-total</Text>
-            <Text style={styles.totalValue}>{order.subtotal.toFixed(2)} €</Text>
-          </View>
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Taxe</Text>
-            <Text style={styles.totalValue}>{order.tax.toFixed(2)} €</Text>
-          </View>
-          <View style={[styles.totalRow, styles.finalTotal]}>
-            <Text style={styles.totalLabel}>Total</Text>
-            <Text style={styles.totalValue}>{order.total.toFixed(2)} €</Text>
-          </View>
+          {taxSettings.enabled ? (
+            <>
+              <View style={styles.totalRow}>
+                <Text style={styles.totalLabel}>Sous-total HT</Text>
+                <Text style={styles.totalValue}>{order.subtotal.toFixed(2)} €</Text>
+              </View>
+              <View style={styles.totalRow}>
+                <Text style={styles.totalLabel}>TVA ({taxSettings.rate.toFixed(2)}%)</Text>
+                <Text style={styles.totalValue}>{order.tax.toFixed(2)} €</Text>
+              </View>
+              <View style={[styles.totalRow, styles.finalTotal]}>
+                <Text style={styles.totalLabel}>Total TTC</Text>
+                <Text style={styles.totalValue}>{order.total.toFixed(2)} €</Text>
+              </View>
+            </>
+          ) : (
+            <View style={[styles.totalRow, styles.finalTotal]}>
+              <Text style={styles.totalLabel}>Total</Text>
+              <Text style={styles.totalValue}>{order.total.toFixed(2)} €</Text>
+            </View>
+          )}
 
           {isPartialPayment && (
             <View style={[styles.totalRow, styles.remainingRow]}>
