@@ -634,7 +634,7 @@ export default function MenuScreen() {
                 ]}>
                   <View style={styles.itemInfo}>
                     <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
-                    <Text style={styles.itemPrice}>${item.price.toFixed(2)}</Text>
+                    <Text style={styles.itemPrice}>{item.price.toFixed(2)} €</Text>
                   </View>
                   <View style={styles.itemActions}>
                     <Pressable

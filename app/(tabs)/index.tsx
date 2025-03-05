@@ -66,7 +66,7 @@ export default function TablesScreen() {
       loadedTables
         .filter(t => t.order && t.order.items.length > 0)
         .forEach(t => {
-          console.log(`Table ${t.id} (${t.name}): ${t.order?.items.length || 0} items, total: ${t.order?.total.toFixed(2) || 0}€`);
+          console.log(`Table ${t.id} (${t.name}): ${t.order?.items.length || 0} items, total: ${t.order?.total.toFixed(2) || 0} €`);
         });
       
       setTables(loadedTables);

@@ -1,9 +1,9 @@
-// app/payment/split.tsx - Updated split payment screen
+// app/payment/split.tsx - Écran de paiement partagé mis à jour
 
 import { View, Text, StyleSheet, ScrollView, Pressable, Alert } from 'react-native';
 import { useState, useEffect } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { DollarSign, CreditCard, Wallet, Home } from 'lucide-react-native';
+import { CreditCard, Wallet, Home } from 'lucide-react-native';
 import { getTable, updateTable, addBill, resetTable } from '../../utils/storage';
 
 export default function SplitBillScreen() {
@@ -15,11 +15,11 @@ export default function SplitBillScreen() {
   const orderItems = items ? JSON.parse(items as string) : [];
   const [tableName, setTableName] = useState("");
   const [tableSection, setTableSection] = useState("");
-  
-  // Split amount per guest (equal split)
+
+  // Montant partagé par invité (partage égal)
   const splitAmount = totalAmount / guestCount;
 
-  // Fetch table details on load
+  // Récupérer les détails de la table au chargement
   useEffect(() => {
     const fetchTableDetails = async () => {
       const table = await getTable(tableIdNum);
@@ -28,7 +28,7 @@ export default function SplitBillScreen() {
         setTableSection(table.section);
       }
     };
-    
+
     fetchTableDetails();
   }, [tableIdNum]);
 
@@ -45,32 +45,32 @@ export default function SplitBillScreen() {
     }))
   );
 
-  // Track remaining total
+  // Suivre le total restant
   const [remainingTotal, setRemainingTotal] = useState(totalAmount);
-  
-  // Update remaining total when payments change
+
+  // Mettre à jour le total restant lorsque les paiements changent
   useEffect(() => {
     const paidTotal = payments.reduce((sum, payment) => (
       payment.paid ? sum + payment.amount : sum
     ), 0);
-    
+
     setRemainingTotal(totalAmount - paidTotal);
   }, [payments, totalAmount]);
 
   const handlePayment = async (id: number, method: 'cash' | 'card') => {
     try {
-      // Find the payment
+      // Trouver le paiement
       const payment = payments.find(p => p.id === id);
       if (!payment) return;
-      
-      // Mark as paid with method
+
+      // Marquer comme payé avec la méthode
       setPayments(prev =>
         prev.map(payment =>
           payment.id === id ? { ...payment, paid: true, method } : payment
         )
       );
-      
-      // Create a bill record for this portion
+
+      // Créer un enregistrement de facture pour cette partie
       const bill = {
         id: Date.now(),
         tableNumber: tableIdNum,
@@ -81,26 +81,26 @@ export default function SplitBillScreen() {
         status: 'split' as 'split',
         timestamp: new Date().toISOString(),
       };
-      
-      // Add to bills history
+
+      // Ajouter à l'historique des factures
       await addBill(bill);
-      
-      // Get current table data to check if table should be reset
+
+      // Obtenir les données actuelles de la table pour vérifier si la table doit être réinitialisée
       const table = await getTable(tableIdNum);
-      
+
       if (!table || !table.order) {
-        console.error('Table not found');
+        console.error('Table non trouvée');
         return;
       }
-      
-      // Update the remaining total on the table's order
+
+      // Mettre à jour le total restant sur la commande de la table
       const newRemainingTotal = table.order.total - payment.amount;
-      
+
       if (newRemainingTotal <= 0.01) {
-        // If this was the last payment, reset the table
+        // Si c'était le dernier paiement, réinitialiser la table
         await resetTable(tableIdNum);
       } else {
-        // Otherwise, update the remaining total
+        // Sinon, mettre à jour le total restant
         const updatedTable = {
           ...table,
           order: {
@@ -111,8 +111,8 @@ export default function SplitBillScreen() {
         await updateTable(updatedTable);
       }
     } catch (error) {
-      console.error('Payment processing error:', error);
-      Alert.alert('Payment Error', 'Failed to process payment');
+      console.error('Erreur de traitement du paiement:', error);
+      Alert.alert('Erreur de Paiement', 'Échec du traitement du paiement');
     }
   };
 
@@ -121,17 +121,17 @@ export default function SplitBillScreen() {
   const handleComplete = () => {
     if (allPaid) {
       Alert.alert(
-        'Payment Complete',
-        'All payments processed successfully.',
-        [{ text: 'Return Home', onPress: () => router.push('/') }]
+        'Paiement Complet',
+        'Tous les paiements ont été traités avec succès.',
+        [{ text: 'Retour à l\'Accueil', onPress: () => router.push('/') }]
       );
     } else if (remainingTotal > 0) {
       Alert.alert(
-        'Incomplete Payment',
-        `There is still $${remainingTotal.toFixed(2)} remaining unpaid. Do you want to return to the table?`,
+        'Paiement Incomplet',
+        `Il reste encore ${remainingTotal.toFixed(2)} € impayé. Voulez-vous retourner à la table ?`,
         [
-          { text: 'Continue Payments', style: 'cancel' },
-          { text: 'Return to Table', onPress: () => router.push(`/table/${tableId}`) }
+          { text: 'Continuer les Paiements', style: 'cancel' },
+          { text: 'Retour à la Table', onPress: () => router.push(`/table/${tableId}`) }
         ]
       );
     }
@@ -140,12 +140,12 @@ export default function SplitBillScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Split Bill - {tableName || `Table ${tableId}`}</Text>
+        <Text style={styles.title}>Partage de l'Addition - {tableName || `Table ${tableId}`}</Text>
         <View style={styles.sectionBadge}>
           <Text style={styles.sectionText}>{tableSection}</Text>
         </View>
         <Text style={styles.subtitle}>
-          Total: ${totalAmount.toFixed(2)} • {guestCount} Guests
+          Total : {totalAmount.toFixed(2)} € • {guestCount} Invités
         </Text>
       </View>
 
@@ -153,8 +153,8 @@ export default function SplitBillScreen() {
         {payments.map(payment => (
           <View key={payment.id} style={styles.paymentCard}>
             <View style={styles.paymentHeader}>
-              <Text style={styles.guestTitle}>Guest {payment.id}</Text>
-              <Text style={styles.amount}>${payment.amount.toFixed(2)}</Text>
+              <Text style={styles.guestTitle}>Invité {payment.id}</Text>
+              <Text style={styles.amount}>{payment.amount.toFixed(2)} €</Text>
             </View>
             {!payment.paid ? (
               <View style={styles.paymentActions}>
@@ -162,19 +162,19 @@ export default function SplitBillScreen() {
                   style={[styles.paymentButton, { backgroundColor: '#4CAF50' }]}
                   onPress={() => handlePayment(payment.id, 'card')}>
                   <CreditCard size={24} color="white" />
-                  <Text style={styles.buttonText}>Pay with Card</Text>
+                  <Text style={styles.buttonText}>Paiement par carte</Text>
                 </Pressable>
                 <Pressable
                   style={[styles.paymentButton, { backgroundColor: '#2196F3' }]}
                   onPress={() => handlePayment(payment.id, 'cash')}>
                   <Wallet size={24} color="white" />
-                  <Text style={styles.buttonText}>Pay with Cash</Text>
+                  <Text style={styles.buttonText}>Paiement en espèces</Text>
                 </Pressable>
               </View>
             ) : (
               <View style={styles.paidStatus}>
                 <Text style={styles.paidText}>
-                  Paid with {payment.method === 'card' ? 'Card' : 'Cash'}
+                  Payé avec {payment.method === 'card' ? 'Carte' : 'Espèces'}
                 </Text>
               </View>
             )}
@@ -184,12 +184,12 @@ export default function SplitBillScreen() {
 
       <View style={styles.footer}>
         <View style={styles.totalSection}>
-          <Text style={styles.remainingLabel}>Remaining</Text>
+          <Text style={styles.remainingLabel}>Restant</Text>
           <Text style={[
             styles.remainingAmount,
             remainingTotal <= 0 ? styles.paidAmount : {}
           ]}>
-            ${remainingTotal.toFixed(2)}
+            {remainingTotal.toFixed(2)} €
           </Text>
         </View>
         <Pressable
@@ -197,7 +197,7 @@ export default function SplitBillScreen() {
           onPress={handleComplete}>
           <Home size={20} color="white" />
           <Text style={styles.completeButtonText}>
-            {allPaid ? 'Return Home' : 'Finish & Return to Table'}
+            {allPaid ? 'Retour à l\'Accueil' : 'Terminer & Retour à la Table'}
           </Text>
         </Pressable>
       </View>

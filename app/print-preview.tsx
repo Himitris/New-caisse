@@ -1,4 +1,4 @@
-// app/print-preview.tsx - Updated to display table name
+// app/print-preview.tsx - Mis à jour pour afficher le nom de la table
 
 import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { useState, useEffect } from 'react';
@@ -11,14 +11,14 @@ export default function PrintPreviewScreen() {
   const { tableId, total, items, paymentMethod, isPartial, remaining, tableName } = useLocalSearchParams();
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  
+
   const tableIdNum = parseInt(tableId as string, 10);
   const totalAmount = parseFloat(total as string);
   const orderItems = items ? JSON.parse(items as string) : [];
   const isPartialPayment = isPartial === 'true';
   const remainingAmount = remaining ? parseFloat(remaining as string) : 0;
   const displayName = tableName || `Table ${tableIdNum}`;
-  
+
   const restaurantInfo = {
     name: 'Manjo Carn',
     address: 'Route de la Corniche, 82140 Saint Antonin Noble Val',
@@ -27,13 +27,13 @@ export default function PrintPreviewScreen() {
     taxInfo: 'TVA non applicable - art.293B du CGI',
     owner: 'Virginie',
   };
-  
+
   const order = {
     tableNumber: tableIdNum,
     tableName: displayName,
     guests: 4,
     items: orderItems,
-    subtotal: totalAmount * 0.9, // Assuming 10% tax for demo
+    subtotal: totalAmount * 0.9, // Supposons une taxe de 10% pour la démo
     tax: totalAmount * 0.1,
     total: totalAmount,
     remaining: remainingAmount,
@@ -41,7 +41,7 @@ export default function PrintPreviewScreen() {
     paymentMethod: paymentMethod || 'Carte',
     timestamp: new Date().toLocaleString(),
   };
-  
+
   const generateHTML = () => {
     let totalPrice = 0;
     interface OrderItem {
@@ -57,12 +57,12 @@ export default function PrintPreviewScreen() {
       <tr>
         <td>${item.name}</td>
         <td>${item.quantity}</td>
-        <td>${item.price.toFixed(2)}€</td>
-        <td>${itemTotal.toFixed(2)}€</td>
+        <td>${item.price.toFixed(2)} €</td>
+        <td>${itemTotal.toFixed(2)} €</td>
       </tr>
       `;
     }).join('');
-  
+
     return `
       <html>
         <head>
@@ -83,13 +83,13 @@ export default function PrintPreviewScreen() {
             <p>${restaurantInfo.address}</p>
             <p>${restaurantInfo.siret}</p>
           </div>
-          
+
           <div class="info">
             <p><strong>${order.tableName}</strong></p>
             <p>Date: ${order.timestamp}</p>
             ${order.isPartial ? `<p class="partial">PAIEMENT PARTIEL</p>` : ''}
           </div>
-  
+
           <table class="items">
             <tr>
               <th>Description</th>
@@ -99,20 +99,20 @@ export default function PrintPreviewScreen() {
             </tr>
             ${itemsHTML}
           </table>
-  
+
           <div class="totals">
-            <p>Sous-total: ${order.subtotal.toFixed(2)}€</p>
-            <p>Taxe: ${order.tax.toFixed(2)}€</p>
-            <h2>Total à payer: ${order.total.toFixed(2)}€</h2>
-            ${order.isPartial ? `<p class="partial">Solde restant: ${order.remaining.toFixed(2)}€</p>` : ''}
+            <p>Sous-total: ${order.subtotal.toFixed(2)} €</p>
+            <p>Taxe: ${order.tax.toFixed(2)} €</p>
+            <h2>Total à payer: ${order.total.toFixed(2)} €</h2>
+            ${order.isPartial ? `<p class="partial">Solde restant: ${order.remaining.toFixed(2)} €</p>` : ''}
           </div>
-  
+
           <div class="payment-info">
             <p>Méthode de paiement: ${order.paymentMethod === 'card' ? 'Carte bancaire' : 'Espèces'}</p>
-            <p>Montant payé: ${order.total.toFixed(2)}€</p>
+            <p>Montant payé: ${order.total.toFixed(2)} €</p>
             <p>Statut: ${order.isPartial ? 'Paiement partiel' : 'Payé en totalité'}</p>
           </div>
-  
+
           <div class="footer">
             <p>${restaurantInfo.taxInfo}</p>
             <p>Merci de votre visite !</p>
@@ -122,7 +122,6 @@ export default function PrintPreviewScreen() {
       </html>
     `;
   };
-  
 
   const handlePrint = async () => {
     try {
@@ -132,7 +131,7 @@ export default function PrintPreviewScreen() {
       });
       setLoading(false);
     } catch (error) {
-      console.error('Failed to print:', error);
+      console.error('Échec de l\'impression:', error);
       setLoading(false);
     }
   };
@@ -146,7 +145,7 @@ export default function PrintPreviewScreen() {
       await Sharing.shareAsync(uri);
       setLoading(false);
     } catch (error) {
-      console.error('Failed to share:', error);
+      console.error('Échec du partage:', error);
       setLoading(false);
     }
   };
@@ -162,9 +161,9 @@ export default function PrintPreviewScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Receipt - {displayName}</Text>
+        <Text style={styles.title}>Reçu - {displayName}</Text>
         {isPartialPayment && (
-          <Text style={styles.partialBadge}>Partial Payment</Text>
+          <Text style={styles.partialBadge}>Paiement partiel</Text>
         )}
       </View>
 
@@ -188,7 +187,7 @@ export default function PrintPreviewScreen() {
                 <Text style={styles.itemQuantity}>x{item.quantity}</Text>
               </View>
               <Text style={styles.itemTotal}>
-                ${(item.quantity * item.price).toFixed(2)}
+                {(item.quantity * item.price).toFixed(2)} €
               </Text>
             </View>
           ))}
@@ -196,36 +195,36 @@ export default function PrintPreviewScreen() {
 
         <View style={styles.totals}>
           <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Subtotal</Text>
-            <Text style={styles.totalValue}>${order.subtotal.toFixed(2)}</Text>
+            <Text style={styles.totalLabel}>Sous-total</Text>
+            <Text style={styles.totalValue}>{order.subtotal.toFixed(2)} €</Text>
           </View>
           <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Tax</Text>
-            <Text style={styles.totalValue}>${order.tax.toFixed(2)}</Text>
+            <Text style={styles.totalLabel}>Taxe</Text>
+            <Text style={styles.totalValue}>{order.tax.toFixed(2)} €</Text>
           </View>
           <View style={[styles.totalRow, styles.finalTotal]}>
             <Text style={styles.totalLabel}>Total</Text>
-            <Text style={styles.totalValue}>${order.total.toFixed(2)}</Text>
+            <Text style={styles.totalValue}>{order.total.toFixed(2)} €</Text>
           </View>
-          
+
           {isPartialPayment && (
             <View style={[styles.totalRow, styles.remainingRow]}>
-              <Text style={styles.remainingLabel}>Remaining Balance</Text>
-              <Text style={styles.remainingValue}>${order.remaining.toFixed(2)}</Text>
+              <Text style={styles.remainingLabel}>Solde restant</Text>
+              <Text style={styles.remainingValue}>{order.remaining.toFixed(2)} €</Text>
             </View>
           )}
         </View>
 
         <View style={styles.paymentInfo}>
           <Text style={styles.paymentMethod}>
-            Payment Method: {order.paymentMethod === 'card' ? 'Credit Card' : 'Cash'}
+            Méthode de paiement: {order.paymentMethod === 'card' ? 'Carte bancaire' : 'Espèces'}
           </Text>
           <Text style={styles.paymentStatus}>
-            Status: {isPartialPayment ? 'Partial Payment' : 'Paid in Full'}
+            Statut: {isPartialPayment ? 'Paiement partiel' : 'Payé en totalité'}
           </Text>
         </View>
 
-        <Text style={styles.thankYou}>Thank you for dining with us!</Text>
+        <Text style={styles.thankYou}>Merci d'avoir mangé avec nous !</Text>
       </ScrollView>
 
       <View style={styles.actions}>
@@ -234,29 +233,29 @@ export default function PrintPreviewScreen() {
           onPress={handlePrint}
           disabled={loading}>
           <Printer size={24} color="white" />
-          <Text style={styles.actionText}>Print</Text>
+          <Text style={styles.actionText}>Imprimer</Text>
         </Pressable>
         <Pressable
           style={[styles.actionButton, { backgroundColor: '#2196F3' }]}
           onPress={handleShare}
           disabled={loading}>
           <Share size={24} color="white" />
-          <Text style={styles.actionText}>Share</Text>
+          <Text style={styles.actionText}>Partager</Text>
         </Pressable>
         <Pressable
           style={[styles.actionButton, { backgroundColor: '#FF9800' }]}
           onPress={handleDone}>
           <Home size={24} color="white" />
-          <Text style={styles.actionText}>Done</Text>
+          <Text style={styles.actionText}>Terminé</Text>
         </Pressable>
       </View>
     </View>
   );
 }
 
-// Styles remain the same
+// Les styles restent les mêmes
 const styles = StyleSheet.create({
-  // Existing styles from improved-print-preview
+  // Styles existants de improved-print-preview
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',

@@ -108,7 +108,7 @@ const ViewReceiptModal: React.FC<ViewReceiptModalProps> = ({
               </View>
               <View style={styles.billRow}>
                 <Text style={styles.billLabel}>Montant:</Text>
-                <Text style={styles.billAmount}>${bill.amount.toFixed(2)}</Text>
+                <Text style={styles.billAmount}>{bill.amount.toFixed(2)} €</Text>
               </View>
               <View style={styles.billRow}>
                 <Text style={styles.billLabel}>Statut:</Text>
@@ -500,7 +500,7 @@ export default function BillsScreen() {
 
           <div class="totals">
             <p>Articles: ${bill.items}</p>
-            <h2>Total: $${bill.amount.toFixed(2)}</h2>
+            <h2>Total: ${bill.amount.toFixed(2)} €</h2>
             <p>Statut: ${bill.status}</p>
             ${bill.paymentMethod ? `<p>Paiement: ${bill.paymentMethod === 'card' ? 'Carte bancaire' : 'Espèces'}</p>` : ''}
           </div>
@@ -643,7 +643,7 @@ export default function BillsScreen() {
                     >
                       <Text style={styles.billItemTable}>{bill.tableName || `Table ${bill.tableNumber}`}</Text>
                       <View style={styles.billItemDetails}>
-                        <Text style={styles.billItemAmount}>${bill.amount.toFixed(2)}</Text>
+                        <Text style={styles.billItemAmount}>{bill.amount.toFixed(2)} €</Text>
                         <Text style={[
                           styles.billItemStatus,
                           { color: getStatusColor(bill.status) }
@@ -692,7 +692,7 @@ export default function BillsScreen() {
                     </View>
                     <View style={styles.detailRow}>
                       <Text style={styles.detailLabel}>Montant:</Text>
-                      <Text style={styles.detailAmount}>${selectedBill.amount.toFixed(2)}</Text>
+                      <Text style={styles.detailAmount}>{selectedBill.amount.toFixed(2)} €</Text>
                     </View>
                     {/* <View style={styles.detailRow}>
                       <Text style={styles.detailLabel}>Articles:</Text>

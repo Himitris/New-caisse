@@ -3,8 +3,8 @@
 import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert, ActivityIndicator } from 'react-native';
 import { useState, useEffect, useMemo } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Users, Plus, Minus, Receipt, Split as Split2, CreditCard, ArrowLeft, Save } from 'lucide-react-native';
-import { getTable, updateTable, OrderItem, Table } from '../../utils/storage';
+import { Users, Plus, Minus, Receipt, Split as Split2, CreditCard, ArrowLeft, Save, X } from 'lucide-react-native';
+import { getTable, updateTable, OrderItem, Table, resetTable } from '../../utils/storage';
 import priceData from '../../helpers/ManjosPrice';
 import { getMenuAvailability, MenuItemAvailability } from '../../utils/storage';
 
@@ -94,6 +94,46 @@ export default function TableScreen() {
       };
     });
   }, []);
+
+  const handleCloseTable = async () => {
+    if (!table) return;
+
+    Alert.alert(
+      'Fermer la table',
+      `Êtes-vous sûr de vouloir fermer la table "${table.name}" ? Toutes les commandes non payées seront perdues.`,
+      [
+        {
+          text: 'Annuler',
+          style: 'cancel'
+        },
+        {
+          text: 'Fermer',
+          style: 'destructive',
+          onPress: async () => {
+            setSaveInProgress(true);
+            try {
+              await resetTable(tableId);
+              Alert.alert(
+                'Table fermée',
+                'La table a été réinitialisée avec succès.',
+                [
+                  {
+                    text: 'OK',
+                    onPress: () => router.back()
+                  }
+                ]
+              );
+            } catch (error) {
+              console.error('Erreur lors de la fermeture de la table:', error);
+              Alert.alert('Erreur', 'Impossible de fermer la table. Veuillez réessayer.');
+            } finally {
+              setSaveInProgress(false);
+            }
+          }
+        }
+      ]
+    );
+  };
 
   // Obtenir toutes les catégories uniques
   const categories = useMemo(() => {
@@ -338,7 +378,7 @@ export default function TableScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.backLink}>
+        <Pressable onPress={() => router.push('/')} style={styles.backLink}>
           <ArrowLeft size={24} color="#333" />
         </Pressable>
         <View style={styles.headerTitleContainer}>
@@ -371,7 +411,7 @@ export default function TableScreen() {
                 <View key={item.id} style={styles.orderItem}>
                   <View style={styles.itemHeader}>
                     <Text style={styles.itemName}>{item.name}</Text>
-                    <Text style={styles.itemPrice}>${(item.price * item.quantity).toFixed(2)}</Text>
+                    <Text style={styles.itemPrice}>{(item.price * item.quantity).toFixed(2)} €</Text>
                   </View>
                   <View style={styles.itemActions}>
                     <View style={styles.quantityControl}>
@@ -396,27 +436,37 @@ export default function TableScreen() {
           </ScrollView>
           <View style={styles.totalSection}>
             <Text style={styles.totalLabel}>Total</Text>
-            <Text style={styles.totalAmount}>${total.toFixed(2)}</Text>
+            <Text style={styles.totalAmount}>{total.toFixed(2)} €</Text>
           </View>
           <View style={styles.paymentActions}>
-            <Pressable
-              style={[styles.paymentButton, { backgroundColor: '#4CAF50' }]}
-              onPress={() => handlePayment('full')}>
-              <CreditCard size={24} color="white" />
-              <Text style={styles.paymentButtonText}>Paiement total</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.paymentButton, { backgroundColor: '#2196F3' }]}
-              onPress={() => handlePayment('split')}>
-              <Split2 size={24} color="white" />
-              <Text style={styles.paymentButtonText}>Partager</Text>
-            </Pressable>
-            <Pressable
-              style={[styles.paymentButton, { backgroundColor: '#FF9800' }]}
-              onPress={() => handlePayment('custom')}>
-              <Receipt size={24} color="white" />
-              <Text style={styles.paymentButtonText}>Partage personnalisé</Text>
-            </Pressable>
+            <View style={ styles.generalButton }>
+              <Pressable
+                style={[styles.paymentButton, { backgroundColor: '#4CAF50' }]}
+                onPress={() => handlePayment('full')}>
+                <CreditCard size={24} color="white" />
+                <Text style={styles.paymentButtonText}>Paiement total</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.paymentButton, { backgroundColor: '#2196F3' }]}
+                onPress={() => handlePayment('split')}>
+                <Split2 size={24} color="white" />
+                <Text style={styles.paymentButtonText}>Partager</Text>
+              </Pressable>
+            </View>
+            <View style={ styles.generalButton }>
+              <Pressable
+                style={[styles.paymentButton, { backgroundColor: '#FF9800' }]}
+                onPress={() => handlePayment('custom')}>
+                <Receipt size={24} color="white" />
+                <Text style={styles.paymentButtonText}>Partage personnalisé</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.paymentButton, { backgroundColor: '#F44336' }]}
+                onPress={handleCloseTable}>
+                <X size={24} color="white" />
+                <Text style={styles.paymentButtonText}>Fermer table</Text>
+              </Pressable>
+            </View>
           </View>
         </View>
 
@@ -538,7 +588,7 @@ export default function TableScreen() {
                         ]}>
                           {item.name}
                         </Text>
-                        <Text style={styles.menuItemPrice}>${item.price.toFixed(2)}</Text>
+                        <Text style={styles.menuItemPrice}>{item.price.toFixed(2)} €</Text>
                       </Pressable>
                     ))}
                   </View>
@@ -681,8 +731,9 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   orderList: {
-    flex: 1,
-    maxHeight: 300,
+    flex: 5,
+    maxHeight: 400,
+    minHeight: 400,
   },
   emptyOrder: {
     textAlign: 'center',
@@ -736,6 +787,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   totalSection: {
+    flex: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -757,6 +809,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     marginTop: 16,
+    flex: 4,
   },
   paymentButton: {
     flex: 1,
@@ -846,5 +899,9 @@ const styles = StyleSheet.create({
   unavailableItemText: {
     textDecorationLine: 'line-through',
     color: '#999',
+  },
+  generalButton: {
+    flex: 1, 
+    gap: 30
   },
 });

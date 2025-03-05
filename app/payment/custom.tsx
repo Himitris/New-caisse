@@ -1,4 +1,4 @@
-// app/payment/custom.tsx - Custom split functionality
+// app/payment/custom.tsx - Fonctionnalité de partage personnalisé
 
 import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert } from 'react-native';
 import { useState, useEffect } from 'react';
@@ -12,12 +12,12 @@ export default function CustomSplitScreen() {
   const tableIdNum = parseInt(tableId as string, 10);
   const totalAmount = parseFloat(total as string);
   const orderItems = items ? JSON.parse(items as string) : [];
-  
-  // Add state for table name and section
+
+  // Ajouter un état pour le nom et la section de la table
   const [tableName, setTableName] = useState("");
   const [tableSection, setTableSection] = useState("");
 
-  // Fetch table details on load
+  // Récupérer les détails de la table au chargement
   useEffect(() => {
     const fetchTableDetails = async () => {
       const table = await getTable(tableIdNum);
@@ -26,114 +26,114 @@ export default function CustomSplitScreen() {
         setTableSection(table.section);
       }
     };
-    
+
     fetchTableDetails();
   }, [tableIdNum]);
-  
-  // State for custom split amounts
+
+  // État pour les montants de partage personnalisés
   const [splitAmounts, setSplitAmounts] = useState<string[]>(['']);
   const [errorMessage, setErrorMessage] = useState('');
-  
-  // Track total of entered amounts
+
+  // Suivre le total des montants saisis
   const [currentTotal, setCurrentTotal] = useState(0);
-  
-  // State for selected payment method for each split
+
+  // État pour la méthode de paiement sélectionnée pour chaque partage
   const [paymentMethods, setPaymentMethods] = useState<('card' | 'cash' | null)[]>([null]);
-  
+
   useEffect(() => {
-    // Calculate the current total of all entered amounts
+    // Calculer le total actuel de tous les montants saisis
     const calculatedTotal = splitAmounts.reduce((sum, amount) => {
       const parsedAmount = parseFloat(amount || '0');
       return sum + (isNaN(parsedAmount) ? 0 : parsedAmount);
     }, 0);
-    
+
     setCurrentTotal(calculatedTotal);
-    
-    // Check if total is valid
+
+    // Vérifier si le total est valide
     if (calculatedTotal > totalAmount) {
-      setErrorMessage('Split total exceeds bill amount');
+      setErrorMessage('Le total des partages dépasse le montant de la facture');
     } else if (calculatedTotal < totalAmount && calculatedTotal > 0) {
-      setErrorMessage(`Remaining: $${(totalAmount - calculatedTotal).toFixed(2)}`);
+      setErrorMessage(`Restant : ${(totalAmount - calculatedTotal).toFixed(2)} €`);
     } else if (calculatedTotal === totalAmount) {
       setErrorMessage('');
     }
   }, [splitAmounts, totalAmount]);
 
-  // Add a new split amount field
+  // Ajouter un nouveau champ de montant de partage
   const addSplitAmount = () => {
     setSplitAmounts([...splitAmounts, '']);
     setPaymentMethods([...paymentMethods, null]);
   };
 
-  // Remove a split amount field
+  // Supprimer un champ de montant de partage
   const removeSplitAmount = (index: number) => {
     const newAmounts = [...splitAmounts];
     newAmounts.splice(index, 1);
     setSplitAmounts(newAmounts);
-    
+
     const newMethods = [...paymentMethods];
     newMethods.splice(index, 1);
     setPaymentMethods(newMethods);
   };
 
-  // Update a split amount value
+  // Mettre à jour la valeur d'un montant de partage
   const updateSplitAmount = (index: number, value: string) => {
     const newAmounts = [...splitAmounts];
-    
-    // Only allow numbers and a single decimal point
+
+    // Autoriser uniquement les chiffres et une seule virgule
     if (value === '' || /^\d*\.?\d*$/.test(value)) {
       newAmounts[index] = value;
       setSplitAmounts(newAmounts);
     }
   };
 
-  // Auto-calculate the remaining amount
+  // Calculer automatiquement le montant restant
   const calculateRemaining = () => {
-    // Calculate sum of all but the last amount
+    // Calculer la somme de tous les montants sauf le dernier
     const sumExceptLast = splitAmounts.slice(0, -1).reduce((sum, amount) => {
       const parsedAmount = parseFloat(amount || '0');
       return sum + (isNaN(parsedAmount) ? 0 : parsedAmount);
     }, 0);
-    
-    // Set the last amount to the remaining total
+
+    // Définir le dernier montant sur le total restant
     const remaining = Math.max(0, totalAmount - sumExceptLast).toFixed(2);
     const newAmounts = [...splitAmounts];
     newAmounts[newAmounts.length - 1] = remaining;
     setSplitAmounts(newAmounts);
   };
 
-  // Set payment method for a specific split
+  // Définir la méthode de paiement pour un partage spécifique
   const setPaymentMethod = (index: number, method: 'card' | 'cash') => {
     const newMethods = [...paymentMethods];
     newMethods[index] = method;
     setPaymentMethods(newMethods);
   };
 
-  // Process payment for all splits
+  // Traiter le paiement pour tous les partages
   const processPayments = async () => {
-    // Validate that all splits have an amount and payment method
+    // Vérifier que tous les partages ont un montant et une méthode de paiement
     const isValid = splitAmounts.every((amount, index) => {
       const parsedAmount = parseFloat(amount || '0');
       return !isNaN(parsedAmount) && parsedAmount > 0 && paymentMethods[index] !== null;
     });
-    
+
     if (!isValid) {
-      Alert.alert('Incomplete Information', 'Please enter an amount and select a payment method for each split.');
+      Alert.alert('Informations incomplètes', 'Veuillez entrer un montant et sélectionner une méthode de paiement pour chaque partage.');
       return;
     }
-    
-    // Check if total matches bill amount
+
+    // Vérifier si le total correspond au montant de la facture
     const calculatedTotal = splitAmounts.reduce((sum, amount) => {
       return sum + parseFloat(amount || '0');
     }, 0);
-    
+
     if (Math.abs(calculatedTotal - totalAmount) > 0.01) {
       Alert.alert(
-        'Amount Mismatch',
-        `The split total ($${calculatedTotal.toFixed(2)}) doesn't match the bill amount ($${totalAmount.toFixed(2)}).`,
+        'Montant incorrect',
+        `Le total des partages (${calculatedTotal.toFixed(2)} €) ne correspond pas au montant de la facture (${totalAmount.toFixed(2)} €).`,
         [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Process Anyway', onPress: () => processPaymentTransactions() }
+          { text: 'Annuler', style: 'cancel' },
+          { text: 'Traiter quand même', onPress: () => processPaymentTransactions() }
         ]
       );
     } else {
@@ -141,30 +141,30 @@ export default function CustomSplitScreen() {
     }
   };
 
-  // Process the actual payment transactions
+  // Traiter les transactions de paiement réelles
   const processPaymentTransactions = async () => {
     try {
-      // Get current table data
+      // Obtenir les données actuelles de la table
       const table = await getTable(tableIdNum);
-      
+
       if (!table || !table.order) {
-        Alert.alert('Error', 'Could not find table information');
+        Alert.alert('Erreur', 'Impossible de trouver les informations de la table');
         return;
       }
-      
+
       let remainingTotal = table.order.total;
       let allPaymentsProcessed = true;
-      
-      // Process each payment
+
+      // Traiter chaque paiement
       for (let i = 0; i < splitAmounts.length; i++) {
         const amount = parseFloat(splitAmounts[i]);
         const method = paymentMethods[i];
-        
+
         if (isNaN(amount) || amount <= 0 || method === null) {
           continue;
         }
-        
-        // Create a bill record
+
+        // Créer un enregistrement de facture
         const bill = {
           id: Date.now() + i,
           tableNumber: tableIdNum,
@@ -176,26 +176,26 @@ export default function CustomSplitScreen() {
           timestamp: new Date().toISOString(),
           paymentMethod: method
         };
-        
-        // Add to bills history
+
+        // Ajouter à l'historique des factures
         await addBill(bill);
-        
-        // Subtract from remaining total
+
+        // Soustraire du total restant
         remainingTotal -= amount;
       }
-      
-      // Check if everything has been paid
+
+      // Vérifier si tout a été payé
       if (remainingTotal <= 0.01) {
-        // Reset the table
+        // Réinitialiser la table
         await resetTable(tableIdNum);
-        
+
         Alert.alert(
-          'Payment Complete',
-          'All splits have been processed successfully.',
+          'Paiement terminé',
+          'Tous les partages ont été traités avec succès.',
           [{ text: 'OK', onPress: () => router.push('/') }]
         );
       } else {
-        // Update the remaining total
+        // Mettre à jour le total restant
         const updatedTable = {
           ...table,
           order: {
@@ -203,18 +203,18 @@ export default function CustomSplitScreen() {
             total: remainingTotal
           }
         };
-        
+
         await updateTable(updatedTable);
-        
+
         Alert.alert(
-          'Partial Payment',
-          `Processed payment(s) successfully. Remaining balance: $${remainingTotal.toFixed(2)}`,
+          'Paiement partiel',
+          `Paiement(s) traité(s) avec succès. Solde restant : ${remainingTotal.toFixed(2)} €`,
           [{ text: 'OK', onPress: () => router.push(`/table/${tableIdNum}`) }]
         );
       }
     } catch (error) {
-      console.error('Payment error:', error);
-      Alert.alert('Payment Error', 'There was an error processing your payments.');
+      console.error('Erreur de paiement :', error);
+      Alert.alert('Erreur de paiement', 'Il y a eu une erreur lors du traitement de vos paiements.');
     }
   };
 
@@ -225,7 +225,7 @@ export default function CustomSplitScreen() {
           <ArrowLeft size={24} color="#333" />
         </Pressable>
         <View>
-          <Text style={styles.title}>Custom Split - {tableName || `Table ${tableId}`}</Text>
+          <Text style={styles.title}>Partage personnalisé - {tableName || `Table ${tableId}`}</Text>
           <View style={styles.sectionBadge}>
             <Text style={styles.sectionText}>{tableSection}</Text>
           </View>
@@ -234,21 +234,21 @@ export default function CustomSplitScreen() {
 
       <View style={styles.content}>
         <View style={styles.totalCard}>
-          <Text style={styles.totalLabel}>Total Bill Amount</Text>
-          <Text style={styles.totalAmount}>${totalAmount.toFixed(2)}</Text>
-          
+          <Text style={styles.totalLabel}>Montant total de la facture</Text>
+          <Text style={styles.totalAmount}>{totalAmount.toFixed(2)} €</Text>
+
           {errorMessage && (
             <Text style={[
-              styles.errorMessage, 
-              errorMessage.includes('Remaining') ? styles.infoMessage : styles.warningMessage
+              styles.errorMessage,
+              errorMessage.includes('Restant') ? styles.infoMessage : styles.warningMessage
             ]}>
               {errorMessage}
             </Text>
           )}
-          
+
           <View style={styles.currentTotalRow}>
-            <Text style={styles.currentTotalLabel}>Current Split Total:</Text>
-            <Text style={styles.currentTotalAmount}>${currentTotal.toFixed(2)}</Text>
+            <Text style={styles.currentTotalLabel}>Total des partages actuels :</Text>
+            <Text style={styles.currentTotalAmount}>{currentTotal.toFixed(2)} €</Text>
           </View>
         </View>
 
@@ -256,9 +256,9 @@ export default function CustomSplitScreen() {
           {splitAmounts.map((amount, index) => (
             <View key={index} style={styles.splitRow}>
               <View style={styles.splitInputContainer}>
-                <Text style={styles.splitLabel}>Split {index + 1}</Text>
+                <Text style={styles.splitLabel}>Partage {index + 1}</Text>
                 <View style={styles.amountInputContainer}>
-                  <Text style={styles.currencySymbol}>$</Text>
+                  <Text style={styles.currencySymbol}>€</Text>
                   <TextInput
                     style={styles.amountInput}
                     keyboardType="decimal-pad"
@@ -268,7 +268,7 @@ export default function CustomSplitScreen() {
                   />
                 </View>
               </View>
-              
+
               <View style={styles.paymentMethodsRow}>
                 <Pressable
                   style={[
@@ -280,9 +280,9 @@ export default function CustomSplitScreen() {
                   <Text style={[
                     styles.methodText,
                     paymentMethods[index] === 'card' && styles.selectedMethodText
-                  ]}>Card</Text>
+                  ]}>Carte</Text>
                 </Pressable>
-                
+
                 <Pressable
                   style={[
                     styles.methodButton,
@@ -293,42 +293,42 @@ export default function CustomSplitScreen() {
                   <Text style={[
                     styles.methodText,
                     paymentMethods[index] === 'cash' && styles.selectedMethodText
-                  ]}>Cash</Text>
+                  ]}>Espèces</Text>
                 </Pressable>
-                
+
                 {splitAmounts.length > 1 && (
                   <Pressable
                     style={styles.removeButton}
                     onPress={() => removeSplitAmount(index)}>
-                    <Text style={styles.removeButtonText}>Remove</Text>
+                    <Text style={styles.removeButtonText}>Supprimer</Text>
                   </Pressable>
                 )}
               </View>
             </View>
           ))}
-          
+
           <View style={styles.actionsContainer}>
             <Pressable style={styles.addButton} onPress={addSplitAmount}>
-              <Text style={styles.addButtonText}>+ Add Another Split</Text>
+              <Text style={styles.addButtonText}>+ Ajouter un autre partage</Text>
             </Pressable>
-            
+
             <Pressable style={styles.calculateButton} onPress={calculateRemaining}>
               <Save size={20} color="white" />
-              <Text style={styles.calculateButtonText}>Auto-Calculate Remaining</Text>
+              <Text style={styles.calculateButtonText}>Calculer automatiquement le reste</Text>
             </Pressable>
           </View>
         </ScrollView>
 
         <View style={styles.footer}>
-          <Pressable 
+          <Pressable
             style={[
               styles.processButton,
-              (currentTotal === 0 || errorMessage.includes('exceeds')) && styles.disabledButton
-            ]} 
+              (currentTotal === 0 || errorMessage.includes('dépasse')) && styles.disabledButton
+            ]}
             onPress={processPayments}
-            disabled={currentTotal === 0 || errorMessage.includes('exceeds')}>
+            disabled={currentTotal === 0 || errorMessage.includes('dépasse')}>
             <CheckCircle size={24} color="white" />
-            <Text style={styles.processButtonText}>Process All Payments</Text>
+            <Text style={styles.processButtonText}>Traiter tous les paiements</Text>
           </Pressable>
         </View>
       </View>

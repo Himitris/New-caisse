@@ -44,7 +44,7 @@ export default function TabLayout() {
         <Tabs.Screen
           name="bills"
           options={{
-            title: 'Bills',
+            title: 'Additions',
             tabBarIcon: ({ size, color }) => (
               <Receipt size={size} color={color} />
             ),
@@ -53,7 +53,7 @@ export default function TabLayout() {
         <Tabs.Screen
           name="settings"
           options={{
-            title: 'Settings',
+            title: 'Paramètres',
             tabBarIcon: ({ size, color }) => (
               <Settings size={size} color={color} />
             ),

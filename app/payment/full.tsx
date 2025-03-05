@@ -107,7 +107,7 @@ export default function FullPaymentScreen() {
         // Show success message for partial payment
         Alert.alert(
           'Partial Payment Successful',
-          `Paid ${method}: $${totalAmount.toFixed(2)}\nRemaining: $${remainingAmount.toFixed(2)}`,
+          `Paid ${method}: ${totalAmount.toFixed(2)} €\nRemaining: ${remainingAmount.toFixed(2)} €`,
           [
             { 
               text: 'OK', 
@@ -153,11 +153,11 @@ export default function FullPaymentScreen() {
       {/* Rest of the UI remains the same */}
       <View style={styles.content}>
         <View style={styles.amountCard}>
-          <Text style={styles.amountLabel}>Total Amount</Text>
-          <Text style={styles.amount}>${totalAmount.toFixed(2)}</Text>
+          <Text style={styles.amountLabel}>Montant total</Text>
+          <Text style={styles.amount}>{totalAmount.toFixed(2)} €</Text>
           
           <View style={styles.printOption}>
-            <Text style={styles.printLabel}>Print Receipt</Text>
+            <Text style={styles.printLabel}>Imprimer le ticket</Text>
             <Switch
               value={printReceipt}
               onValueChange={setPrintReceipt}
@@ -172,7 +172,7 @@ export default function FullPaymentScreen() {
             onPress={() => handlePayment('card')}
             disabled={processing}>
             <CreditCard size={32} color="white" />
-            <Text style={styles.buttonText}>Pay with Card</Text>
+            <Text style={styles.buttonText}>Paiement par carte</Text>
           </Pressable>
 
           <Pressable
@@ -180,7 +180,7 @@ export default function FullPaymentScreen() {
             onPress={() => handlePayment('cash')}
             disabled={processing}>
             <Wallet size={32} color="white" />
-            <Text style={styles.buttonText}>Pay with Cash</Text>
+            <Text style={styles.buttonText}>Paiement en espèces</Text>
           </Pressable>
         </View>
       </View>
