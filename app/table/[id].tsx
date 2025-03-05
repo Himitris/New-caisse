@@ -6,6 +6,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Users, Plus, Minus, Receipt, Split as Split2, CreditCard, ArrowLeft } from 'lucide-react-native';
 import { getTable, updateTable, OrderItem, Table } from '../../utils/storage';
 import priceData from '../../helpers/ManjosPrice';
+import { getMenuAvailability, MenuItemAvailability } from '../../utils/storage';
 
 interface MenuItem {
   id: number;
@@ -45,6 +46,8 @@ export default function TableScreen() {
   const tableId = parseInt(id as string, 10);
   const router = useRouter();
 
+
+  const [unavailableItems, setUnavailableItems] = useState<number[]>([]);
   const [guestCount, setGuestCount] = useState(1);
   const [table, setTable] = useState<Table | null>(null);
   const [loading, setLoading] = useState(true);
@@ -129,6 +132,19 @@ export default function TableScreen() {
     setLoading(false);
   };
 
+  useEffect(() => {
+    // Charger les articles indisponibles
+    const loadUnavailableItems = async () => {
+      const menuAvailability = await getMenuAvailability();
+      const unavailable = menuAvailability
+        .filter(item => !item.available)
+        .map(item => item.id);
+      setUnavailableItems(unavailable);
+    };
+
+    loadUnavailableItems();
+  }, []);
+
   // Fonction pour filtrer les éléments du menu par catégorie
   const getMenuItemsByCategory = (category: string) => {
     return menuItems.filter(item => item.category === category);
@@ -143,6 +159,14 @@ export default function TableScreen() {
   // Fonction pour ajouter un item à la commande
   const addItemToOrder = (item: MenuItem) => {
     if (!table || !table.order) return;
+
+    if (unavailableItems.includes(item.id)) {
+      Alert.alert(
+        "Article indisponible",
+        `${item.name} n'est pas disponible actuellement.`
+      );
+      return;
+    }
 
     const updatedTable = { ...table };
 
@@ -509,10 +533,16 @@ export default function TableScreen() {
                         key={item.id}
                         style={[
                           styles.menuItem,
-                          { borderLeftColor: item.color }
+                          { borderLeftColor: item.color },
+                          unavailableItems.includes(item.id) && styles.unavailableItem // Ajoutez cette ligne
                         ]}
                         onPress={() => addItemToOrder(item)}>
-                        <Text style={styles.menuItemName}>{item.name}</Text>
+                        <Text style={[
+                          styles.menuItemName,
+                          unavailableItems.includes(item.id) && styles.unavailableItemText // Ajoutez cette ligne
+                        ]}>
+                          {item.name}
+                        </Text>
                         <Text style={styles.menuItemPrice}>${item.price.toFixed(2)}</Text>
                       </Pressable>
                     ))}
@@ -761,7 +791,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     minWidth: 80, // Largeur minimale pour éviter l’étirement
     alignSelf: 'flex-start', // Empêche l'expansion verticale
-  },  
+  },
   activeCategoryTab: {
     borderBottomWidth: 2,
   },
@@ -813,5 +843,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#4CAF50',
+  },
+  unavailableItem: {
+    opacity: 0.5,
+    backgroundColor: '#f0f0f0',
+  },
+  unavailableItemText: {
+    textDecorationLine: 'line-through',
+    color: '#999',
   },
 });

@@ -1,12 +1,9 @@
 // app/(tabs)/menu.tsx - Pleinement fonctionnel avec tous les boutons actifs
-
 import { View, Text, StyleSheet, ScrollView, Pressable, Alert, TextInput, Modal } from 'react-native';
 import { useState, useMemo, useEffect } from 'react';
 import { CirclePlus as PlusCircle, CircleMinus as MinusCircle, CreditCard as Edit, X, Save, Plus } from 'lucide-react-native';
 import priceData from '../../helpers/ManjosPrice';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const MENU_STORAGE_KEY = 'restaurant_menu_status';
+import { getMenuAvailability, saveMenuAvailability, MenuItemAvailability } from '../../utils/storage';
 
 interface MenuItem {
   id: number;
@@ -20,7 +17,7 @@ interface MenuItem {
 
 interface EditModalProps {
   visible: boolean;
-  item: MenuItem | null;
+  item?: MenuItem | null;
   onClose: () => void;
   onSave: (item: MenuItem) => void;
 }
@@ -59,14 +56,14 @@ const EditItemModal: React.FC<EditModalProps> = ({ visible, item, onClose, onSav
 
   const handleSave = () => {
     if (!item) return;
-    
+
     const updatedItem = {
       ...item,
       name,
       price: parseFloat(price) || item.price,
       available
     };
-    
+
     onSave(updatedItem);
     onClose();
   };
@@ -88,7 +85,7 @@ const EditItemModal: React.FC<EditModalProps> = ({ visible, item, onClose, onSav
               <X size={24} color="#666" />
             </Pressable>
           </View>
-          
+
           <View style={styles.formGroup}>
             <Text style={styles.label}>Nom:</Text>
             <TextInput
@@ -98,7 +95,7 @@ const EditItemModal: React.FC<EditModalProps> = ({ visible, item, onClose, onSav
               placeholder="Nom de l'article"
             />
           </View>
-          
+
           <View style={styles.formGroup}>
             <Text style={styles.label}>Prix (€):</Text>
             <TextInput
@@ -109,7 +106,7 @@ const EditItemModal: React.FC<EditModalProps> = ({ visible, item, onClose, onSav
               placeholder="0.00"
             />
           </View>
-          
+
           <View style={styles.formGroup}>
             <Text style={styles.label}>Disponibilité:</Text>
             <View style={styles.availabilitySwitch}>
@@ -139,7 +136,167 @@ const EditItemModal: React.FC<EditModalProps> = ({ visible, item, onClose, onSav
               </Pressable>
             </View>
           </View>
-          
+
+          <Pressable style={styles.saveButton} onPress={handleSave}>
+            <Save size={20} color="#fff" />
+            <Text style={styles.saveButtonText}>Enregistrer</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
+const AddItemModal: React.FC<EditModalProps> = ({ visible, onClose, onSave }) => {
+  const [name, setName] = useState('');
+  const [price, setPrice] = useState('');
+  const [available, setAvailable] = useState(true);
+  const [type, setType] = useState<'resto' | 'boisson'>('resto');
+  const [category, setCategory] = useState('Plats Principaux');
+
+  const handleSave = () => {
+    const newItem: MenuItem = {
+      id: Date.now(), // Utilisez un ID unique
+      name,
+      price: parseFloat(price) || 0,
+      category,
+      available,
+      type,
+      color: CATEGORY_COLORS[category] || '#757575'
+    };
+
+    onSave(newItem);
+    onClose();
+  };
+
+  const categories = type === 'resto'
+    ? ['Plats Principaux', 'Plats Maxi', 'Salades', 'Accompagnements', 'Desserts', 'Menu Enfant']
+    : ['Softs', 'Boissons Chaudes', 'Bières', 'Vins', 'Alcools', 'Glaces'];
+
+  return (
+    <Modal
+      visible={visible}
+      transparent={true}
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Ajouter un nouvel article</Text>
+            <Pressable onPress={onClose} style={styles.closeButton}>
+              <X size={24} color="#666" />
+            </Pressable>
+          </View>
+
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Nom:</Text>
+            <TextInput
+              style={styles.input}
+              value={name}
+              onChangeText={setName}
+              placeholder="Nom de l'article"
+            />
+          </View>
+
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Prix (€):</Text>
+            <TextInput
+              style={styles.input}
+              value={price}
+              onChangeText={setPrice}
+              keyboardType="decimal-pad"
+              placeholder="0.00"
+            />
+          </View>
+
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Type:</Text>
+            <View style={styles.typeSwitch}>
+              <Pressable
+                style={[
+                  styles.typeOption,
+                  type === 'resto' && styles.typeSelected
+                ]}
+                onPress={() => {
+                  setType('resto');
+                  setCategory('Plats Principaux');
+                }}
+              >
+                <Text style={[
+                  styles.typeText,
+                  type === 'resto' && styles.typeTextSelected
+                ]}>Plat</Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.typeOption,
+                  type === 'boisson' && styles.typeSelected
+                ]}
+                onPress={() => {
+                  setType('boisson');
+                  setCategory('Softs');
+                }}
+              >
+                <Text style={[
+                  styles.typeText,
+                  type === 'boisson' && styles.typeTextSelected
+                ]}>Boisson</Text>
+              </Pressable>
+            </View>
+          </View>
+
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Catégorie:</Text>
+            <View style={styles.categorySwitch}>
+              {categories.map(cat => (
+                <Pressable
+                  key={cat}
+                  style={[
+                    styles.categoryOption,
+                    category === cat && styles.categorySelected
+                  ]}
+                  onPress={() => setCategory(cat)}
+                >
+                  <Text style={[
+                    styles.categoryText,
+                    category === cat && styles.categoryTextSelected
+                  ]}>{cat}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+
+          <View style={styles.formGroup}>
+            <Text style={styles.label}>Disponibilité:</Text>
+            <View style={styles.availabilitySwitch}>
+              <Pressable
+                style={[
+                  styles.availabilityOption,
+                  available && styles.availabilitySelected
+                ]}
+                onPress={() => setAvailable(true)}
+              >
+                <Text style={[
+                  styles.availabilityText,
+                  available && styles.availabilityTextSelected
+                ]}>Disponible</Text>
+              </Pressable>
+              <Pressable
+                style={[
+                  styles.availabilityOption,
+                  !available && styles.availabilitySelected
+                ]}
+                onPress={() => setAvailable(false)}
+              >
+                <Text style={[
+                  styles.availabilityText,
+                  !available && styles.availabilityTextSelected
+                ]}>Indisponible</Text>
+              </Pressable>
+            </View>
+          </View>
+
           <Pressable style={styles.saveButton} onPress={handleSave}>
             <Save size={20} color="#fff" />
             <Text style={styles.saveButtonText}>Enregistrer</Text>
@@ -158,39 +315,50 @@ export default function MenuScreen() {
   const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
   const [editItem, setEditItem] = useState<MenuItem | null>(null);
   const [editModalVisible, setEditModalVisible] = useState(false);
-  
+  const [addModalVisible, setAddModalVisible] = useState(false);
+
   // Chargement initial des données
   useEffect(() => {
     loadMenuItemsStatus();
   }, []);
-  
+
+  const handleSaveNewItem = (newItem: MenuItem) => {
+    setMenuItems(prev => {
+      const updated = [...prev, newItem];
+
+      // Sauvegarder le changement dans AsyncStorage
+      setTimeout(() => saveMenuItemsStatus(), 100);
+
+      return updated;
+    });
+  };
+
   // Sauvegarde des statuts de disponibilité
   const saveMenuItemsStatus = async () => {
     try {
-      const itemStatus = menuItems.map(item => ({
+      const itemStatus: MenuItemAvailability[] = menuItems.map(item => ({
         id: item.id,
         available: item.available,
         name: item.name,
         price: item.price
       }));
-      
-      await AsyncStorage.setItem(MENU_STORAGE_KEY, JSON.stringify(itemStatus));
+
+      await saveMenuAvailability(itemStatus);
     } catch (error) {
       console.error('Error saving menu items status:', error);
     }
   };
-  
+
   // Chargement des statuts de disponibilité
   const loadMenuItemsStatus = async () => {
     try {
-      const storedStatus = await AsyncStorage.getItem(MENU_STORAGE_KEY);
-      const itemsStatus = storedStatus ? JSON.parse(storedStatus) : [];
-      
+      const itemsStatus = await getMenuAvailability();
+
       // Convertir les données de ManjosPrice en items de menu
       const initialItems = priceData.map(item => {
         // Déterminer la catégorie en fonction du type et du nom
         let category = item.type === 'resto' ? 'Plats Principaux' : 'Softs';
-        
+
         // Pour les plats (resto)
         if (item.type === 'resto') {
           if (item.name.toLowerCase().includes('salade')) {
@@ -219,10 +387,10 @@ export default function MenuScreen() {
             category = 'Alcools';
           }
         }
-        
+
         // Vérifier si on a un statut sauvegardé pour cet item
-        const savedStatus: { id: number; available: boolean; name: string; price: number } | undefined = itemsStatus.find((status: { id: number }) => status.id === item.id);
-        
+        const savedStatus = itemsStatus.find((status) => status.id === item.id);
+
         return {
           id: item.id,
           name: savedStatus?.name || item.name,
@@ -233,7 +401,7 @@ export default function MenuScreen() {
           color: CATEGORY_COLORS[category as keyof typeof CATEGORY_COLORS] || '#757575'
         };
       });
-      
+
       setOriginalItems(initialItems);
       setMenuItems(initialItems);
     } catch (error) {
@@ -242,12 +410,13 @@ export default function MenuScreen() {
       initializeMenuItems();
     }
   };
-  
+
+
   // Initialiser les items de menu si pas de données sauvegardées
   const initializeMenuItems = () => {
     const initialItems = priceData.map(item => {
       let category = item.type === 'resto' ? 'Plats Principaux' : 'Softs';
-      
+
       if (item.type === 'resto') {
         if (item.name.toLowerCase().includes('salade')) {
           category = 'Salades';
@@ -273,7 +442,7 @@ export default function MenuScreen() {
           category = 'Alcools';
         }
       }
-      
+
       return {
         id: item.id,
         name: item.name,
@@ -284,7 +453,7 @@ export default function MenuScreen() {
         color: CATEGORY_COLORS[category] || '#757575'
       };
     });
-    
+
     setOriginalItems(initialItems);
     setMenuItems(initialItems);
   };
@@ -292,68 +461,68 @@ export default function MenuScreen() {
   // Obtenir toutes les catégories uniques
   const categories = useMemo(() => {
     const allCategories = [...new Set(menuItems.map(item => item.category))];
-    
+
     // Filtre par type si nécessaire
     if (activeType) {
-      return allCategories.filter(category => 
+      return allCategories.filter(category =>
         menuItems.some(item => item.category === category && item.type === activeType)
       );
     }
-    
+
     return allCategories.sort();
   }, [menuItems, activeType]);
 
   // Fonction pour marquer un item disponible/indisponible
   const toggleItemAvailability = (itemId: number) => {
     setMenuItems(prev => {
-      const updated = prev.map(item => 
+      const updated = prev.map(item =>
         item.id === itemId ? { ...item, available: !item.available } : item
       );
-      
+
       // Sauvegarder le changement dans AsyncStorage
       setTimeout(() => saveMenuItemsStatus(), 100);
-      
+
       return updated;
     });
   };
-  
+
   // Ouvrir la modal d'édition
   const handleEdit = (item: MenuItem) => {
     setEditItem(item);
     setEditModalVisible(true);
   };
-  
+
   // Sauvegarder les modifications
   const handleSaveEdit = (updatedItem: MenuItem) => {
     setMenuItems(prev => {
-      const updated = prev.map(item => 
+      const updated = prev.map(item =>
         item.id === updatedItem.id ? updatedItem : item
       );
-      
+
       // Sauvegarder le changement dans AsyncStorage
       setTimeout(() => saveMenuItemsStatus(), 100);
-      
+
       return updated;
     });
   };
-  
+
   // Filtrer par catégorie
   const handleCategorySelect = (category: string) => {
     setSelectedCategory(selectedCategory === category ? null : category);
   };
-  
+
   // Obtenir les items à afficher (filtrés par type et catégorie)
   const getFilteredItems = () => {
     let filtered = menuItems;
-    
+
     if (activeType) {
       filtered = filtered.filter(item => item.type === activeType);
     }
-    
+
     if (selectedCategory) {
       filtered = filtered.filter(item => item.category === selectedCategory);
     }
-    
+
     return filtered;
   };
 
@@ -362,7 +531,7 @@ export default function MenuScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>Gestion du Menu</Text>
         <View style={styles.typeFilters}>
-          <Pressable 
+          <Pressable
             style={[
               styles.typeFilterButton,
               activeType === 'resto' && styles.activeTypeButton
@@ -373,7 +542,7 @@ export default function MenuScreen() {
               activeType === 'resto' && styles.activeTypeText
             ]}>Plats</Text>
           </Pressable>
-          <Pressable 
+          <Pressable
             style={[
               styles.typeFilterButton,
               activeType === 'boisson' && styles.activeTypeButton
@@ -385,19 +554,25 @@ export default function MenuScreen() {
             ]}>Boissons</Text>
           </Pressable>
         </View>
-        <Pressable 
+        <Pressable
           style={styles.addButton}
-          onPress={() => Alert.alert("Fonctionnalité", "Ajouter un nouvel article sera disponible dans une future mise à jour.")}
+          onPress={() => setAddModalVisible(true)}
         >
           <PlusCircle size={24} color="#fff" />
           <Text style={styles.addButtonText}>Ajouter un item</Text>
         </Pressable>
       </View>
-      
+
+      {/* Modal d'ajout */}
+      <AddItemModal
+        visible={addModalVisible}
+        onClose={() => setAddModalVisible(false)}
+        onSave={handleSaveNewItem}
+      />
       <View style={styles.content}>
         <View style={styles.categoriesSidebar}>
           <ScrollView>
-            <Pressable 
+            <Pressable
               style={[
                 styles.categoryItem,
                 !selectedCategory && styles.activeCategoryItem
@@ -408,7 +583,7 @@ export default function MenuScreen() {
                 !selectedCategory && styles.activeCategoryItemText
               ]}>Toutes les catégories</Text>
             </Pressable>
-            
+
             {categories.map(category => (
               <Pressable
                 key={category}
@@ -426,7 +601,7 @@ export default function MenuScreen() {
             ))}
           </ScrollView>
         </View>
-        
+
         <View style={styles.menuItemsContainer}>
           <ScrollView>
             <View style={styles.menuItemsGrid}>
@@ -455,7 +630,7 @@ export default function MenuScreen() {
                         {item.available ? 'Indisponible' : 'Disponible'}
                       </Text>
                     </Pressable>
-                    <Pressable 
+                    <Pressable
                       style={[styles.actionButton, { backgroundColor: '#2196F3' }]}
                       onPress={() => handleEdit(item)}
                     >
@@ -469,9 +644,9 @@ export default function MenuScreen() {
           </ScrollView>
         </View>
       </View>
-      
+
       {/* Modal d'édition */}
-      <EditItemModal 
+      <EditItemModal
         visible={editModalVisible}
         item={editItem}
         onClose={() => setEditModalVisible(false)}
@@ -713,5 +888,46 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: '600',
+  },
+  typeSwitch: {
+    flexDirection: 'row',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  typeOption: {
+    flex: 1,
+    padding: 10,
+    alignItems: 'center',
+  },
+  typeSelected: {
+    backgroundColor: '#2196F3',
+  },
+  typeText: {
+    fontWeight: '500',
+  },
+  typeTextSelected: {
+    color: 'white',
+  },
+  categorySwitch: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+  },
+  categoryOption: {
+    padding: 10,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 4,
+  },
+  categorySelected: {
+    backgroundColor: '#2196F3',
+  },
+  categoryText: {
+    fontWeight: '500',
+  },
+  categoryTextSelected: {
+    color: 'white',
   },
 });

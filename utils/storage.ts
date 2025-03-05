@@ -41,10 +41,18 @@ export interface Bill {
   section?: string;
 }
 
+export interface MenuItemAvailability {
+  id: number;
+  available: boolean;
+  name: string; 
+  price: number;
+}
+
 // Clés pour AsyncStorage
 const TABLES_STORAGE_KEY = 'restaurant_tables_v3'; // Nouvelle clé pour éviter les conflits
 const FIRST_LAUNCH_KEY = 'first_launch_v3';
 const BILLS_STORAGE_KEY = 'restaurant_bills';
+const MENU_AVAILABILITY_KEY = 'restaurant_menu_availability';
 
 export const TABLE_SECTIONS = {
   EAU: 'Eau',
@@ -279,6 +287,28 @@ export const resetAllTables = async (): Promise<void> => {
   try {
     await initializeTables();
   } catch (error) {
+    throw error;
+  }
+};
+export const getMenuAvailability = async (): Promise<MenuItemAvailability[]> => {
+  try {
+    const storedStatus = await AsyncStorage.getItem(MENU_AVAILABILITY_KEY);
+    if (storedStatus) {
+      return JSON.parse(storedStatus);
+    }
+    return [];
+  } catch (error) {
+    console.error('Error loading menu availability:', error);
+    return [];
+  }
+};
+
+// Fonction pour sauvegarder les disponibilités des articles
+export const saveMenuAvailability = async (items: MenuItemAvailability[]): Promise<void> => {
+  try {
+    await AsyncStorage.setItem(MENU_AVAILABILITY_KEY, JSON.stringify(items));
+  } catch (error) {
+    console.error('Error saving menu availability:', error);
     throw error;
   }
 };
