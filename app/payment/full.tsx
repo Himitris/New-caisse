@@ -49,12 +49,14 @@ export default function FullPaymentScreen() {
       const bill = {
         id: Date.now(),
         tableNumber: tableIdNum,
-        tableName: table.name,
-        section: table.section,
         amount: totalAmount,
         items: orderItems.length,
         status: 'paid' as 'paid',
         timestamp: new Date().toISOString(),
+        tableName: table.name,
+        section: table.section,
+        paymentMethod: method,
+        paymentType: 'full' as 'full'
       };
       
       // Add to bills history

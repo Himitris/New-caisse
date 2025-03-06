@@ -1,12 +1,19 @@
-// Modification de app/table/[id].tsx pour supprimer les fonctionnalités de TVA
+// app/table/[id].tsx - Code complet avec gestion de l'historique des paiements
 
-import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert, ActivityIndicator } from 'react-native';
-import { useState, useEffect, useMemo } from 'react';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Users, Plus, Minus, Receipt, Split as Split2, CreditCard, ArrowLeft, Save, X, Printer } from 'lucide-react-native';
-import { getTable, updateTable, OrderItem, Table, resetTable, getMenuAvailability, MenuItemAvailability, getCustomMenuItems, CustomMenuItem } from '../../utils/storage';
+import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert, ActivityIndicator, Modal } from 'react-native';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
+import {
+  Users, Plus, Minus, Receipt, Split, CreditCard, ArrowLeft,
+  Save, X, Printer, History, Clock
+} from 'lucide-react-native';
+import {
+  getTable, updateTable, OrderItem, Table, resetTable,
+  getMenuAvailability, MenuItemAvailability, getCustomMenuItems,
+  CustomMenuItem, BillManager, Bill
+} from '../../utils/storage';
+import { events, EVENT_TYPES } from '../../utils/events';
 import priceData from '../../helpers/ManjosPrice';
-// Suppression de l'import TaxManager
 
 interface MenuItem {
   id: number;
@@ -110,14 +117,18 @@ export default function TableScreen() {
   const [saveInProgress, setSaveInProgress] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [customMenuItems, setCustomMenuItems] = useState<CustomMenuItem[]>([]);
-  // Suppression des états liés à la TVA
+
+  // États pour l'historique des paiements
+  const [tableHistory, setTableHistory] = useState<Bill[]>([]);
+  const [historyModalVisible, setHistoryModalVisible] = useState(false);
+  const [refreshingHistory, setRefreshingHistory] = useState(false);
+  const [refreshCounter, setRefreshCounter] = useState(0);
 
   useEffect(() => {
     const loadData = async () => {
       try {
         const items = await getCustomMenuItems();
         setCustomMenuItems(items);
-        // Suppression du chargement des paramètres de TVA
       } catch (error) {
         console.error('Error loading data:', error);
       }
@@ -125,7 +136,6 @@ export default function TableScreen() {
 
     loadData();
   }, []);
-
 
   // Convertir les données de ManjosPrice en items de menu avec couleurs
   const menuItems: MenuItem[] = useMemo(() => {
@@ -201,6 +211,92 @@ export default function TableScreen() {
     setLoading(false);
   };
 
+  // Fonction pour charger l'historique des paiements
+  const loadTableHistory = async () => {
+    try {
+      setRefreshingHistory(true);
+      if (tableId && table && table.order) {
+        // Récupérer tous les paiements pour cette table
+        const allHistory = await BillManager.getBillsForTable(tableId);
+
+        // Filtrer uniquement les paiements effectués après l'ouverture de cette table
+        // en utilisant le timestamp de l'ordre actuel comme référence
+        const currentSessionTimestamp = new Date(table.order.timestamp).getTime();
+
+        const currentHistory = allHistory.filter(bill => {
+          const billTimestamp = new Date(bill.timestamp).getTime();
+          return billTimestamp >= currentSessionTimestamp;
+        });
+
+        setTableHistory(currentHistory);
+        console.log(`Filtered history: ${currentHistory.length} payments in current session`);
+      } else {
+        setTableHistory([]);
+      }
+    } catch (error) {
+      console.error('Error loading table history:', error);
+      setTableHistory([]);
+    } finally {
+      setRefreshingHistory(false);
+    }
+  };
+
+  // Fonction pour forcer le rafraîchissement de l'historique
+  const refreshTableHistory = async () => {
+    console.log("Refreshing payment history...");
+    await loadTableHistory();
+  };
+
+  // Forcer le rafraîchissement de l'historique
+  const forceHistoryRefresh = () => {
+    setRefreshCounter(prev => prev + 1);
+  };
+
+  // Écouter les événements de paiement
+  useEffect(() => {
+    // S'abonner à l'événement de paiement ajouté
+    const unsubscribe = events.on(EVENT_TYPES.PAYMENT_ADDED, (tableNumber, bill) => {
+      // Vérifier si l'événement concerne notre table
+      if (tableNumber === tableId) {
+        console.log(`Payment event received for table ${tableId}, refreshing history`);
+        refreshTableHistory();
+      }
+    });
+
+    // Se désabonner quand le composant est démonté
+    return () => {
+      unsubscribe();
+    };
+  }, [tableId]);
+
+  // Rafraîchir l'historique quand l'écran est revisité
+  useFocusEffect(
+    useCallback(() => {
+      if (tableId && table) {
+        refreshTableHistory();
+      }
+      return () => {
+        // Fonction de nettoyage si nécessaire
+      };
+    }, [tableId, table])
+  );
+
+  // Rafraîchir l'historique lorsque le compteur change
+  useEffect(() => {
+    if (refreshCounter > 0) { // Ignorer l'initialisation
+      refreshTableHistory();
+    }
+  }, [refreshCounter]);
+
+  // Rafraîchir l'historique lorsque les données de la table changent
+  useEffect(() => {
+    if (table && table.order) {
+      loadTableHistory();
+    } else {
+      setTableHistory([]);
+    }
+  }, [table]);
+
   useEffect(() => {
     // Charger les articles indisponibles
     const loadUnavailableItems = async () => {
@@ -268,9 +364,6 @@ export default function TableScreen() {
         total: 0
       };
     }
-
-    console.log(item.price)
-    console.log(updatedTable.order.items)
 
     // Vérifier si l'item existe déjà en comparant à la fois le nom ET le prix
     const existingItem = updatedTable.order.items.find(
@@ -406,6 +499,100 @@ export default function TableScreen() {
     }
   };
 
+  // Version simplifiée du modal qui affiche directement chaque paiement avec son type
+
+  // Remplacer complètement le modal actuel par cette version basique
+
+  const TableHistoryModal = () => {
+    const hasHistory = tableHistory && tableHistory.length > 0;
+
+    // Calculer le total des paiements partiels
+    const totalPartialPayments = tableHistory.reduce((sum, bill) => sum + bill.amount, 0);
+
+    return (
+      <Modal
+        visible={historyModalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setHistoryModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.historyModalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Historique des paiements - {table?.name}</Text>
+              <Pressable onPress={() => setHistoryModalVisible(false)} style={styles.closeButton}>
+                <X size={24} color="#666" />
+              </Pressable>
+            </View>
+
+            {/* Résumé en haut du modal */}
+            <View style={styles.historySummary}>
+              {hasHistory ? (
+                <>
+                  <Text style={styles.historySummaryText}>
+                    <Text style={styles.historySummaryBold}>{tableHistory.length}</Text> paiement(s) partiel(s) pour cette session
+                  </Text>
+                  <Text style={styles.historySummaryAmount}>
+                    Total payé: <Text style={styles.historySummaryBold}>{totalPartialPayments.toFixed(2)} €</Text>
+                  </Text>
+                  {table && table.order && (
+                    <Text style={styles.historySummaryRemaining}>
+                      Reste à payer: <Text style={styles.historySummaryBold}>{table.order.total.toFixed(2)} €</Text>
+                    </Text>
+                  )}
+                </>
+              ) : (
+                <Text style={styles.emptyHistory}>Aucun paiement partiel pour cette session</Text>
+              )}
+            </View>
+
+            {/* Liste simple des paiements */}
+            {hasHistory && (
+              <ScrollView style={styles.historyList}>
+                {tableHistory.map((payment, index) => (
+                  <View key={payment.id} style={styles.paymentItem}>
+                    <View style={styles.paymentHeader}>
+                      <Text style={styles.paymentTitle}>Paiement {index + 1}</Text>
+                      <Text style={styles.paymentAmount}>{payment.amount.toFixed(2)} €</Text>
+                    </View>
+
+                    <View style={styles.paymentDetails}>
+                      <Text style={styles.paymentType}>
+                        Type: {payment.paymentType === 'split' ? 'Partagé' :
+                          payment.paymentType === 'custom' ? 'Personnalisé' :
+                            payment.paymentType === 'full' ? 'Complet' : 'Inconnu'}
+                      </Text>
+                      <Text style={styles.paymentMethod}>
+                        {payment.paymentMethod === 'card' ? '💳 Carte' : '💶 Espèces'}
+                      </Text>
+                    </View>
+
+                    <Text style={styles.paymentDate}>
+                      {new Date(payment.timestamp).toLocaleString('fr-FR', {
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        day: '2-digit',
+                        month: '2-digit',
+                        year: '2-digit'
+                      })}
+                    </Text>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+
+            <Pressable
+              style={styles.historyCloseButton}
+              onPress={() => setHistoryModalVisible(false)}
+            >
+              <Text style={styles.historyCloseButtonText}>Fermer</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -452,6 +639,22 @@ export default function TableScreen() {
             <Plus size={24} color="#666" />
           </Pressable>
         </View>
+
+        {/* Badge d'historique des paiements */}
+        {tableHistory.length > 0 && (
+          <View style={styles.historyBadgeContainer}>
+            <Pressable
+              style={styles.historyBadge}
+              onPress={() => setHistoryModalVisible(true)}
+            >
+              <History size={20} color="white" />
+              <Text style={styles.historyBadgeText}>
+                {tableHistory.length} paiement{tableHistory.length > 1 ? 's' : ''} partiel{tableHistory.length > 1 ? 's' : ''}
+              </Text>
+            </Pressable>
+          </View>
+        )}
+
         <Pressable
           style={[styles.paymentButton, { backgroundColor: '#F44336', marginLeft: 40 }]}
           onPress={() => handleCloseTable(tableId, table, router, setSaveInProgress)}>
@@ -496,7 +699,6 @@ export default function TableScreen() {
             )}
           </ScrollView>
           <View style={styles.totalSection}>
-            {/* Suppression de l'affichage des informations TVA */}
             <View style={styles.finalTotal}>
               <Text style={styles.totalLabel}>Total:</Text>
               <Text style={styles.totalAmount}>{total.toFixed(2)} €</Text>
@@ -513,7 +715,7 @@ export default function TableScreen() {
               <Pressable
                 style={[styles.paymentButton, { backgroundColor: '#2196F3' }]}
                 onPress={() => handlePayment('split')}>
-                <Split2 size={24} color="white" />
+                <Split size={24} color="white" />
                 <Text style={styles.paymentButtonText}>Partager</Text>
               </Pressable>
             </View>
@@ -573,8 +775,7 @@ export default function TableScreen() {
                 ]}
                 onPress={() => setActiveType(null)}>
                 <Text style={[
-                  styles.typeFilterText,
-                  activeType === null && styles.activeTypeText
+                  styles.typeFilterText, activeType === null && styles.activeTypeText
                 ]}>
                   Tout
                 </Text>
@@ -643,12 +844,12 @@ export default function TableScreen() {
                         style={[
                           styles.menuItem,
                           { borderLeftColor: item.color },
-                          unavailableItems.includes(item.id) && styles.unavailableItem // Ajoutez cette ligne
+                          unavailableItems.includes(item.id) && styles.unavailableItem
                         ]}
                         onPress={() => addItemToOrder(item)}>
                         <Text style={[
                           styles.menuItemName,
-                          unavailableItems.includes(item.id) && styles.unavailableItemText // Ajoutez cette ligne
+                          unavailableItems.includes(item.id) && styles.unavailableItemText
                         ]}>
                           {item.name}
                         </Text>
@@ -662,6 +863,9 @@ export default function TableScreen() {
           </ScrollView>
         </View>
       </View>
+
+      {/* Modal d'historique des paiements */}
+      <TableHistoryModal />
     </View>
   );
 }
@@ -670,11 +874,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   backButton: {
     marginTop: 20,
@@ -796,8 +995,7 @@ const styles = StyleSheet.create({
   },
   orderList: {
     flex: 5,
-    maxHeight: 400,
-    minHeight: 400,
+    minHeight: 300,
   },
   emptyOrder: {
     textAlign: 'center',
@@ -858,11 +1056,11 @@ const styles = StyleSheet.create({
     borderTopWidth: 2,
     borderTopColor: '#e0e0e0',
     marginTop: 16,
-    paddingTop: 16,
   },
   totalLabel: {
     fontSize: 18,
     fontWeight: '600',
+    alignItems: 'center',
   },
   totalAmount: {
     fontSize: 24,
@@ -901,7 +1099,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 2,
     borderBottomColor: 'transparent',
     textAlign: 'center',
-    minWidth: 80, // Largeur minimale pour éviter l’étirement
+    minWidth: 80, // Largeur minimale pour éviter l'étirement
     alignSelf: 'flex-start', // Empêche l'expansion verticale
   },
   activeCategoryTab: {
@@ -974,11 +1172,237 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   finalTotal: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-evenly',
+    marginTop: 10
+  },
+
+  // Styles pour l'historique des paiements
+  historyBadgeContainer: {
+    marginLeft: 16,
+  },
+  historyBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FF9800',
+    padding: 8,
+    borderRadius: 16,
+    gap: 6,
+  },
+  historyBadgeText: {
+    color: 'white',
+    fontWeight: '600',
+    fontSize: 12,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  historyModalContent: {
+    backgroundColor: 'white',
+    width: '60%',
+    maxHeight: '80%',
+    borderRadius: 12,
+    padding: 20,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-  }
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  closeButton: {
+    padding: 5,
+  },
+  historyList: {
+    flex: 1,
+    maxHeight: 400,
+  },
+  emptyHistory: {
+    textAlign: 'center',
+    color: '#666',
+    marginTop: 20,
+    marginBottom: 20,
+    fontStyle: 'italic',
+  },
+  historyItem: {
+    backgroundColor: '#f9f9f9',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#FF9800',
+  },
+  historyItemHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  historyItemDate: {
+    fontSize: 14,
+    color: '#666',
+  },
+  historyItemStatus: {
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  historyItemDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  historyItemAmount: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#FF9800',
+  },
+  historyItemMethod: {
+    fontSize: 14,
+    color: '#666',
+    backgroundColor: '#f0f0f0',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  historyCloseButton: {
+    marginTop: 16,
+    backgroundColor: '#f0f0f0',
+    padding: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  historyCloseButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
+  },
+  historySummary: {
+    backgroundColor: '#FFF8E1',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  historySummaryText: {
+    fontSize: 16,
+    marginBottom: 8,
+    color: '#333',
+  },
+  historySummaryAmount: {
+    fontSize: 16,
+    color: '#333',
+    marginBottom: 4,
+  },
+  historySummaryRemaining: {
+    fontSize: 16,
+    color: '#F44336',
+    fontWeight: '500',
+  },
+  historySummaryBold: {
+    fontWeight: 'bold',
+  },
+  loadingContainer: {
+    padding: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+  },
+  loadingText: {
+    marginLeft: 10,
+    color: '#FF9800',
+    fontSize: 14,
+  },
+  paymentTypeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f5f5f5',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 12,
+    marginTop: 16,
+  },
+  paymentTypeTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
+    flex: 1,
+  },
+  paymentTypeAmount: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  historyItemTypeSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  historyItemType: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  paymentItem: {
+    backgroundColor: 'white',
+    borderRadius: 8,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+  paymentHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  paymentTitle: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  paymentAmount: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#FF9800',
+  },
+  paymentDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  paymentType: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+  },
+  paymentMethod: {
+    fontSize: 14,
+    color: '#666',
+    backgroundColor: '#f5f5f5',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  paymentDate: {
+    fontSize: 12,
+    color: '#999',
+    textAlign: 'right',
+  },
 });

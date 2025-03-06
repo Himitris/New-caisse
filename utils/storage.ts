@@ -2,6 +2,7 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
+import { events, EVENT_TYPES } from './events';
 
 // Types d'entités
 export interface Table {
@@ -41,6 +42,7 @@ export interface Bill {
   tableName?: string;
   section?: string;
   paymentMethod?: 'card' | 'cash';
+  paymentType?: 'full' | 'split' | 'custom';
 }
 
 export interface MenuItemAvailability {
@@ -201,12 +203,12 @@ class TableManager {
     try {
       // Vérifier si des tables existent déjà
       const existingTables = await StorageManager.load<Table[]>(STORAGE_KEYS.TABLES, []);
-      
+
       if (existingTables.length > 0) {
         log('Tables already exist, skipping initialization');
         return existingTables;
       }
-      
+
       log('First initialization of tables with default data');
       await StorageManager.save(STORAGE_KEYS.TABLES, defaultTables);
       await StorageManager.markAppLaunched();
@@ -274,10 +276,10 @@ class TableManager {
   static async updateTable(updatedTable: Table): Promise<void> {
     try {
       const tables = await TableManager.getTables();
-      
+
       // Vérifier si la table existe déjà
       const existingIndex = tables.findIndex(table => table.id === updatedTable.id);
-      
+
       if (existingIndex >= 0) {
         // Remplacer la table existante par la version mise à jour
         tables[existingIndex] = updatedTable;
@@ -285,7 +287,7 @@ class TableManager {
         // Ajouter la nouvelle table si elle n'existe pas
         tables.push(updatedTable);
       }
-      
+
       // Sauvegarder toutes les tables
       await TableManager.saveTables(tables);
       log(`Updated table ${updatedTable.id} successfully`);
@@ -300,11 +302,11 @@ class TableManager {
     try {
       const tables = await TableManager.getTables();
       const tableIndex = tables.findIndex(table => table.id === tableId);
-      
+
       if (tableIndex >= 0) {
         // Récupérer la configuration par défaut pour cette table
         const defaultTable = defaultTables.find(t => t.id === tableId);
-        
+
         // Mettre à jour la table tout en conservant son nom et sa section d'origine
         tables[tableIndex] = {
           ...defaultTable || tables[tableIndex],
@@ -314,7 +316,7 @@ class TableManager {
           guests: undefined,
           order: undefined
         };
-        
+
         await TableManager.saveTables(tables);
         log(`Reset table ${tableId} to available state`);
       } else {
@@ -330,7 +332,7 @@ class TableManager {
   static async resetAllTables(): Promise<void> {
     try {
       const currentTables = await TableManager.getTables();
-      
+
       // Créer un tableau de tables réinitialisées en conservant les noms et sections personnalisés
       const resetTables = defaultTables.map(defaultTable => {
         const existingTable = currentTables.find(t => t.id === defaultTable.id);
@@ -340,7 +342,7 @@ class TableManager {
           section: existingTable?.section || defaultTable.section
         };
       });
-      
+
       await TableManager.saveTables(resetTables);
       log('All tables have been reset to default state');
     } catch (error) {
@@ -369,6 +371,9 @@ class BillManager {
       bills.push(bill);
       await BillManager.saveBills(bills);
       log(`Added new bill ID ${bill.id} for table ${bill.tableNumber}`);
+
+      // Émettre un événement que la table peut écouter
+      events.emit(EVENT_TYPES.PAYMENT_ADDED, bill.tableNumber, bill);
     } catch (error) {
       log(`Error adding bill:`, error);
       throw error;
@@ -380,7 +385,7 @@ class BillManager {
     try {
       const bills = await BillManager.getBills();
       const updatedBills = bills.filter(bill => bill.id !== billId);
-      
+
       if (bills.length !== updatedBills.length) {
         await BillManager.saveBills(updatedBills);
         log(`Deleted bill ID ${billId}`);
@@ -397,7 +402,19 @@ class BillManager {
   static async getBillsForTable(tableId: number): Promise<Bill[]> {
     try {
       const bills = await BillManager.getBills();
-      return bills.filter(bill => bill.tableNumber === tableId);
+
+      // Filtrer les factures pour la table spécifique
+      const tableBills = bills.filter(bill => bill.tableNumber === tableId);
+
+      // Trier par date, du plus récent au plus ancien
+      tableBills.sort((a, b) => {
+        const dateA = new Date(a.timestamp).getTime();
+        const dateB = new Date(b.timestamp).getTime();
+        return dateB - dateA; // Ordre décroissant
+      });
+
+      log(`Found ${tableBills.length} bills for table ${tableId}`);
+      return tableBills;
     } catch (error) {
       log(`Error getting bills for table ${tableId}:`, error);
       return [];
@@ -410,10 +427,10 @@ class BillManager {
       const bills = await BillManager.getBills();
       const startOfDay = new Date(date);
       startOfDay.setHours(0, 0, 0, 0);
-      
+
       const endOfDay = new Date(date);
       endOfDay.setHours(23, 59, 59, 999);
-      
+
       return bills.filter(bill => {
         const billDate = new Date(bill.timestamp);
         return billDate >= startOfDay && billDate <= endOfDay;
@@ -460,7 +477,7 @@ class MenuManager {
     try {
       const items = await MenuManager.getMenuAvailability();
       const existingItemIndex = items.findIndex(item => item.id === itemId);
-      
+
       if (existingItemIndex >= 0) {
         // Mettre à jour l'article existant
         items[existingItemIndex].available = available;
@@ -469,7 +486,7 @@ class MenuManager {
         log(`Cannot update availability for item ${itemId} - not found in availability list`);
         return;
       }
-      
+
       await MenuManager.saveMenuAvailability(items);
       log(`Updated availability of item ${itemId} to ${available}`);
     } catch (error) {
@@ -508,7 +525,7 @@ class CustomMenuManager {
     try {
       const items = await CustomMenuManager.getCustomMenuItems();
       const index = items.findIndex(item => item.id === updatedItem.id);
-      
+
       if (index >= 0) {
         items[index] = updatedItem;
         await CustomMenuManager.saveCustomMenuItems(items);
@@ -527,7 +544,7 @@ class CustomMenuManager {
     try {
       const items = await CustomMenuManager.getCustomMenuItems();
       const updatedItems = items.filter(item => item.id !== itemId);
-      
+
       if (items.length !== updatedItems.length) {
         await CustomMenuManager.saveCustomMenuItems(updatedItems);
         log(`Deleted custom menu item ID ${itemId}`);

@@ -174,7 +174,8 @@ export default function CustomSplitScreen() {
           items: orderItems.length,
           status: 'split' as 'split',
           timestamp: new Date().toISOString(),
-          paymentMethod: method
+          paymentMethod: method,
+          paymentType: 'custom' as 'custom',
         };
 
         // Ajouter à l'historique des factures

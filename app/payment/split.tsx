@@ -80,6 +80,8 @@ export default function SplitBillScreen() {
         items: orderItems.length,
         status: 'split' as 'split',
         timestamp: new Date().toISOString(),
+        paymentMethod: method,
+        paymentType: 'split' as 'split',
       };
 
       // Ajouter à l'historique des factures
