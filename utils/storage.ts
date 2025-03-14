@@ -92,6 +92,31 @@ const log = (message: string, data?: any) => {
 
 // Classe utilitaire pour gérer le stockage
 class StorageManager {
+
+  static async resetApplicationData(): Promise<void> {
+    try {
+      // Liste des clés à réinitialiser
+      const keysToReset = [
+        STORAGE_KEYS.BILLS,
+        STORAGE_KEYS.MENU_AVAILABILITY,
+        STORAGE_KEYS.LAST_SYNC
+      ];
+      
+      // Supprimer les données pour chaque clé
+      for (const key of keysToReset) {
+        await AsyncStorage.removeItem(key);
+      }
+      
+      log('Les données de l\'application ont été réinitialisées');
+      
+      // Mise à jour de la version actuelle
+      await AsyncStorage.setItem(STORAGE_KEYS.APP_VERSION, CURRENT_APP_VERSION);
+    } catch (error) {
+      log('Erreur lors de la réinitialisation des données:', error);
+      throw error;
+    }
+  }
+  
   // Méthode générique pour sauvegarder des données
   static async save<T>(key: string, data: T): Promise<void> {
     try {
@@ -380,6 +405,17 @@ class BillManager {
     }
   }
 
+  // Réinitialiser toutes les factures
+  static async clearAllBills(): Promise<void> {
+    try {
+      await StorageManager.save(STORAGE_KEYS.BILLS, []);
+      log('Toutes les factures ont été supprimées');
+    } catch (error) {
+      log('Erreur lors de la suppression des factures:', error);
+      throw error;
+    }
+  }
+
   // Supprimer une facture
   static async deleteBill(billId: number): Promise<void> {
     try {
@@ -413,7 +449,6 @@ class BillManager {
         return dateB - dateA; // Ordre décroissant
       });
 
-      log(`Found ${tableBills.length} bills for table ${tableId}`);
       return tableBills;
     } catch (error) {
       log(`Error getting bills for table ${tableId}:`, error);

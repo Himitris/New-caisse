@@ -60,7 +60,6 @@ export default function TablesScreen() {
       const occupiedCount = loadedTables.filter(t => t.status === 'occupied').length;
       const withOrdersCount = loadedTables.filter(t => t.order && t.order.items.length > 0).length;
       
-      console.log(`Tables chargées: ${loadedTables.length} au total, ${occupiedCount} occupées, ${withOrdersCount} avec commandes`);
       
       // Afficher les détails des tables avec commandes
       loadedTables

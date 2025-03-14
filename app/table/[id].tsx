@@ -1,20 +1,18 @@
-// app/table/[id].tsx - Code complet avec gestion de l'historique des paiements
-
-import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert, Modal } from 'react-native';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import {
-  Users, Plus, Minus, Receipt, Split, CreditCard, ArrowLeft,
-  Save, X, Printer, History, Clock
+  Users, Plus, Minus, Receipt, Split, CreditCard, ArrowLeft, X, Printer, History
 } from 'lucide-react-native';
 import {
   getTable, updateTable, OrderItem, Table, resetTable,
-  getMenuAvailability, MenuItemAvailability, getCustomMenuItems,
+  getMenuAvailability, getCustomMenuItems,
   CustomMenuItem, BillManager, Bill
 } from '../../utils/storage';
 import { events, EVENT_TYPES } from '../../utils/events';
 import priceData from '../../helpers/ManjosPrice';
 import SplitSelectionModal from '../components/SplitSelectionModal';
+import PaymentHistoryModal from '../components/PaymentHistoryModal';
 
 interface MenuItem {
   id: number;
@@ -22,7 +20,7 @@ interface MenuItem {
   price: number;
   category: string;
   type: 'resto' | 'boisson';
-  color: string; // Couleur pour la catégorie
+  color: string;
 }
 
 // Définition des couleurs pour les catégories
@@ -68,7 +66,7 @@ const handleCloseTable = async (tableId: number, table: Table | null, router: an
               [
                 {
                   text: 'OK',
-                  onPress: () => router.back()
+                  onPress: () => router.push('/')
                 }
               ]
             );
@@ -232,7 +230,6 @@ export default function TableScreen() {
         });
 
         setTableHistory(currentHistory);
-        console.log(`Filtered history: ${currentHistory.length} payments in current session`);
       } else {
         setTableHistory([]);
       }
@@ -246,7 +243,6 @@ export default function TableScreen() {
 
   // Fonction pour forcer le rafraîchissement de l'historique
   const refreshTableHistory = async () => {
-    console.log("Refreshing payment history...");
     await loadTableHistory();
   };
 
@@ -510,100 +506,6 @@ export default function TableScreen() {
         items: JSON.stringify(table.order.items)
       },
     });
-  };
-
-  // Remplacer complètement le modal actuel par cette version basique
-
-  const TableHistoryModal = () => {
-    const hasHistory = tableHistory && tableHistory.length > 0;
-
-    // Calculer le total des paiements partiels
-    const totalPartialPayments = tableHistory.reduce((sum, bill) => sum + bill.amount, 0);
-
-    return (
-      <Modal
-        visible={historyModalVisible}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setHistoryModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.historyModalContent}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Historique des paiements - {table?.name}</Text>
-              <Pressable onPress={() => setHistoryModalVisible(false)} style={styles.closeButton}>
-                <X size={24} color="#666" />
-              </Pressable>
-            </View>
-
-            {/* Résumé en haut du modal */}
-            <View style={styles.historySummary}>
-              {hasHistory ? (
-                <>
-                  <Text style={styles.historySummaryText}>
-                    <Text style={styles.historySummaryBold}>{tableHistory.length}</Text> paiement(s) partiel(s) pour cette session
-                  </Text>
-                  <Text style={styles.historySummaryAmount}>
-                    Total payé: <Text style={styles.historySummaryBold}>{totalPartialPayments.toFixed(2)} €</Text>
-                  </Text>
-                  {table && table.order && (
-                    <Text style={styles.historySummaryRemaining}>
-                      Reste à payer: <Text style={styles.historySummaryBold}>{table.order.total.toFixed(2)} €</Text>
-                    </Text>
-                  )}
-                </>
-              ) : (
-                <Text style={styles.emptyHistory}>Aucun paiement partiel pour cette session</Text>
-              )}
-            </View>
-
-            {/* Liste simple des paiements */}
-            {hasHistory && (
-              <ScrollView style={styles.historyList}>
-                {tableHistory.map((payment, index) => (
-                  <View key={payment.id} style={styles.paymentItem}>
-                    <View style={styles.paymentHeader}>
-                      <Text style={styles.paymentTitle}>Paiement {index + 1}</Text>
-                      <Text style={styles.paymentAmount}>{payment.amount.toFixed(2)} €</Text>
-                    </View>
-
-                    <View style={styles.paymentDetails}>
-                      <Text style={styles.paymentType}>
-                        Type: {payment.paymentType === 'split' ? 'Partagé' :
-                          payment.paymentType === 'custom' ? 'Personnalisé' :
-                            payment.paymentType === 'full' ? 'Complet' : 'Inconnu'}
-                      </Text>
-                      <Text style={styles.paymentMethod}>
-                        {payment.paymentMethod === 'card' ? '💳 Carte' :
-                          payment.paymentMethod === 'cash' ? '💶 Espèces' :
-                            '📝 Chèque'}
-                      </Text>
-                    </View>
-
-                    <Text style={styles.paymentDate}>
-                      {new Date(payment.timestamp).toLocaleString('fr-FR', {
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        day: '2-digit',
-                        month: '2-digit',
-                        year: '2-digit'
-                      })}
-                    </Text>
-                  </View>
-                ))}
-              </ScrollView>
-            )}
-
-            <Pressable
-              style={styles.historyCloseButton}
-              onPress={() => setHistoryModalVisible(false)}
-            >
-              <Text style={styles.historyCloseButtonText}>Fermer</Text>
-            </Pressable>
-          </View>
-        </View>
-      </Modal>
-    );
   };
 
   if (loading) {
@@ -878,7 +780,15 @@ export default function TableScreen() {
       </View>
 
       {/* Modal d'historique des paiements */}
-      <TableHistoryModal />
+      <PaymentHistoryModal
+        visible={historyModalVisible}
+        onClose={() => setHistoryModalVisible(false)}
+        tableHistory={tableHistory}
+        tableName={table?.name || `Table ${tableId}`}
+        tableTotal={table?.order?.total}
+        refreshing={refreshingHistory}
+        onRefresh={refreshTableHistory}
+      />
       <SplitSelectionModal
         visible={splitModalVisible}
         onClose={() => setSplitModalVisible(false)}
@@ -1248,9 +1158,6 @@ const styles = StyleSheet.create({
   modalTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-  },
-  closeButton: {
-    padding: 5,
   },
   historyList: {
     flex: 1,

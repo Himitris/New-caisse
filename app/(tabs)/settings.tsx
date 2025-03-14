@@ -2,7 +2,8 @@
 
 import { View, Text, StyleSheet, ScrollView, Pressable, Switch, Alert, Modal, TextInput, ActivityIndicator } from 'react-native';
 import { useState, useEffect } from 'react';
-import { Store, Clock, DollarSign, Printer, Bell, Shield, CircleHelp as HelpCircle, Users, LayoutGrid, X, Save } from 'lucide-react-native';
+import { Store, Clock, DollarSign, Printer, Bell, Shield, CircleHelp as HelpCircle, Users, LayoutGrid, X, Save, Trash2 } from 'lucide-react-native';
+import { StorageManager, BillManager, TableManager } from '../../utils/storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const SETTINGS_STORAGE_KEY = 'restaurant_settings';
@@ -530,6 +531,63 @@ export default function SettingsScreen() {
     loadSettings();
   }, []);
 
+  const handleResetAppData = () => {
+    Alert.alert(
+      'Réinitialiser toutes les données',
+      'Attention ! Cette action va supprimer tout l\'historique des paiements, les tables ouvertes et les additions en cours. Cette action est irréversible.',
+      [
+        {
+          text: 'Annuler',
+          style: 'cancel'
+        },
+        {
+          text: 'Réinitialiser',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setSaving(true); // Afficher l'indicateur de chargement
+
+              // Récupérer d'abord les tables pour conserver leur configuration
+              const tables = await TableManager.getTables();
+
+              // Réinitialiser les tables en conservant leur nom et section
+              // mais en effaçant leur statut, commandes, etc.
+              const resetTables = tables.map(table => ({
+                ...table,
+                status: 'available' as const,
+                guests: undefined,
+                order: undefined
+              }));
+
+              // Sauvegarder les tables réinitialisées
+              await TableManager.saveTables(resetTables);
+
+              // Supprimer tout l'historique des factures
+              await BillManager.clearAllBills();
+
+              // Réinitialiser les autres données (disponibilité du menu, etc.)
+              await StorageManager.resetApplicationData();
+
+              Alert.alert(
+                'Réinitialisation terminée',
+                'Toutes les données ont été réinitialisées avec succès.',
+                [{ text: 'OK' }]
+              );
+            } catch (error) {
+              console.error('Erreur lors de la réinitialisation des données:', error);
+              Alert.alert(
+                'Erreur',
+                'Une erreur est survenue lors de la réinitialisation des données.'
+              );
+            } finally {
+              setSaving(false); // Masquer l'indicateur de chargement
+            }
+          }
+        }
+      ]
+    );
+  };
+
   // Sauvegarder les paramètres
   const saveSettings = async () => {
     try {
@@ -702,6 +760,24 @@ export default function SettingsScreen() {
               </Pressable>
             );
           })}
+          <View style={styles.resetSection}>
+            <Text style={styles.resetWarning}>
+              Zone dangereuse - Les actions ci-dessous sont irréversibles
+            </Text>
+            <Pressable
+              style={styles.dangerButton}
+              onPress={handleResetAppData}
+            >
+              <Trash2 size={24} color="white" />
+              <Text style={styles.dangerButtonText}>
+                Réinitialiser toutes les données
+              </Text>
+            </Pressable>
+            <Text style={styles.resetDescription}>
+              Cette action supprimera tout l'historique des paiements, réinitialisera les tables et videra les additions en cours.
+              La structure des tables et leurs noms seront conservés.
+            </Text>
+          </View>
         </ScrollView>
       </View>
 
@@ -979,6 +1055,49 @@ const styles = StyleSheet.create({
   disabledInput: {
     backgroundColor: '#f0f0f0',
     color: '#999',
+  },
+  resetSection: {
+    marginTop: 30,
+    borderTopWidth: 1,
+    borderTopColor: '#ffcccc',
+    paddingTop: 20,
+    paddingHorizontal: 20,
+  },
+  resetWarning: {
+    color: '#F44336',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  dangerButton: {
+    backgroundColor: '#F44336',
+    padding: 16,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  dangerButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  resetDescription: {
+    marginTop: 16,
+    color: '#666',
+    fontSize: 14,
+    textAlign: 'center',
+    fontStyle: 'italic',
   },
 
 });
