@@ -14,6 +14,7 @@ import {
 } from '../../utils/storage';
 import { events, EVENT_TYPES } from '../../utils/events';
 import priceData from '../../helpers/ManjosPrice';
+import SplitSelectionModal from '../components/SplitSelectionModal';
 
 interface MenuItem {
   id: number;
@@ -123,6 +124,8 @@ export default function TableScreen() {
   const [historyModalVisible, setHistoryModalVisible] = useState(false);
   const [refreshingHistory, setRefreshingHistory] = useState(false);
   const [refreshCounter, setRefreshCounter] = useState(0);
+
+  const [splitModalVisible, setSplitModalVisible] = useState(false);
 
   useEffect(() => {
     const loadData = async () => {
@@ -473,20 +476,14 @@ export default function TableScreen() {
         },
       });
     } else if (type === 'split') {
+      // Vérifier s'il y a suffisamment de couverts avant d'ouvrir le modal
       if (guestCount <= 1) {
-        Alert.alert('Cannot Split', 'Need at least 2 guests to split the bill.');
+        Alert.alert('Impossible de partager', 'Il faut au moins 2 convives pour partager l\'addition.');
         return;
       }
 
-      router.push({
-        pathname: '/payment/split',
-        params: {
-          tableId: tableId.toString(),
-          total: total.toString(),
-          guests: guestCount.toString(),
-          items: JSON.stringify(table.order.items)
-        },
-      });
+      // Afficher le modal de sélection de parts plutôt que de naviguer directement
+      setSplitModalVisible(true);
     } else if (type === 'custom') {
       router.push({
         pathname: '/payment/custom',
@@ -499,7 +496,21 @@ export default function TableScreen() {
     }
   };
 
-  // Version simplifiée du modal qui affiche directement chaque paiement avec son type
+  const handleSplitConfirm = (partsCount: number) => {
+    if (!table || !table.order) return;
+
+    const total = table.order.total;
+
+    router.push({
+      pathname: '/payment/split',
+      params: {
+        tableId: tableId.toString(),
+        total: total.toString(),
+        guests: partsCount.toString(),  // Utiliser le nombre de parts choisi ici
+        items: JSON.stringify(table.order.items)
+      },
+    });
+  };
 
   // Remplacer complètement le modal actuel par cette version basique
 
@@ -563,7 +574,9 @@ export default function TableScreen() {
                             payment.paymentType === 'full' ? 'Complet' : 'Inconnu'}
                       </Text>
                       <Text style={styles.paymentMethod}>
-                        {payment.paymentMethod === 'card' ? '💳 Carte' : '💶 Espèces'}
+                        {payment.paymentMethod === 'card' ? '💳 Carte' :
+                          payment.paymentMethod === 'cash' ? '💶 Espèces' :
+                            '📝 Chèque'}
                       </Text>
                     </View>
 
@@ -866,6 +879,13 @@ export default function TableScreen() {
 
       {/* Modal d'historique des paiements */}
       <TableHistoryModal />
+      <SplitSelectionModal
+        visible={splitModalVisible}
+        onClose={() => setSplitModalVisible(false)}
+        onConfirm={handleSplitConfirm}
+        defaultPartsCount={guestCount}
+        tableName={table?.name || `Table ${tableId}`}
+      />
     </View>
   );
 }

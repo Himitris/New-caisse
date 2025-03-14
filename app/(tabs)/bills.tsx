@@ -17,7 +17,7 @@ interface Bill {
   items: number;
   status: 'pending' | 'paid' | 'split';
   timestamp: string;
-  paymentMethod?: 'card' | 'cash';
+  paymentMethod?: 'card' | 'cash' | 'check';
 }
 
 interface ViewReceiptModalProps {
@@ -121,7 +121,9 @@ const ViewReceiptModal: React.FC<ViewReceiptModalProps> = ({
                 <View style={styles.billRow}>
                   <Text style={styles.billLabel}>Paiement:</Text>
                   <Text style={styles.billValue}>
-                    {bill.paymentMethod === 'card' ? 'Carte bancaire' : 'Espèces'}
+                    {bill.paymentMethod === 'card' ? 'Carte bancaire' :
+                      bill.paymentMethod === 'cash' ? 'Espèces' :
+                        'Chèque'}
                   </Text>
                 </View>
               )}
@@ -436,6 +438,19 @@ export default function BillsScreen() {
     );
   };
 
+  const getBillPaymentMethodIcon = (method?: 'card' | 'cash' | 'check') => {
+    switch (method) {
+      case 'card':
+        return '💳';
+      case 'cash':
+        return '💶';
+      case 'check':
+        return '📝';
+      default:
+        return '';
+    }
+  };
+
   // Suppression d'une facture
   const handleDeleteBill = async () => {
     if (!selectedBill) return;
@@ -497,14 +512,17 @@ export default function BillsScreen() {
             <p>Date: ${new Date(bill.timestamp).toLocaleString()}</p>
             ${bill.section ? `<p>Section: ${bill.section}</p>` : ''}
           </div>
-
+  
           <div class="totals">
             <p>Articles: ${bill.items}</p>
             <h2>Total: ${bill.amount.toFixed(2)} €</h2>
             <p>Statut: ${bill.status}</p>
-            ${bill.paymentMethod ? `<p>Paiement: ${bill.paymentMethod === 'card' ? 'Carte bancaire' : 'Espèces'}</p>` : ''}
+            ${bill.paymentMethod ? `<p>Paiement: ${bill.paymentMethod === 'card' ? 'Carte bancaire' :
+          bill.paymentMethod === 'cash' ? 'Espèces' :
+            'Chèque'
+        }</p>` : ''}
           </div>
-
+  
           <div class="payment-info">
             <p>Merci de votre visite!<br>
               A bientôt<br>
@@ -702,7 +720,9 @@ export default function BillsScreen() {
                       <View style={styles.detailRow}>
                         <Text style={styles.detailLabel}>Mode de paiement:</Text>
                         <Text style={styles.detailValue}>
-                          {selectedBill.paymentMethod === 'card' ? 'Carte bancaire' : 'Espèces'}
+                          {selectedBill.paymentMethod === 'card' ? 'Carte bancaire' :
+                            selectedBill.paymentMethod === 'cash' ? 'Espèces' :
+                              'Chèque'}
                         </Text>
                       </View>
                     )}

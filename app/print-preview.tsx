@@ -124,7 +124,11 @@ export default function PrintPreviewScreen() {
           </div>
   
           <div class="payment-info">
-            <p>Méthode de paiement: ${order.paymentMethod === 'card' ? 'Carte bancaire' : 'Espèces'}</p>
+            <p>Méthode de paiement: ${order.paymentMethod === 'card' ?
+                  'Carte bancaire' :
+                  order.paymentMethod === 'cash' ?
+                    'Espèces' :
+                    'Chèque'}</p>
             <p>Montant payé: ${order.total.toFixed(2)} €</p>
             <p>Statut: ${order.isPartial ? 'Paiement partiel' : 'Payé en totalité'}</p>
           </div>
@@ -233,7 +237,11 @@ export default function PrintPreviewScreen() {
 
         <View style={styles.paymentInfo}>
           <Text style={styles.paymentMethod}>
-            {isPreviewMode ? '' : `Méthode de paiement: ${order.paymentMethod === 'card' ? 'Carte bancaire' : 'Espèces'}`}
+            {isPreviewMode ? '' : `Méthode de paiement: ${order.paymentMethod === 'card' ?
+                'Carte bancaire' :
+                order.paymentMethod === 'cash' ?
+                  'Espèces' :
+                  'Chèque'}`}
           </Text>
           <Text style={styles.paymentStatus}>
             Statut: {isPreviewMode ? 'Prévisualisation - Non payé' : (isPartialPayment ? 'Paiement partiel' : 'Payé en totalité')}

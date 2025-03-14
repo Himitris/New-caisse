@@ -3,7 +3,7 @@
 import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert } from 'react-native';
 import { useState, useEffect } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { ArrowLeft, CreditCard, Wallet, Save, CheckCircle } from 'lucide-react-native';
+import { ArrowLeft, CreditCard, Wallet, Save, CheckCircle, Edit3 } from 'lucide-react-native';
 import { getTable, updateTable, addBill, resetTable } from '../../utils/storage';
 
 export default function CustomSplitScreen() {
@@ -38,7 +38,7 @@ export default function CustomSplitScreen() {
   const [currentTotal, setCurrentTotal] = useState(0);
 
   // État pour la méthode de paiement sélectionnée pour chaque partage
-  const [paymentMethods, setPaymentMethods] = useState<('card' | 'cash' | null)[]>([null]);
+  const [paymentMethods, setPaymentMethods] = useState<('card' | 'cash' | 'check' | null)[]>([null]);
 
   useEffect(() => {
     // Calculer le total actuel de tous les montants saisis
@@ -103,7 +103,7 @@ export default function CustomSplitScreen() {
   };
 
   // Définir la méthode de paiement pour un partage spécifique
-  const setPaymentMethod = (index: number, method: 'card' | 'cash') => {
+  const setPaymentMethod = (index: number, method: 'card' | 'cash' | 'check') => {
     const newMethods = [...paymentMethods];
     newMethods[index] = method;
     setPaymentMethods(newMethods);
@@ -295,6 +295,19 @@ export default function CustomSplitScreen() {
                     styles.methodText,
                     paymentMethods[index] === 'cash' && styles.selectedMethodText
                   ]}>Espèces</Text>
+                </Pressable>
+
+                <Pressable
+                  style={[
+                    styles.methodButton,
+                    paymentMethods[index] === 'check' && styles.selectedMethodButton
+                  ]}
+                  onPress={() => setPaymentMethod(index, 'check')}>
+                  <Edit3 size={20} color={paymentMethods[index] === 'check' ? 'white' : '#333'} />
+                  <Text style={[
+                    styles.methodText,
+                    paymentMethods[index] === 'check' && styles.selectedMethodText
+                  ]}>Chèque</Text>
                 </Pressable>
 
                 {splitAmounts.length > 1 && (

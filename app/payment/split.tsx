@@ -3,7 +3,7 @@
 import { View, Text, StyleSheet, ScrollView, Pressable, Alert } from 'react-native';
 import { useState, useEffect } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { CreditCard, Wallet, Home } from 'lucide-react-native';
+import { CreditCard, Wallet, Home, Edit3 } from 'lucide-react-native';
 import { getTable, updateTable, addBill, resetTable } from '../../utils/storage';
 
 export default function SplitBillScreen() {
@@ -36,7 +36,7 @@ export default function SplitBillScreen() {
     id: number;
     amount: number;
     paid: boolean;
-    method?: 'cash' | 'card';
+    method?: 'cash' | 'card' | 'check';
   }>>(
     Array.from({ length: guestCount }, (_, i) => ({
       id: i + 1,
@@ -57,7 +57,7 @@ export default function SplitBillScreen() {
     setRemainingTotal(totalAmount - paidTotal);
   }, [payments, totalAmount]);
 
-  const handlePayment = async (id: number, method: 'cash' | 'card') => {
+  const handlePayment = async (id: number, method: 'cash' | 'card' | 'check') => {
     try {
       // Trouver le paiement
       const payment = payments.find(p => p.id === id);
@@ -172,11 +172,17 @@ export default function SplitBillScreen() {
                   <Wallet size={24} color="white" />
                   <Text style={styles.buttonText}>Paiement en espèces</Text>
                 </Pressable>
+                <Pressable
+                  style={[styles.paymentButton, { backgroundColor: '#9C27B0' }]}
+                  onPress={() => handlePayment(payment.id, 'check')}>
+                  <Edit3 size={24} color="white" />
+                  <Text style={styles.buttonText}>Paiement par chèque</Text>
+                </Pressable>
               </View>
             ) : (
               <View style={styles.paidStatus}>
                 <Text style={styles.paidText}>
-                  Payé avec {payment.method === 'card' ? 'Carte' : 'Espèces'}
+                  Payé avec {payment.method === 'card' ? 'Carte' : payment.method === 'cash' ? 'Espèces' : 'Chèque'}
                 </Text>
               </View>
             )}

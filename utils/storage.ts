@@ -41,7 +41,7 @@ export interface Bill {
   timestamp: string;
   tableName?: string;
   section?: string;
-  paymentMethod?: 'card' | 'cash';
+  paymentMethod?: 'card' | 'cash' | 'check';
   paymentType?: 'full' | 'split' | 'custom';
 }
 
