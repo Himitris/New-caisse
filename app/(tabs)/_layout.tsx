@@ -1,7 +1,7 @@
 // app/(tabs)/_layout.tsx - Optimisé pour le mode paysage
 
 import { Tabs } from 'expo-router';
-import { LayoutGrid, UtensilsCrossed, Receipt, Settings } from 'lucide-react-native';
+import { LayoutGrid, UtensilsCrossed, Receipt, Settings, BarChart3 } from 'lucide-react-native';
 import { View, StyleSheet } from 'react-native';
 
 export default function TabLayout() {
@@ -47,6 +47,15 @@ export default function TabLayout() {
             title: 'Additions',
             tabBarIcon: ({ size, color }) => (
               <Receipt size={size} color={color} />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="journal"
+          options={{
+            title: 'Journal',
+            tabBarIcon: ({ size, color }) => (
+              <BarChart3 size={size} color={color} />
             ),
           }}
         />
