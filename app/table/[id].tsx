@@ -2,7 +2,7 @@ import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert, Modal 
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import {
-  Users, Plus, Minus, Receipt, Split, CreditCard, ArrowLeft, X, Printer, History
+  Users, Plus, Minus, Receipt, Split, CreditCard, ArrowLeft, X, Printer, History, ShoppingCart
 } from 'lucide-react-native';
 import {
   getTable, updateTable, OrderItem, Table, resetTable,
@@ -13,6 +13,7 @@ import { events, EVENT_TYPES } from '../../utils/events';
 import priceData from '../../helpers/ManjosPrice';
 import SplitSelectionModal from '../components/SplitSelectionModal';
 import PaymentHistoryModal from '../components/PaymentHistoryModal';
+
 
 interface MenuItem {
   id: number;
@@ -262,9 +263,18 @@ export default function TableScreen() {
       }
     });
 
+    const unsubscribe2 = events.on(EVENT_TYPES.TABLE_UPDATED, (updatedTableId) => {
+      // Vérifier si l'événement concerne cette table
+      if (updatedTableId === tableId) {
+        console.log(`Table ${tableId} a été mise à jour, rechargement des données...`);
+        loadTable();
+      }
+    });
+
     // Se désabonner quand le composant est démonté
     return () => {
       unsubscribe();
+      unsubscribe2();
     };
   }, [tableId]);
 
@@ -452,7 +462,7 @@ export default function TableScreen() {
   };
 
   // Gérer le paiement
-  const handlePayment = (type: 'full' | 'split' | 'custom') => {
+  const handlePayment = (type: 'full' | 'split' | 'custom' | 'items') => {
     if (!table || !table.order) return;
 
     const total = table.order.total;
@@ -487,6 +497,13 @@ export default function TableScreen() {
           tableId: tableId.toString(),
           total: total.toString(),
           items: JSON.stringify(table.order.items)
+        },
+      });
+    } else if (type === 'items') {
+      router.push({
+        pathname: '/payment/items',
+        params: {
+          tableId: tableId.toString()
         },
       });
     }
@@ -628,10 +645,10 @@ export default function TableScreen() {
                 <Text style={styles.paymentButtonText}>Paiement total</Text>
               </Pressable>
               <Pressable
-                style={[styles.paymentButton, { backgroundColor: '#2196F3' }]}
-                onPress={() => handlePayment('split')}>
-                <Split size={24} color="white" />
-                <Text style={styles.paymentButtonText}>Partager</Text>
+                style={[styles.paymentButton, { backgroundColor: '#673AB7' }]}
+                onPress={() => handlePayment('items')}>
+                <ShoppingCart size={24} color="white" />
+                <Text style={styles.paymentButtonText}>Paiement par article</Text>
               </Pressable>
             </View>
             <View style={styles.paymentActionsRow}>
@@ -640,6 +657,12 @@ export default function TableScreen() {
                 onPress={() => handlePayment('custom')}>
                 <Receipt size={24} color="white" />
                 <Text style={styles.paymentButtonText}>Partage personnalisé</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.paymentButton, { backgroundColor: '#2196F3' }]}
+                onPress={() => handlePayment('split')}>
+                <Split size={24} color="white" />
+                <Text style={styles.paymentButtonText}>Partager</Text>
               </Pressable>
               <Pressable
                 style={[styles.paymentButton, { backgroundColor: '#9C27B0' }]}
@@ -879,7 +902,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 3.84,
-    elevation: 5, 
+    elevation: 5,
   },
 
   menuSection: {
@@ -928,7 +951,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   orderList: {
-    minHeight: '40%',
+    height: '40%',
   },
   emptyOrder: {
     textAlign: 'center',

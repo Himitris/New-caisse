@@ -42,7 +42,8 @@ export interface Bill {
   tableName?: string;
   section?: string;
   paymentMethod?: 'card' | 'cash' | 'check';
-  paymentType?: 'full' | 'split' | 'custom';
+  paymentType?: 'full' | 'split' | 'custom' | 'items'; // Ajout de 'items'
+  paidItems?: any[]; // Pour stocker les détails des articles payés
 }
 
 export interface MenuItemAvailability {
