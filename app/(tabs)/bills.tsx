@@ -1,12 +1,12 @@
 // app/(tabs)/bills.tsx - Version améliorée avec tri, recherche et suppression
-
 import { View, Text, StyleSheet, ScrollView, Pressable, Alert, Modal, ActivityIndicator, Share, TextInput } from 'react-native';
 import { useState, useEffect } from 'react';
-import { Receipt, Printer, Download, Share as ShareIcon, Eye, X, Trash2, Search, Calendar, Filter, ArrowDownAZ, ArrowUpAZ, ArrowUpDown } from 'lucide-react-native';
+import { Receipt, Printer, Download, Share as ShareIcon, Eye, X, Trash2, Search, Calendar, Filter, ArrowDownAZ, ArrowUpAZ, ArrowUpDown, BarChart3 } from 'lucide-react-native';
 import { getBills, saveBills } from '../../utils/storage';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import StatsModal from '../components/StatsModal';
 
 interface Bill {
   id: number;
@@ -280,6 +280,7 @@ export default function BillsScreen() {
   const [viewModalVisible, setViewModalVisible] = useState(false);
   const [processingAction, setProcessingAction] = useState(false);
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc' | 'none'>('desc'); // 'desc', 'asc', or 'none'
+  const [statsModalVisible, setStatsModalVisible] = useState(false);
 
   // Chargement des factures
   useEffect(() => {
@@ -518,8 +519,8 @@ export default function BillsScreen() {
             <h2>Total: ${bill.amount.toFixed(2)} €</h2>
             <p>Statut: ${bill.status}</p>
             ${bill.paymentMethod ? `<p>Paiement: ${bill.paymentMethod === 'card' ? 'Carte bancaire' :
-          bill.paymentMethod === 'cash' ? 'Espèces' :
-            'Chèque'
+        bill.paymentMethod === 'cash' ? 'Espèces' :
+          'Chèque'
         }</p>` : ''}
           </div>
   
@@ -617,6 +618,12 @@ export default function BillsScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Factures & Paiements</Text>
+        <Pressable
+          style={styles.statsButton}
+          onPress={() => setStatsModalVisible(true)}>
+          <BarChart3 size={20} color="#673AB7" />
+          <Text style={styles.statsButtonText}>Statistiques</Text>
+        </Pressable>
       </View>
 
       {bills.length === 0 ? (
@@ -790,6 +797,10 @@ export default function BillsScreen() {
           <Text style={styles.processingText}>Traitement en cours...</Text>
         </View>
       )}
+      <StatsModal
+        visible={statsModalVisible}
+        onClose={() => setStatsModalVisible(false)}
+      />
     </View>
   );
 }
@@ -832,6 +843,8 @@ const styles = StyleSheet.create({
     backgroundColor: 'white',
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
+    justifyContent: 'space-between',
+    flexDirection: 'row'
   },
   title: {
     fontSize: 24,
@@ -1188,5 +1201,19 @@ const styles = StyleSheet.create({
     color: '#666',
     fontStyle: 'italic',
     textAlign: 'center',
-  }
+  },
+  statsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+    borderRadius: 8,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#673AB7',
+    backgroundColor: 'white',
+  },
+  statsButtonText: {
+    color: '#673AB7',
+    fontWeight: '600',
+  },
 });

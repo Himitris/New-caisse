@@ -867,9 +867,11 @@ const styles = StyleSheet.create({
     padding: 12,
     gap: 12,
     flexDirection: 'row',
+    flexWrap: 'wrap', // Permet aux éléments de passer à la ligne sur petits écrans
   },
   orderSection: {
     flex: 2,
+    minWidth: 300, // Définit une largeur minimale
     backgroundColor: 'white',
     borderRadius: 12,
     padding: 16,
@@ -877,10 +879,12 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 3.84,
-    elevation: 5,
+    elevation: 5, 
   },
+
   menuSection: {
     flex: 3,
+    minWidth: 300, // Définit une largeur minimale
     backgroundColor: 'white',
     borderRadius: 12,
     padding: 16,
@@ -924,8 +928,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   orderList: {
-    flex: 5,
-    minHeight: 300,
+    minHeight: '40%',
   },
   emptyOrder: {
     textAlign: 'center',
@@ -979,13 +982,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   totalSection: {
-    flex: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     borderTopWidth: 2,
     borderTopColor: '#e0e0e0',
-    marginTop: 16,
+  },
+
+  finalTotal: {
+    width: '100%', // Assure que le total prend toute la largeur
+    flexDirection: 'row',
+    justifyContent: 'space-between', // Change à space-between au lieu de space-evenly
+    alignItems: 'center',
+    marginTop: 10,
   },
   totalLabel: {
     fontSize: 18,
@@ -999,18 +1008,9 @@ const styles = StyleSheet.create({
   },
   paymentActions: {
     flexDirection: 'column',
-    gap: 12,
-    marginTop: 16,
-    flex: 4,
-  },
-  paymentButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    padding: 12,
-    borderRadius: 8,
+    gap: 1,
+    marginTop: 6,
+    flex: 2,
   },
   paymentButtonText: {
     color: 'white',
@@ -1062,17 +1062,21 @@ const styles = StyleSheet.create({
   menuItemsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 2,
+    gap: 6,
+    justifyContent: 'space-between', // Mieux répartir les éléments
   },
+
   menuItem: {
-    width: '30%', // Ajuste pour éviter des espaces vides
-    height: 50, // Fixe une hauteur raisonnable
+    width: '31%', // Ajusté pour tenir compte du gap
+    minWidth: 90, // Largeur minimale
+    height: 50,
     backgroundColor: '#f9f9f9',
     borderRadius: 6,
     padding: 8,
     borderLeftWidth: 4,
-    justifyContent: 'center', // Centre le contenu verticalement
-    alignItems: 'center', // Centre horizontalement
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 6, // Ajoute de l'espace sous chaque élément
   },
   menuItemName: {
     fontSize: 12,
@@ -1100,12 +1104,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     marginBottom: 12,
+    flexWrap: 'wrap', // Permet aux boutons de passer à la ligne sur petits écrans
   },
-  finalTotal: {
+
+  paymentButton: {
     flex: 1,
+    minWidth: 130, // Largeur minimale pour les boutons
     flexDirection: 'row',
-    justifyContent: 'space-evenly',
-    marginTop: 10
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 8, // Ajoute une marge en bas pour l'espacement
   },
 
   // Styles pour l'historique des paiements
