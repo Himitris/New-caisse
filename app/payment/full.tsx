@@ -56,7 +56,9 @@ export default function FullPaymentScreen() {
         tableName: table.name,
         section: table.section,
         paymentMethod: method,
-        paymentType: 'full' as 'full'
+        paymentType: 'full' as 'full',
+        // Ajouter cette ligne pour stocker les articles payés
+        paidItems: orderItems  // Ceci contiendra tous les détails des articles
       };
 
       // Add to bills history

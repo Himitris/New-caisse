@@ -69,8 +69,7 @@ export default function SplitBillScreen() {
           payment.id === id ? { ...payment, paid: true, method } : payment
         )
       );
-
-      // Créer un enregistrement de facture pour cette partie
+      
       const bill = {
         id: Date.now(),
         tableNumber: tableIdNum,
@@ -82,6 +81,13 @@ export default function SplitBillScreen() {
         timestamp: new Date().toISOString(),
         paymentMethod: method,
         paymentType: 'split' as 'split',
+        // Ajouter les articles avec une quantité ajustée
+        paidItems: orderItems.map((item: { quantity: number; }) => ({
+          ...item,
+          quantity: item.quantity / guestCount, // Diviser la quantité par le nombre de parts
+          splitPart: payment.id, // Ajouter un identifiant de la part pour référence
+          totalParts: guestCount // Le nombre total de parts
+        }))
       };
 
       // Ajouter à l'historique des factures

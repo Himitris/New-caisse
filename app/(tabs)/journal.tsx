@@ -1,8 +1,8 @@
-// app/(tabs)/journal.tsx - Journal des ventes
+// app/(tabs)/journal.tsx - Journal des ventes avec regroupement des articles
 
 import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, TextInput } from 'react-native';
 import { useState, useEffect } from 'react';
-import { BarChart3, Filter, Search, Calendar, X, FileDown, ClipboardList } from 'lucide-react-native';
+import { BarChart3, Filter, Search, Calendar, X, FileDown, ClipboardList, Tag, Grid } from 'lucide-react-native';
 import { getBills, Bill } from '../../utils/storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Sharing from 'expo-sharing';
@@ -19,19 +19,30 @@ interface SoldItem {
   tableName?: string;
   section?: string;
   paymentMethod?: 'card' | 'cash' | 'check';
+  paymentType?: 'full' | 'split' | 'custom' | 'items';
 }
 
 interface SummaryItem {
-  id: number;
+  id: number | string;
   name: string;
   totalQuantity: number;
   totalAmount: number;
+  occurrences: number;
+  details: SoldItem[];
 }
 
 interface SalesByCategory {
   category: string;
   totalAmount: number;
   itemCount: number;
+  items: SummaryItem[];
+}
+
+interface PaymentMethodStats {
+  card: number;
+  cash: number;
+  check: number;
+  unknown: number;
 }
 
 export default function JournalScreen() {
@@ -41,6 +52,12 @@ export default function JournalScreen() {
   const [summaryItems, setSummaryItems] = useState<SummaryItem[]>([]);
   const [filteredItems, setFilteredItems] = useState<SoldItem[]>([]);
   const [salesByCategory, setSalesByCategory] = useState<SalesByCategory[]>([]);
+  const [paymentMethodStats, setPaymentMethodStats] = useState<PaymentMethodStats>({
+    card: 0,
+    cash: 0,
+    check: 0,
+    unknown: 0
+  });
   
   // États pour le filtrage
   const [searchText, setSearchText] = useState('');
@@ -48,7 +65,8 @@ export default function JournalScreen() {
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [dateFilterActive, setDateFilterActive] = useState(false);
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'all' | 'card' | 'cash' | 'check'>('all');
-  const [viewMode, setViewMode] = useState<'detailed' | 'summary'>('detailed');
+  const [viewMode, setViewMode] = useState<'detailed' | 'summary'>('summary');
+  const [groupByMode, setGroupByMode] = useState<'article' | 'transaction'>('article');
 
   // Statistiques globales
   const [totalSales, setTotalSales] = useState(0);
@@ -59,12 +77,78 @@ export default function JournalScreen() {
     loadSalesData();
   }, []);
 
+  // Fonction utilitaire pour trier les articles
+  const getArticleCategory = (itemName: string): string => {
+    const lowerName = itemName.toLowerCase();
+    
+    // Plats
+    if (lowerName.includes('magret') || 
+        lowerName.includes('confit') || 
+        lowerName.includes('tartare') || 
+        lowerName.includes('cassoulet') ||
+        lowerName.includes('saucisse') ||
+        lowerName.includes('plat') ||
+        lowerName.includes('maxi')) {
+      return 'Plats';
+    }
+    // Salades
+    else if (lowerName.includes('salade')) {
+      return 'Salades';
+    }
+    // Desserts
+    else if (lowerName.includes('dessert')) {
+      return 'Desserts';
+    }
+    // Boissons
+    else if (lowerName.includes('verre') || 
+            lowerName.includes('pichet') ||
+            lowerName.includes('btl') ||
+            lowerName.includes('vin') ||
+            lowerName.includes('biere') ||
+            lowerName.includes('blonde') ||
+            lowerName.includes('ambree') ||
+            lowerName.includes('soft') ||
+            lowerName.includes('eau') ||
+            lowerName.includes('café') ||
+            lowerName.includes('thé')) {
+      return 'Boissons';
+    }
+    // Apéritifs et Alcools
+    else if (lowerName.includes('apero') || 
+            lowerName.includes('digestif') ||
+            lowerName.includes('ricard') ||
+            lowerName.includes('alcool') ||
+            lowerName.includes('cocktail')) {
+      return 'Apéritifs et Alcools';
+    }
+    // Menu enfant
+    else if (lowerName.includes('enfant')) {
+      return 'Menu Enfant';
+    }
+    // Accompagnements
+    else if (lowerName.includes('frites') || 
+            lowerName.includes('accompagnement')) {
+      return 'Accompagnements';
+    }
+    // Glaces
+    else if (lowerName.includes('glace')) {
+      return 'Desserts';
+    }
+    // Si le système ne peut pas déterminer
+    else if (lowerName.includes('paiement') || lowerName.includes('payment')) {
+      return 'Paiements génériques';
+    }
+    else {
+      return 'Autres';
+    }
+  };
+
   // Charger les données de vente
   const loadSalesData = async () => {
     try {
       setLoading(true);
       const allBills = await getBills();
-
+      
       // Trier les factures par date (la plus récente en premier)
       const sortedBills = allBills.sort((a, b) => {
         return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
@@ -76,25 +160,38 @@ export default function JournalScreen() {
       const itemsSold: SoldItem[] = [];
       let totalItemCount = 0;
       let totalSalesAmount = 0;
+      const paymentMethodCounts = {
+        card: 0,
+        cash: 0,
+        check: 0,
+        unknown: 0
+      };
 
       sortedBills.forEach(bill => {
+        // Comptabiliser les méthodes de paiement
+        if (bill.paymentMethod === 'card') paymentMethodCounts.card++;
+        else if (bill.paymentMethod === 'cash') paymentMethodCounts.cash++;
+        else if (bill.paymentMethod === 'check') paymentMethodCounts.check++;
+        else paymentMethodCounts.unknown++;
+
         // Si la facture a des articles spécifiquement payés (paiement par article)
         if (bill.paidItems && bill.paidItems.length > 0) {
           bill.paidItems.forEach(item => {
             const soldItem: SoldItem = {
               id: item.id,
               name: item.name,
-              quantity: item.quantity,
+              quantity: item.quantity || 1,
               price: item.price,
-              totalAmount: item.price * item.quantity,
+              totalAmount: item.price * (item.quantity || 1),
               date: bill.timestamp,
               tableNumber: bill.tableNumber,
               tableName: bill.tableName,
               section: bill.section,
-              paymentMethod: bill.paymentMethod
+              paymentMethod: bill.paymentMethod,
+              paymentType: bill.paymentType
             };
             itemsSold.push(soldItem);
-            totalItemCount += item.quantity;
+            totalItemCount += soldItem.quantity;
             totalSalesAmount += soldItem.totalAmount;
           });
         } 
@@ -111,7 +208,8 @@ export default function JournalScreen() {
             tableNumber: bill.tableNumber,
             tableName: bill.tableName,
             section: bill.section,
-            paymentMethod: bill.paymentMethod
+            paymentMethod: bill.paymentMethod,
+            paymentType: bill.paymentType
           };
           itemsSold.push(soldItem);
           totalItemCount += 1;
@@ -123,6 +221,7 @@ export default function JournalScreen() {
       setFilteredItems(itemsSold);
       setTotalItems(totalItemCount);
       setTotalSales(totalSalesAmount);
+      setPaymentMethodStats(paymentMethodCounts);
 
       // Préparer les données pour le résumé
       prepareSummaryData(itemsSold);
@@ -137,20 +236,27 @@ export default function JournalScreen() {
   // Préparer les données pour le résumé
   const prepareSummaryData = (items: SoldItem[]) => {
     // Regrouper les articles par nom
-    const itemSummary = items.reduce((acc: {[key: string]: SummaryItem}, item) => {
-      const key = `${item.id}-${item.name}`;
-      if (!acc[key]) {
-        acc[key] = {
-          id: item.id,
+    const itemSummary: {[key: string]: SummaryItem} = {};
+    
+    items.forEach(item => {
+      const key = item.name.toLowerCase();
+      
+      if (!itemSummary[key]) {
+        itemSummary[key] = {
+          id: typeof item.id === 'number' ? item.id : 0,
           name: item.name,
           totalQuantity: 0,
-          totalAmount: 0
+          totalAmount: 0,
+          occurrences: 0,
+          details: []
         };
       }
-      acc[key].totalQuantity += item.quantity;
-      acc[key].totalAmount += item.totalAmount;
-      return acc;
-    }, {});
+      
+      itemSummary[key].totalQuantity += item.quantity;
+      itemSummary[key].totalAmount += item.totalAmount;
+      itemSummary[key].occurrences += 1;
+      itemSummary[key].details.push(item);
+    });
 
     // Convertir l'objet en tableau
     const summaryArray = Object.values(itemSummary);
@@ -164,41 +270,31 @@ export default function JournalScreen() {
     setTopSellingItems(summaryArray.slice(0, 5));
 
     // Catégoriser les ventes
-    // Ceci est une version simplifiée - dans une version plus complète,
-    // vous pourriez vouloir définir des catégories réelles basées sur vos articles
-    const categories = {
-      'plats': items.filter(item => item.name.toLowerCase().includes('plat') || 
-                                  item.name.toLowerCase().includes('magret') || 
-                                  item.name.toLowerCase().includes('confit') ||
-                                  item.name.toLowerCase().includes('tartare')),
-      'boissons': items.filter(item => item.name.toLowerCase().includes('vin') || 
-                                     item.name.toLowerCase().includes('bière') || 
-                                     item.name.toLowerCase().includes('soft') ||
-                                     item.name.toLowerCase().includes('eau')),
-      'desserts': items.filter(item => item.name.toLowerCase().includes('dessert')),
-      'autres': items.filter(item => !item.name.toLowerCase().includes('plat') && 
-                                   !item.name.toLowerCase().includes('magret') && 
-                                   !item.name.toLowerCase().includes('confit') &&
-                                   !item.name.toLowerCase().includes('tartare') &&
-                                   !item.name.toLowerCase().includes('vin') &&
-                                   !item.name.toLowerCase().includes('bière') &&
-                                   !item.name.toLowerCase().includes('soft') &&
-                                   !item.name.toLowerCase().includes('eau') &&
-                                   !item.name.toLowerCase().includes('dessert'))
-    };
-
-    const categorySummary: SalesByCategory[] = [];
+    const categorizedSales: {[key: string]: SalesByCategory} = {};
     
-    Object.entries(categories).forEach(([category, categoryItems]) => {
-      const totalAmount = categoryItems.reduce((sum, item) => sum + item.totalAmount, 0);
-      categorySummary.push({
-        category,
-        totalAmount,
-        itemCount: categoryItems.length
-      });
+    // Parcourir tous les articles résumés et les classer par catégorie
+    summaryArray.forEach(item => {
+      const category = getArticleCategory(item.name);
+      
+      if (!categorizedSales[category]) {
+        categorizedSales[category] = {
+          category,
+          totalAmount: 0,
+          itemCount: 0,
+          items: []
+        };
+      }
+      
+      categorizedSales[category].totalAmount += item.totalAmount;
+      categorizedSales[category].itemCount += 1; 
+      categorizedSales[category].items.push(item);
     });
-
-    setSalesByCategory(categorySummary);
+    
+    // Convertir l'objet en tableau et trier par montant total
+    const categoriesArray = Object.values(categorizedSales)
+      .sort((a, b) => b.totalAmount - a.totalAmount);
+    
+    setSalesByCategory(categoriesArray);
   };
 
   // Fonction pour filtrer les articles
@@ -274,22 +370,40 @@ export default function JournalScreen() {
   // Exporter les données en CSV
   const exportToCSV = async () => {
     try {
-      let csvContent = "Nom de l'article,Quantité,Prix unitaire,Montant total,Date,Table,Section,Méthode de paiement\n";
+      // Déterminer les données à exporter en fonction du mode de vue
+      let csvContent = "";
       
-      filteredItems.forEach(item => {
-        const row = [
-          `"${item.name.replace(/"/g, '""')}"`,
-          item.quantity,
-          item.price.toFixed(2),
-          item.totalAmount.toFixed(2),
-          formatDate(item.date),
-          item.tableName || `Table ${item.tableNumber}`,
-          item.section || 'N/A',
-          item.paymentMethod || 'N/A'
-        ].join(',');
+      if (viewMode === 'detailed') {
+        csvContent = "Nom de l'article,Quantité,Prix unitaire,Montant total,Date,Table,Section,Méthode de paiement\n";
         
-        csvContent += row + '\n';
-      });
+        filteredItems.forEach(item => {
+          const row = [
+            `"${item.name.replace(/"/g, '""')}"`,
+            item.quantity,
+            item.price.toFixed(2),
+            item.totalAmount.toFixed(2),
+            formatDate(item.date),
+            item.tableName || `Table ${item.tableNumber}`,
+            item.section || 'N/A',
+            item.paymentMethod || 'N/A'
+          ].join(',');
+          
+          csvContent += row + '\n';
+        });
+      } else {
+        csvContent = "Article,Quantité totale,Montant total,Nombre de ventes\n";
+        
+        summaryItems.forEach(item => {
+          const row = [
+            `"${item.name.replace(/"/g, '""')}"`,
+            item.totalQuantity,
+            item.totalAmount.toFixed(2),
+            item.occurrences
+          ].join(',');
+          
+          csvContent += row + '\n';
+        });
+      }
       
       const fileUri = FileSystem.documentDirectory + 'journal_ventes.csv';
       await FileSystem.writeAsStringAsync(fileUri, csvContent);
@@ -303,6 +417,10 @@ export default function JournalScreen() {
       console.error('Erreur lors de l\'exportation:', error);
       alert("Une erreur s'est produite lors de l'exportation des données.");
     }
+  };
+
+  const toggleGroupByMode = () => {
+    setGroupByMode(groupByMode === 'article' ? 'transaction' : 'article');
   };
 
   if (loading) {
@@ -331,6 +449,16 @@ export default function JournalScreen() {
             <BarChart3 size={20} color={viewMode === 'summary' ? '#2196F3' : '#666'} />
             <Text style={[styles.viewModeText, viewMode === 'summary' && styles.activeViewModeText]}>Résumé</Text>
           </Pressable>
+          {viewMode === 'summary' && (
+            <Pressable 
+              style={[styles.viewModeButton, styles.groupByButton]} 
+              onPress={toggleGroupByMode}>
+              <Grid size={20} color="#666" />
+              <Text style={styles.groupByText}>
+                Grouper par: {groupByMode === 'article' ? 'Article' : 'Transaction'}
+              </Text>
+            </Pressable>
+          )}
           <Pressable
             style={styles.exportButton}
             onPress={exportToCSV}>
@@ -431,6 +559,14 @@ export default function JournalScreen() {
           <Text style={styles.statValue}>{filteredItems.length}</Text>
           <Text style={styles.statLabel}>Transactions</Text>
         </View>
+        <View style={styles.statCard}>
+          <View style={styles.paymentMethodIcons}>
+            <Text style={styles.paymentMethodIcon}>💳 {paymentMethodStats.card}</Text>
+            <Text style={styles.paymentMethodIcon}>💶 {paymentMethodStats.cash}</Text>
+            <Text style={styles.paymentMethodIcon}>📝 {paymentMethodStats.check}</Text>
+          </View>
+          <Text style={styles.statLabel}>Méthodes de paiement</Text>
+        </View>
       </View>
 
       {viewMode === 'detailed' ? (
@@ -475,6 +611,21 @@ export default function JournalScreen() {
                       </Text>
                     </View>
                   )}
+                  {item.paymentType && (
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>Type:</Text>
+                      <Text style={styles.detailValue}>
+                        {item.paymentType === 'full' ? 'Paiement complet' :
+                         item.paymentType === 'split' ? 'Paiement partagé' : 
+                         item.paymentType === 'custom' ? 'Paiement personnalisé' : 
+                         'Paiement par article'}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+                <View style={styles.categoryTag}>
+                  <Tag size={14} color="#666" />
+                  <Text style={styles.categoryTagText}>{getArticleCategory(item.name)}</Text>
                 </View>
               </View>
             ))
@@ -485,7 +636,7 @@ export default function JournalScreen() {
           <View style={styles.summarySection}>
             <Text style={styles.sectionTitle}>Top 5 des Articles Vendus</Text>
             {topSellingItems.map((item, index) => (
-              <View key={`top-${item.id}-${index}`} style={styles.summaryItemRow}>
+              <View key={`top-${index}`} style={styles.summaryItemRow}>
                 <View style={styles.summaryItemInfo}>
                   <Text style={styles.summaryItemRank}>#{index + 1}</Text>
                   <Text style={styles.summaryItemName}>{item.name}</Text>
@@ -498,10 +649,18 @@ export default function JournalScreen() {
             ))}
           </View>
           
+          {/* Ventes par catégorie */}
           <View style={styles.summarySection}>
             <Text style={styles.sectionTitle}>Ventes par Catégorie</Text>
             {salesByCategory.map((category, index) => (
-              <View key={`cat-${index}`} style={styles.categoryRow}>
+              <Pressable 
+                key={`cat-${index}`} 
+                style={styles.categoryRow}
+                onPress={() => {
+                  // Filtrer les résultats par cette catégorie
+                  setSearchText(category.category);
+                }}
+              >
                 <Text style={styles.categoryName}>
                   {category.category.charAt(0).toUpperCase() + category.category.slice(1)}
                 </Text>
@@ -509,14 +668,18 @@ export default function JournalScreen() {
                   <Text style={styles.categoryCount}>{category.itemCount} articles</Text>
                   <Text style={styles.categoryAmount}>{category.totalAmount.toFixed(2)} €</Text>
                 </View>
-              </View>
+              </Pressable>
             ))}
           </View>
           
+          {/* Tous les articles (résumé) */}
           <View style={styles.summarySection}>
-            <Text style={styles.sectionTitle}>Tous les Articles (Résumé)</Text>
+            <Text style={styles.sectionTitle}>
+              Tous les Articles ({summaryItems.length})
+            </Text>
+            
             {summaryItems.map((item, index) => (
-              <View key={`summary-${item.id}-${index}`} style={styles.summaryItemRow}>
+              <View key={`summary-${index}`} style={styles.summaryItemRow}>
                 <Text style={styles.summaryItemName}>{item.name}</Text>
                 <View style={styles.summaryItemStats}>
                   <Text style={styles.summaryItemQuantity}>{item.totalQuantity} vendus</Text>
@@ -577,6 +740,13 @@ const styles = StyleSheet.create({
   activeViewModeButton: {
     backgroundColor: '#e3f2fd',
     borderColor: '#2196F3',
+  },
+  groupByButton: {
+    backgroundColor: '#f9f9f9',
+  },
+  groupByText: {
+    color: '#666',
+    fontWeight: '500',
   },
   viewModeText: {
     color: '#666',
@@ -712,6 +882,16 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#666',
   },
+  paymentMethodIcons: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
+  paymentMethodIcon: {
+    fontSize: 14,
+    color: '#2196F3',
+  },
   scrollContainer: {
     flex: 1,
     padding: 12,
@@ -741,6 +921,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 16,
     marginBottom: 12,
+    position: 'relative',
     borderLeftWidth: 4,
     borderLeftColor: '#2196F3',
     shadowColor: '#000',
@@ -785,6 +966,22 @@ const styles = StyleSheet.create({
   detailValue: {
     fontSize: 14,
     fontWeight: '500',
+  },
+  categoryTag: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    gap: 4,
+  },
+  categoryTagText: {
+    fontSize: 12,
+    color: '#666',
   },
   // Styles pour la vue résumé
   summarySection: {

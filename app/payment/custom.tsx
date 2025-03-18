@@ -164,7 +164,6 @@ export default function CustomSplitScreen() {
           continue;
         }
 
-        // Créer un enregistrement de facture
         const bill = {
           id: Date.now() + i,
           tableNumber: tableIdNum,
@@ -176,8 +175,13 @@ export default function CustomSplitScreen() {
           timestamp: new Date().toISOString(),
           paymentMethod: method,
           paymentType: 'custom' as 'custom',
+          // Stocker les articles avec le pourcentage de paiement
+          paidItems: orderItems.map((item: any) => ({
+            ...item,
+            paymentPercentage: table.order ? (amount / table.order.total) * 100 : 0,
+            customAmount: amount 
+          }))
         };
-
         // Ajouter à l'historique des factures
         await addBill(bill);
 
