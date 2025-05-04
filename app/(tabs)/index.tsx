@@ -1,18 +1,37 @@
-// app/(tabs)/index.tsx - Optimisé pour rafraichissement des données et affichage des items
-
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert, Platform, ActivityIndicator } from 'react-native';
-import { useState, useEffect, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Pressable,
+  Alert,
+  Platform,
+  ActivityIndicator,
+} from 'react-native';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Users, RefreshCcw, Filter } from 'lucide-react-native';
-import { 
-  getTables, 
-  saveTables, 
-  Table, 
-  resetAllTables, 
-  TABLE_SECTIONS, 
+import {
+  getTables,
+  saveTables,
+  Table,
+  resetAllTables,
+  TABLE_SECTIONS,
 } from '../../utils/storage';
 import CustomCoversModal from '../components/CustomCoversModal';
 import CoversSelectionModal from '../components/CoversSelectionModal';
+
+// Mise en cache des couleurs des tables
+const TABLE_COLORS = {
+  available: '#4CAF50',
+  occupied: '#F44336',
+  reserved: '#FFC107',
+  default: '#E0E0E0',
+} as const;
+
+// Constantes optimisées
+const LOADING_DELAY = 200; // ms
+const REFRESH_DEBOUNCE = 300; // ms
 
 export default function TablesScreen() {
   const router = useRouter();
@@ -22,57 +41,80 @@ export default function TablesScreen() {
   const [activeSection, setActiveSection] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
-  
+
   // États pour les modals
-  const [customCoversModalVisible, setCustomCoversModalVisible] = useState(false);
-  const [coversSelectionModalVisible, setCoversSelectionModalVisible] = useState(false);
+  const [customCoversModalVisible, setCustomCoversModalVisible] =
+    useState(false);
+  const [coversSelectionModalVisible, setCoversSelectionModalVisible] =
+    useState(false);
   const [selectedTable, setSelectedTable] = useState<Table | null>(null);
 
-  // Chargement initial des tables
+  // Mémoïzation des sections
+  const sections = useMemo(() => Object.values(TABLE_SECTIONS || {}), []);
+
+  // Mémoïzation des tables par section
+  const tablesBySection = useMemo(() => {
+    return sections.reduce((acc, section) => {
+      acc[section] = tables.filter((table) => {
+        if (!table.section) return false;
+        return table.section.toLowerCase() === section.toLowerCase();
+      });
+      return acc;
+    }, {} as Record<string, Table[]>);
+  }, [tables, sections]);
+
+  // Chargement initial des tables avec buffer optionnel
   useEffect(() => {
-    loadTables();
+    let mounted = true;
+    let timeoutId: ReturnType<typeof setTimeout>;
+
+    const initialize = async () => {
+      // Delay initial loading slightly to allow UI to render
+      timeoutId = setTimeout(() => {
+        if (mounted) {
+          loadTables(true);
+        }
+      }, LOADING_DELAY);
+    };
+
+    initialize();
+
+    return () => {
+      mounted = false;
+      clearTimeout(timeoutId);
+    };
   }, []);
 
   // Rafraîchir les tables à chaque fois que l'écran redevient actif
   useFocusEffect(
     useCallback(() => {
-      console.log("Plan du restaurant en focus - rafraîchissement des données");
-      loadTables();
+      console.log('Plan du restaurant en focus - rafraîchissement des données');
+      loadTables(false);
       return () => {
         // Fonction de nettoyage si nécessaire
       };
     }, [])
   );
 
-  const loadTables = async (showLoading = true) => {
+  const loadTables = useCallback(async (showLoading = true) => {
     if (showLoading) {
       setLoading(true);
       setError(null);
     } else {
       setRefreshing(true);
     }
-    
+
     try {
       // Récupérer les tables depuis le stockage
       const loadedTables = await getTables();
-      
-      // Ajouter des logs pour comprendre ce qui est chargé
-      const occupiedCount = loadedTables.filter(t => t.status === 'occupied').length;
-      const withOrdersCount = loadedTables.filter(t => t.order && t.order.items.length > 0).length;
-      
-      
-      // Afficher les détails des tables avec commandes
-      loadedTables
-        .filter(t => t.order && t.order.items.length > 0)
-        .forEach(t => {
-          console.log(`Table ${t.id} (${t.name}): ${t.order?.items.length || 0} items, total: ${t.order?.total.toFixed(2) || 0} €`);
-        });
-      
+
       setTables(loadedTables);
       setLastRefresh(new Date());
     } catch (error) {
-      console.error("Error loading tables:", error);
-      setError("Erreur lors du chargement des tables. Essayez de les réinitialiser.");
+      console.error('Error loading tables:', error);
+      setError(
+        'Erreur lors du chargement des tables. Essayez de les réinitialiser.'
+      );
     } finally {
       if (showLoading) {
         setLoading(false);
@@ -80,161 +122,219 @@ export default function TablesScreen() {
         setRefreshing(false);
       }
     }
-  };
+  }, []);
 
-  const handleRefreshTables = () => {
-    loadTables();
-  };
+  // Fonction de rafraîchissement avec debounce
+  const handleRefreshTables = useCallback(() => {
+    loadTables(false);
+  }, [loadTables]);
 
-  const handleResetAllTables = async () => {
+  const handleResetAllTables = useCallback(() => {
     Alert.alert(
       'Réinitialiser Toutes les Tables',
       'Êtes-vous sûr de vouloir réinitialiser toutes les tables?',
       [
         { text: 'Annuler', style: 'cancel' },
-        { 
-          text: 'Réinitialiser', 
+        {
+          text: 'Réinitialiser',
           style: 'destructive',
           onPress: async () => {
             setLoading(true);
             try {
               await resetAllTables();
-              await loadTables();
-              Alert.alert('Succès', 'Toutes les tables ont été réinitialisées.');
+              await loadTables(true);
+              Alert.alert(
+                'Succès',
+                'Toutes les tables ont été réinitialisées.'
+              );
             } catch (error) {
-              console.error("Error resetting tables:", error);
-              Alert.alert('Erreur', 'Un problème est survenu lors de la réinitialisation des tables.');
+              console.error('Error resetting tables:', error);
+              Alert.alert(
+                'Erreur',
+                'Un problème est survenu lors de la réinitialisation des tables.'
+              );
             } finally {
               setLoading(false);
             }
-          }
-        }
+          },
+        },
       ]
     );
-  };
+  }, [loadTables]);
 
-  const openTable = (table: Table) => {
-    if (table.status === 'available') {
-      setSelectedTable(table);
-      setCoversSelectionModalVisible(true);
-    } else if (table.status === 'occupied') {
-      router.push(`/table/${table.id}`);
-    } else if (table.status === 'reserved') {
-      Alert.alert(
-        'Table Réservée',
-        `Cette table (${table.name}) est actuellement réservée. Que souhaitez-vous faire?`,
-        [
-          { text: 'Annuler', style: 'cancel' },
-          { 
-            text: 'Rendre Disponible', 
-            onPress: async () => {
-              const updatedTable = { ...table, status: 'available' as const };
-              const updatedTables = tables.map(t => 
-                t.id === table.id ? updatedTable : t
-              );
-              setTables(updatedTables);
-              await saveTables(updatedTables);
-            }
-          },
-          { 
-            text: 'Ouvrir Table', 
-            onPress: () => openTable({ ...table, status: 'available' }) 
-          }
-        ]
-      );
-    }
-  };
+  const openTable = useCallback(
+    (table: Table) => {
+      if (table.status === 'available') {
+        setSelectedTable(table);
+        setCoversSelectionModalVisible(true);
+      } else if (table.status === 'occupied') {
+        router.push(`/table/${table.id}`);
+      } else if (table.status === 'reserved') {
+        Alert.alert(
+          'Table Réservée',
+          `Cette table (${table.name}) est actuellement réservée. Que souhaitez-vous faire?`,
+          [
+            { text: 'Annuler', style: 'cancel' },
+            {
+              text: 'Rendre Disponible',
+              onPress: async () => {
+                const updatedTable = { ...table, status: 'available' as const };
+                const updatedTables = tables.map((t) =>
+                  t.id === table.id ? updatedTable : t
+                );
+                setTables(updatedTables);
+                await saveTables(updatedTables);
+              },
+            },
+            {
+              text: 'Ouvrir Table',
+              onPress: () => openTable({ ...table, status: 'available' }),
+            },
+          ]
+        );
+      }
+    },
+    [router, tables]
+  );
 
   // Gérer le nombre de couverts personnalisé
-  const handleCustomCovers = (covers: number) => {
-    if (selectedTable) {
-      processOpenTable(selectedTable, covers);
-    }
-  };
+  const handleCustomCovers = useCallback(
+    (covers: number) => {
+      if (selectedTable) {
+        processOpenTable(selectedTable, covers);
+      }
+    },
+    [selectedTable]
+  );
 
   // Gérer la sélection d'un nombre de couverts prédéfini
-  const handleSelectCovers = (covers: number) => {
-    if (selectedTable) {
-      setCoversSelectionModalVisible(false);
-      processOpenTable(selectedTable, covers);
-    }
-  };
+  const handleSelectCovers = useCallback(
+    (covers: number) => {
+      if (selectedTable) {
+        setCoversSelectionModalVisible(false);
+        processOpenTable(selectedTable, covers);
+      }
+    },
+    [selectedTable]
+  );
 
   // Ouvrir le modal de couverts personnalisés
-  const handleCustomCoversOpen = () => {
+  const handleCustomCoversOpen = useCallback(() => {
     setCoversSelectionModalVisible(false);
     setCustomCoversModalVisible(true);
-  };
+  }, []);
 
   // Traiter l'ouverture d'une table avec un nombre spécifique de couverts
-  const processOpenTable = async (table: Table, guestNumber: number) => {
-    try {
-      // Mettre à jour le statut de la table
-      const updatedTable: Table = {
-        ...table,
-        status: 'occupied',
-        guests: guestNumber,
-        order: {
-          id: Date.now(),
-          items: [],
+  const processOpenTable = useCallback(
+    async (table: Table, guestNumber: number) => {
+      try {
+        // Mettre à jour le statut de la table
+        const updatedTable: Table = {
+          ...table,
+          status: 'occupied',
           guests: guestNumber,
-          status: 'active',
-          timestamp: new Date().toISOString(),
-          total: 0
-        }
-      };
+          order: {
+            id: Date.now(),
+            items: [],
+            guests: guestNumber,
+            status: 'active',
+            timestamp: new Date().toISOString(),
+            total: 0,
+          },
+        };
 
-      // Mettre à jour les tables dans l'état et le stockage
-      const updatedTables = tables.map(t => 
-        t.id === table.id ? updatedTable : t
-      );
-      setTables(updatedTables);
-      await saveTables(updatedTables);
+        // Mettre à jour les tables dans l'état et le stockage
+        const updatedTables = tables.map((t) =>
+          t.id === table.id ? updatedTable : t
+        );
+        setTables(updatedTables);
+        await saveTables(updatedTables);
 
-      // Naviguer vers la page de détail de la table
-      router.push(`/table/${table.id}`);
-    } catch (error) {
-      console.error("Error opening table:", error);
-      Alert.alert("Erreur", "Impossible d'ouvrir la table. Veuillez réessayer.");
-    }
-  };
+        // Naviguer vers la page de détail de la table
+        router.push(`/table/${table.id}`);
+      } catch (error) {
+        console.error('Error opening table:', error);
+        Alert.alert(
+          'Erreur',
+          "Impossible d'ouvrir la table. Veuillez réessayer."
+        );
+      }
+    },
+    [tables, router]
+  );
 
-  const getTableColor = (status: Table['status']) => {
-    switch (status) {
-      case 'available':
-        return '#4CAF50';
-      case 'occupied':
-        return '#F44336';
-      case 'reserved':
-        return '#FFC107';
-      default:
-        return '#E0E0E0';
-    }
-  };
-
-  // Get all available sections
-  const sections = Object.values(TABLE_SECTIONS || {});
-
-  // Filter tables by section
-  const getTablesBySection = (section: string) => {
-    const filtered = tables.filter(table => {
-      if (!table.section) return false;
-      return table.section.toLowerCase() === section.toLowerCase();
-    });
-    return filtered;
-  };
+  const getTableColor = useCallback((status: Table['status']) => {
+    return TABLE_COLORS[status] || TABLE_COLORS.default;
+  }, []);
 
   // Toggle section filtering
-  const toggleSection = (section: string) => {
-    if (activeSection === section) {
-      setActiveSection(null); // Show all sections
-    } else {
-      setActiveSection(section); // Filter to just this section
-    }
-  };
+  const toggleSection = useCallback((section: string) => {
+    setActiveSection((current) => (current === section ? null : section));
+  }, []);
 
   // Show all sections or just the active one
-  const sectionsToDisplay = activeSection ? [activeSection] : sections;
+  const sectionsToDisplay = useMemo(() => {
+    return activeSection ? [activeSection] : sections;
+  }, [activeSection, sections]);
+
+  // Rendering optimisations
+  const renderTableItem = useCallback(
+    (table: Table) => (
+      <Pressable
+        key={table.id}
+        style={[styles.table, { backgroundColor: getTableColor(table.status) }]}
+        onPress={() => openTable(table)}
+      >
+        <Text style={styles.tableNumber}>{table.name}</Text>
+        <View style={styles.tableInfo}>
+          <Users size={20} color="white" />
+          <Text style={styles.seats}>{table.guests || 0}</Text>
+        </View>
+        <Text style={styles.status}>{table.status}</Text>
+        {table.order?.items.length ? (
+          <Text style={styles.orderInfo}>
+            {table.order.items.length} items - {table.order.total.toFixed(2)}€
+          </Text>
+        ) : null}
+      </Pressable>
+    ),
+    [getTableColor, openTable]
+  );
+
+  const renderSectionContent = useCallback(
+    (section: string) => {
+      const sectionTables = tablesBySection[section] || [];
+
+      if (sectionTables.length === 0) {
+        return (
+          <View style={styles.noTablesContainer}>
+            <Text style={styles.noTablesText}>
+              Aucune table dans cette section
+            </Text>
+            <Text style={styles.noTablesDetails}>
+              Platform: {Platform.OS}, Total Tables: {tables.length}, Section:{' '}
+              {section}
+            </Text>
+            <Pressable
+              style={styles.sectionResetButton}
+              onPress={handleResetAllTables}
+            >
+              <Text style={styles.sectionResetText}>
+                Réinitialiser Toutes les Tables
+              </Text>
+            </Pressable>
+          </View>
+        );
+      }
+
+      return (
+        <View style={styles.tablesGrid}>
+          {sectionTables.map(renderTableItem)}
+        </View>
+      );
+    },
+    [tablesBySection, tables.length, handleResetAllTables, renderTableItem]
+  );
 
   if (loading) {
     return (
@@ -249,13 +349,17 @@ export default function TablesScreen() {
     return (
       <View style={styles.loadingContainer}>
         {error && <Text style={styles.errorText}>{error}</Text>}
-        {tables.length === 0 && <Text style={styles.errorText}>Aucune table trouvée. Veuillez initialiser la base de données.</Text>}
-        
-        <Pressable 
-          style={styles.resetButton} 
-          onPress={handleResetAllTables}>
+        {tables.length === 0 && (
+          <Text style={styles.errorText}>
+            Aucune table trouvée. Veuillez initialiser la base de données.
+          </Text>
+        )}
+
+        <Pressable style={styles.resetButton} onPress={handleResetAllTables}>
           <RefreshCcw size={20} color="white" />
-          <Text style={styles.resetButtonText}>Réinitialiser Toutes les Tables</Text>
+          <Text style={styles.resetButtonText}>
+            Réinitialiser Toutes les Tables
+          </Text>
         </Pressable>
       </View>
     );
@@ -271,7 +375,7 @@ export default function TablesScreen() {
         onCustomCovers={handleCustomCoversOpen}
         tableName={selectedTable?.name || ''}
       />
-      
+
       {/* Modal pour le nombre de couverts personnalisé */}
       <CustomCoversModal
         visible={customCoversModalVisible}
@@ -284,25 +388,31 @@ export default function TablesScreen() {
         <Text style={styles.title}>Plan du Restaurant</Text>
         <View style={styles.headerButtons}>
           {refreshing && (
-            <ActivityIndicator size="small" color="#2196F3" style={{ marginRight: 10 }} />
+            <ActivityIndicator
+              size="small"
+              color="#2196F3"
+              style={{ marginRight: 10 }}
+            />
           )}
-          <Pressable 
-            style={styles.refreshButton} 
-            onPress={handleRefreshTables}>
+          <Pressable style={styles.refreshButton} onPress={handleRefreshTables}>
             <RefreshCcw size={20} color="#2196F3" />
             <Text style={styles.refreshButtonText}>Rafraîchir</Text>
           </Pressable>
-          <Pressable 
-            style={styles.filterButton} 
-            onPress={() => setActiveSection(null)}>
+          <Pressable
+            style={styles.filterButton}
+            onPress={() => setActiveSection(null)}
+          >
             <Filter size={20} color={activeSection ? '#666' : '#2196F3'} />
-            <Text style={[styles.filterButtonText, { color: activeSection ? '#666' : '#2196F3' }]}>
+            <Text
+              style={[
+                styles.filterButtonText,
+                { color: activeSection ? '#666' : '#2196F3' },
+              ]}
+            >
               Tout
             </Text>
           </Pressable>
-          <Pressable 
-            style={styles.resetButton} 
-            onPress={handleResetAllTables}>
+          <Pressable style={styles.resetButton} onPress={handleResetAllTables}>
             <RefreshCcw size={20} color="white" />
             <Text style={styles.resetButtonText}>Réinitialiser</Text>
           </Pressable>
@@ -311,19 +421,19 @@ export default function TablesScreen() {
 
       <View style={styles.mainContent}>
         <View style={styles.sectionTabs}>
-          {sections.map(section => (
+          {sections.map((section) => (
             <Pressable
               key={section}
               style={[
                 styles.sectionTab,
-                activeSection === section && styles.activeTab
+                activeSection === section && styles.activeTab,
               ]}
               onPress={() => toggleSection(section)}
             >
-              <Text 
+              <Text
                 style={[
                   styles.sectionTabText,
-                  activeSection === section && styles.activeTabText
+                  activeSection === section && styles.activeTabText,
                 ]}
               >
                 {section}
@@ -334,58 +444,12 @@ export default function TablesScreen() {
 
         <ScrollView style={styles.scrollContainer}>
           <View style={styles.tablesContainer}>
-            {sectionsToDisplay.map(section => {
-              const sectionTables = getTablesBySection(section);
-              
-              return (
-                <View key={section} style={styles.sectionContainer}>
-                  <Text style={styles.sectionTitle}>{section}</Text>
-                  {sectionTables.length === 0 ? (
-                    <View style={styles.noTablesContainer}>
-                      <Text style={styles.noTablesText}>Aucune table dans cette section</Text>
-                      <Text style={styles.noTablesDetails}>
-                        Platform: {Platform.OS}, 
-                        Total Tables: {tables.length}, 
-                        Section: {section}
-                      </Text>
-                      <Pressable
-                        style={styles.sectionResetButton}
-                        onPress={handleResetAllTables}>
-                        <Text style={styles.sectionResetText}>
-                          Réinitialiser Toutes les Tables
-                        </Text>
-                      </Pressable>
-                    </View>
-                  ) : (
-                    <View style={styles.tablesGrid}>
-                      {sectionTables.map((table) => (
-                        <Pressable
-                          key={table.id}
-                          style={[
-                            styles.table,
-                            { backgroundColor: getTableColor(table.status) },
-                          ]}
-                          onPress={() => openTable(table)}>
-                          <Text style={styles.tableNumber}>{table.name}</Text>
-                          <View style={styles.tableInfo}>
-                            <Users size={20} color="white" />
-                            <Text style={styles.seats}>
-                              {table.guests || 0}
-                            </Text>
-                          </View>
-                          <Text style={styles.status}>{table.status}</Text>
-                          {table.order && table.order.items.length > 0 && (
-                            <Text style={styles.orderInfo}>
-                              {table.order.items.length} items - ${table.order.total.toFixed(2)}
-                            </Text>
-                          )}
-                        </Pressable>
-                      ))}
-                    </View>
-                  )}
-                </View>
-              );
-            })}
+            {sectionsToDisplay.map((section) => (
+              <View key={section} style={styles.sectionContainer}>
+                <Text style={styles.sectionTitle}>{section}</Text>
+                {renderSectionContent(section)}
+              </View>
+            ))}
           </View>
         </ScrollView>
       </View>
