@@ -1,7 +1,32 @@
-// app/(tabs)/bills.tsx - Version améliorée avec tri, recherche et suppression
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert, Modal, ActivityIndicator, Share, TextInput } from 'react-native';
-import { useState, useEffect } from 'react';
-import { Receipt, Printer, Download, Share as ShareIcon, Eye, X, Trash2, Search, Calendar, Filter, ArrowDownAZ, ArrowUpAZ, ArrowUpDown, BarChart3 } from 'lucide-react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Pressable,
+  Alert,
+  Modal,
+  ActivityIndicator,
+  Share,
+  TextInput,
+} from 'react-native';
+import { useState, useEffect, useCallback, useMemo, memo } from 'react';
+import {
+  Receipt,
+  Printer,
+  Download,
+  Share as ShareIcon,
+  Eye,
+  X,
+  Trash2,
+  Search,
+  Calendar,
+  Filter,
+  ArrowDownAZ,
+  ArrowUpAZ,
+  ArrowUpDown,
+  BarChart3,
+} from 'lucide-react-native';
 import { getBills, saveBills } from '../../utils/storage';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -29,248 +54,321 @@ interface ViewReceiptModalProps {
   onDelete: () => void;
 }
 
-// Modal pour voir le reçu
-const ViewReceiptModal: React.FC<ViewReceiptModalProps> = ({
-  visible,
-  bill,
-  onClose,
-  onPrint,
-  onShare,
-  onDelete
-}) => {
-  if (!bill) return null;
+// Cache pour les constantes
+const STATUS_COLORS = {
+  pending: '#FFC107',
+  paid: '#4CAF50',
+  split: '#2196F3',
+  default: '#E0E0E0',
+} as const;
 
-  function getStatusColor(status: 'pending' | 'paid' | 'split'): string {
-    switch (status) {
-      case 'pending':
-        return '#FFC107';
-      case 'paid':
-        return '#4CAF50';
-      case 'split':
-        return '#2196F3';
-      default:
-        return '#E0E0E0';
-    }
-  }
+const PAYMENT_METHOD_ICONS = {
+  card: '💳',
+  cash: '💶',
+  check: '📝',
+  default: '',
+} as const;
 
-  const handleDelete = () => {
-    Alert.alert(
-      "Supprimer la facture",
-      "Êtes-vous sûr de vouloir supprimer cette facture ?",
-      [
-        { text: "Annuler", style: "cancel" },
-        { text: "Supprimer", style: "destructive", onPress: onDelete }
-      ]
-    );
-  };
+const PAYMENT_METHOD_LABELS = {
+  card: 'Carte bancaire',
+  cash: 'Espèces',
+  check: 'Chèque',
+} as const;
 
-  return (
-    <Modal
-      visible={visible}
-      transparent={true}
-      animationType="fade"
-      onRequestClose={onClose}
-    >
-      <View style={styles.modalOverlay}>
-        <View style={styles.receiptModalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Reçu</Text>
-            <Pressable onPress={onClose} style={styles.closeButton}>
-              <X size={24} color="#666" />
-            </Pressable>
-          </View>
+const RESTAURANT_INFO = {
+  name: 'Restaurant Manjo Carn',
+  address: 'Route de la Corniche, 82140 Saint Antonin Noble Val',
+  phone: '05 63 68 25 85',
+} as const;
 
-          <ScrollView style={styles.receiptContent}>
-            <View style={styles.restaurantInfo}>
-              <Text style={styles.restaurantName}>Restaurant Manjo Carn</Text>
-              <Text style={styles.restaurantAddress}>Route de la Corniche, 82140 Saint Antonin Noble Val</Text>
-              <Text style={styles.restaurantPhone}>05 63 68 25 85</Text>
+// Modal pour voir le reçu - Mémoïzé
+const ViewReceiptModal = memo<ViewReceiptModalProps>(
+  ({ visible, bill, onClose, onPrint, onShare, onDelete }) => {
+    if (!bill) return null;
+
+    const handleDelete = useCallback(() => {
+      Alert.alert(
+        'Supprimer la facture',
+        'Êtes-vous sûr de vouloir supprimer cette facture ?',
+        [
+          { text: 'Annuler', style: 'cancel' },
+          { text: 'Supprimer', style: 'destructive', onPress: onDelete },
+        ]
+      );
+    }, [onDelete]);
+
+    const statusColor = STATUS_COLORS[bill.status];
+    const paymentLabel = bill.paymentMethod
+      ? PAYMENT_METHOD_LABELS[bill.paymentMethod]
+      : '';
+
+    return (
+      <Modal
+        visible={visible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={onClose}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.receiptModalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Reçu</Text>
+              <Pressable onPress={onClose} style={styles.closeButton}>
+                <X size={24} color="#666" />
+              </Pressable>
             </View>
 
-            <View style={styles.receiptDivider} />
-
-            <View style={styles.billInfo}>
-              <Text style={styles.billTable}>{bill.tableName || `Table ${bill.tableNumber}`}</Text>
-              <Text style={styles.billDate}>
-                {new Date(bill.timestamp).toLocaleString()}
-              </Text>
-              {bill.section && (
-                <Text style={styles.billSection}>Section: {bill.section}</Text>
-              )}
-            </View>
-
-            <View style={styles.receiptDivider} />
-
-            <View style={styles.billSummary}>
-              <View style={styles.billRow}>
-                <Text style={styles.billLabel}>Articles:</Text>
-                <Text style={styles.billValue}>{bill.items}</Text>
+            <ScrollView style={styles.receiptContent}>
+              <View style={styles.restaurantInfo}>
+                <Text style={styles.restaurantName}>
+                  {RESTAURANT_INFO.name}
+                </Text>
+                <Text style={styles.restaurantAddress}>
+                  {RESTAURANT_INFO.address}
+                </Text>
+                <Text style={styles.restaurantPhone}>
+                  {RESTAURANT_INFO.phone}
+                </Text>
               </View>
-              <View style={styles.billRow}>
-                <Text style={styles.billLabel}>Montant:</Text>
-                <Text style={styles.billAmount}>{bill.amount.toFixed(2)} €</Text>
+
+              <View style={styles.receiptDivider} />
+
+              <View style={styles.billInfo}>
+                <Text style={styles.billTable}>
+                  {bill.tableName || `Table ${bill.tableNumber}`}
+                </Text>
+                <Text style={styles.billDate}>
+                  {new Date(bill.timestamp).toLocaleString()}
+                </Text>
+                {bill.section && (
+                  <Text style={styles.billSection}>
+                    Section: {bill.section}
+                  </Text>
+                )}
               </View>
-              <View style={styles.billRow}>
-                <Text style={styles.billLabel}>Statut:</Text>
-                <Text style={[
-                  styles.billStatus,
-                  { color: getStatusColor(bill.status) }
-                ]}>{bill.status}</Text>
-              </View>
-              {bill.paymentMethod && (
+
+              <View style={styles.receiptDivider} />
+
+              <View style={styles.billSummary}>
                 <View style={styles.billRow}>
-                  <Text style={styles.billLabel}>Paiement:</Text>
-                  <Text style={styles.billValue}>
-                    {bill.paymentMethod === 'card' ? 'Carte bancaire' :
-                      bill.paymentMethod === 'cash' ? 'Espèces' :
-                        'Chèque'}
+                  <Text style={styles.billLabel}>Articles:</Text>
+                  <Text style={styles.billValue}>{bill.items}</Text>
+                </View>
+                <View style={styles.billRow}>
+                  <Text style={styles.billLabel}>Montant:</Text>
+                  <Text style={styles.billAmount}>
+                    {bill.amount.toFixed(2)} €
                   </Text>
                 </View>
-              )}
+                <View style={styles.billRow}>
+                  <Text style={styles.billLabel}>Statut:</Text>
+                  <Text style={[styles.billStatus, { color: statusColor }]}>
+                    {bill.status}
+                  </Text>
+                </View>
+                {paymentLabel && (
+                  <View style={styles.billRow}>
+                    <Text style={styles.billLabel}>Paiement:</Text>
+                    <Text style={styles.billValue}>{paymentLabel}</Text>
+                  </View>
+                )}
+              </View>
+
+              <View style={styles.receiptDivider} />
+
+              <Text style={styles.receiptFooter}>Merci de votre visite!</Text>
+            </ScrollView>
+
+            <View style={styles.receiptActions}>
+              <Pressable style={styles.receiptAction} onPress={onPrint}>
+                <Printer size={20} color="#4CAF50" />
+                <Text style={[styles.receiptActionText, { color: '#4CAF50' }]}>
+                  Imprimer
+                </Text>
+              </Pressable>
+              <Pressable style={styles.receiptAction} onPress={onShare}>
+                <ShareIcon size={20} color="#2196F3" />
+                <Text style={[styles.receiptActionText, { color: '#2196F3' }]}>
+                  Partager
+                </Text>
+              </Pressable>
+              <Pressable style={styles.receiptAction} onPress={handleDelete}>
+                <Trash2 size={20} color="#F44336" />
+                <Text style={[styles.receiptActionText, { color: '#F44336' }]}>
+                  Supprimer
+                </Text>
+              </Pressable>
             </View>
-
-            <View style={styles.receiptDivider} />
-
-            <Text style={styles.receiptFooter}>Merci de votre visite!</Text>
-          </ScrollView>
-
-          <View style={styles.receiptActions}>
-            <Pressable style={styles.receiptAction} onPress={onPrint}>
-              <Printer size={20} color="#4CAF50" />
-              <Text style={[styles.receiptActionText, { color: '#4CAF50' }]}>Imprimer</Text>
-            </Pressable>
-            <Pressable style={styles.receiptAction} onPress={onShare}>
-              <ShareIcon size={20} color="#2196F3" />
-              <Text style={[styles.receiptActionText, { color: '#2196F3' }]}>Partager</Text>
-            </Pressable>
-            <Pressable style={styles.receiptAction} onPress={handleDelete}>
-              <Trash2 size={20} color="#F44336" />
-              <Text style={[styles.receiptActionText, { color: '#F44336' }]}>Supprimer</Text>
-            </Pressable>
           </View>
         </View>
-      </View>
-    </Modal>
-  );
-};
+      </Modal>
+    );
+  }
+);
 
-// Componant pour la barre de filtre
+// Composant pour le filtrage - Mémoïzé
 interface FilterBarProps {
-  onFilter: () => void;
   onSearch: (text: string) => void;
   onDateChange: (date: Date | null) => void;
   sortOrder: 'desc' | 'asc' | 'none';
   onSortChange: (order: 'desc' | 'asc' | 'none') => void;
-  onDeleteAll: () => void; // Ajoutez cette ligne
+  onDeleteAll: () => void;
+  onFilter: () => void;
 }
 
-const FilterBar: React.FC<FilterBarProps> = ({
-  onFilter,
-  onSearch,
-  onDateChange,
-  sortOrder,
-  onSortChange,
-  onDeleteAll
-}) => {
-  const [showDatePicker, setShowDatePicker] = useState(false);
-  const [searchText, setSearchText] = useState('');
-  const [selectedDate, setSelectedDate] = useState(new Date());
+const FilterBar = memo<FilterBarProps>(
+  ({
+    onFilter,
+    onSearch,
+    onDateChange,
+    sortOrder,
+    onSortChange,
+    onDeleteAll,
+  }) => {
+    const [showDatePicker, setShowDatePicker] = useState(false);
+    const [searchText, setSearchText] = useState('');
+    const [selectedDate, setSelectedDate] = useState(new Date());
 
-  const handleSearch = (text: string) => {
-    setSearchText(text);
-    onSearch(text);
-  };
+    const handleSearch = useCallback(
+      (text: string) => {
+        setSearchText(text);
+        onSearch(text);
+      },
+      [onSearch]
+    );
 
-  interface DateChangeEvent {
-    type: string;
-    nativeEvent: any;
-  }
+    const handleDateChange = useCallback(
+      (event: any, date?: Date) => {
+        setShowDatePicker(false);
+        if (date) {
+          setSelectedDate(date);
+          onDateChange(date);
+        }
+      },
+      [onDateChange]
+    );
 
-  const handleDateChange = (event: DateChangeEvent, date?: Date | undefined) => {
-    setShowDatePicker(false);
-    if (date) {
-      setSelectedDate(date);
-      onDateChange(date);
-    }
-  };
+    const handleSortToggle = useCallback(() => {
+      let newSortOrder: 'none' | 'desc' | 'asc';
+      switch (sortOrder) {
+        case 'desc':
+          newSortOrder = 'asc';
+          break;
+        case 'asc':
+          newSortOrder = 'none';
+          break;
+        default:
+          newSortOrder = 'desc';
+      }
+      onSortChange(newSortOrder);
+    }, [sortOrder, onSortChange]);
 
-  // Rotation du tri
-  const handleSortToggle = () => {
-    let newSortOrder: 'none' | 'desc' | 'asc';
-    switch (sortOrder) {
-      case 'desc':
-        newSortOrder = 'asc';
-        break;
-      case 'asc':
-        newSortOrder = 'none';
-        break;
-      default:
-        newSortOrder = 'desc';
-    }
-    onSortChange(newSortOrder);
-  };
+    const sortIcon = useMemo(() => {
+      if (sortOrder === 'desc')
+        return <ArrowDownAZ size={20} color="#2196F3" />;
+      if (sortOrder === 'asc') return <ArrowUpAZ size={20} color="#2196F3" />;
+      return <ArrowUpDown size={20} color="#666" />;
+    }, [sortOrder]);
 
-  return (
-    <View style={styles.filterBar}>
-      <View style={styles.searchContainer}>
-        <Search size={20} color="#666" />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Rechercher par table ou montant..."
-          value={searchText}
-          onChangeText={handleSearch}
-        />
-        {searchText ? (
-          <Pressable onPress={() => handleSearch('')}>
-            <X size={20} color="#666" />
+    const sortLabel = useMemo(() => {
+      if (sortOrder === 'none') return 'Trier';
+      if (sortOrder === 'asc') return 'Ancien→Récent';
+      return 'Récent→Ancien';
+    }, [sortOrder]);
+
+    return (
+      <View style={styles.filterBar}>
+        <View style={styles.searchContainer}>
+          <Search size={20} color="#666" />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Rechercher par table ou montant..."
+            value={searchText}
+            onChangeText={handleSearch}
+          />
+          {searchText ? (
+            <Pressable onPress={() => handleSearch('')}>
+              <X size={20} color="#666" />
+            </Pressable>
+          ) : null}
+        </View>
+
+        <View style={styles.filterActions}>
+          <Pressable
+            style={styles.filterButton}
+            onPress={() => setShowDatePicker(true)}
+          >
+            <Calendar size={20} color="#2196F3" />
+            <Text style={styles.filterButtonText}>Par date</Text>
           </Pressable>
-        ) : null}
+
+          <Pressable style={styles.filterButton} onPress={handleSortToggle}>
+            {sortIcon}
+            <Text style={styles.filterButtonText}>{sortLabel}</Text>
+          </Pressable>
+
+          <Pressable style={styles.filterButton} onPress={onDeleteAll}>
+            <Filter size={20} color="#F44336" />
+            <Text style={[styles.filterButtonText, { color: '#F44336' }]}>
+              Supprimer toutes les notes
+            </Text>
+          </Pressable>
+        </View>
+
+        {showDatePicker && (
+          <DateTimePicker
+            value={selectedDate}
+            mode="date"
+            display="default"
+            onChange={handleDateChange}
+          />
+        )}
       </View>
+    );
+  }
+);
 
-      <View style={styles.filterActions}>
-        <Pressable
-          style={styles.filterButton}
-          onPress={() => setShowDatePicker(true)}
-        >
-          <Calendar size={20} color="#2196F3" />
-          <Text style={styles.filterButtonText}>Par date</Text>
-        </Pressable>
+// Composant pour un item de facture - Mémoïzé
+interface BillListItemProps {
+  bill: Bill;
+  isSelected: boolean;
+  onSelect: (bill: Bill) => void;
+}
 
-        <Pressable
-          style={styles.filterButton}
-          onPress={handleSortToggle}
-        >
-          {sortOrder === 'desc' ? (
-            <ArrowDownAZ size={20} color="#2196F3" />
-          ) : sortOrder === 'asc' ? (
-            <ArrowUpAZ size={20} color="#2196F3" />
-          ) : (
-            <ArrowUpDown size={20} color="#666" />
-          )}
-          <Text style={styles.filterButtonText}>
-            {sortOrder === 'none' ? 'Trier' : sortOrder === 'asc' ? 'Ancien→Récent' : 'Récent→Ancien'}
+const BillListItem = memo<BillListItemProps>(
+  ({ bill, isSelected, onSelect }) => {
+    const handlePress = useCallback(() => {
+      onSelect(bill);
+    }, [bill, onSelect]);
+
+    const statusColor = STATUS_COLORS[bill.status];
+    const formattedDate = useMemo(() => {
+      const date = new Date(bill.timestamp);
+      return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      })}`;
+    }, [bill.timestamp]);
+
+    return (
+      <Pressable
+        style={[styles.billListItem, isSelected && styles.selectedBillItem]}
+        onPress={handlePress}
+      >
+        <Text style={styles.billItemTable}>
+          {bill.tableName || `Table ${bill.tableNumber}`}
+        </Text>
+        <View style={styles.billItemDetails}>
+          <Text style={styles.billItemAmount}>{bill.amount.toFixed(2)} €</Text>
+          <Text style={[styles.billItemStatus, { color: statusColor }]}>
+            {bill.status}
           </Text>
-        </Pressable>
-        <Pressable
-          style={styles.filterButton}
-          onPress={onDeleteAll} // Modifiez cette ligne
-        >
-          <Filter size={20} color="#F44336" />
-          <Text style={[styles.filterButtonText, { color: '#F44336' }]}>Supprimer toutes les notes</Text>
-        </Pressable>
-      </View>
-
-      {showDatePicker && (
-        <DateTimePicker
-          value={selectedDate}
-          mode="date"
-          display="default"
-          onChange={handleDateChange}
-        />
-      )}
-    </View>
-  );
-};
+        </View>
+        <Text style={styles.billItemDate}>{formattedDate}</Text>
+      </Pressable>
+    );
+  }
+);
 
 export default function BillsScreen() {
   const [bills, setBills] = useState<Bill[]>([]);
@@ -279,206 +377,181 @@ export default function BillsScreen() {
   const [selectedBill, setSelectedBill] = useState<Bill | null>(null);
   const [viewModalVisible, setViewModalVisible] = useState(false);
   const [processingAction, setProcessingAction] = useState(false);
-  const [sortOrder, setSortOrder] = useState<'desc' | 'asc' | 'none'>('desc'); // 'desc', 'asc', or 'none'
+  const [sortOrder, setSortOrder] = useState<'desc' | 'asc' | 'none'>('desc');
   const [statsModalVisible, setStatsModalVisible] = useState(false);
 
   // Chargement des factures
   useEffect(() => {
+    let mounted = true;
+
+    const loadBills = async () => {
+      try {
+        setLoading(true);
+        const loadedBills = await getBills();
+        if (mounted) {
+          const sortedBills = sortBillsByDate(loadedBills, 'desc');
+          setBills(sortedBills);
+          setFilteredBills(sortedBills);
+          if (sortedBills.length > 0) {
+            setSelectedBill(sortedBills[0]);
+          }
+        }
+      } catch (error) {
+        console.error('Error loading bills:', error);
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    };
+
     loadBills();
+
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  // Fonction pour charger les factures
-  const loadBills = async () => {
-    try {
-      setLoading(true);
-      const loadedBills = await getBills();
-      // Sort bills by timestamp (newest first by default)
-      const sortedBills = sortBillsByDate(loadedBills, 'desc');
-      setBills(sortedBills);
-      setFilteredBills(sortedBills);
+  // Tri des factures par date - Mémoïzé
+  const sortBillsByDate = useCallback(
+    (billsToSort: Bill[], order: 'desc' | 'asc' | 'none' = 'desc') => {
+      if (order === 'none') return billsToSort;
 
-      // Select the first bill by default if available
-      if (sortedBills.length > 0) {
-        setSelectedBill(sortedBills[0]);
+      return [...billsToSort].sort((a, b) => {
+        const dateA = new Date(a.timestamp).getTime();
+        const dateB = new Date(b.timestamp).getTime();
+        return order === 'desc' ? dateB - dateA : dateA - dateB;
+      });
+    },
+    []
+  );
+
+  // Recherche dans les factures - Mémoïzé
+  const handleSearch = useCallback(
+    (text: string) => {
+      if (!text.trim()) {
+        setFilteredBills(sortBillsByDate(bills, sortOrder));
+        return;
       }
-    } catch (error) {
-      console.error('Error loading bills:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  // Tri des factures par date
-  interface SortBillsByDate {
-    (billsToSort: Bill[], order?: 'desc' | 'asc' | 'none'): Bill[];
-  }
+      const lowerCaseText = text.toLowerCase();
+      const filtered = bills.filter((bill) => {
+        const tableName = bill.tableName || `Table ${bill.tableNumber}`;
+        const amount = bill.amount.toString();
 
-  const sortBillsByDate: SortBillsByDate = (billsToSort, order = 'desc') => {
-    if (order === 'none') return billsToSort;
+        return (
+          tableName.toLowerCase().includes(lowerCaseText) ||
+          amount.includes(lowerCaseText) ||
+          (bill.section && bill.section.toLowerCase().includes(lowerCaseText))
+        );
+      });
 
-    return [...billsToSort].sort((a, b) => {
-      const dateA = new Date(a.timestamp).getTime();
-      const dateB = new Date(b.timestamp).getTime();
-      return order === 'desc' ? dateB - dateA : dateA - dateB;
-    });
-  };
+      setFilteredBills(sortBillsByDate(filtered, sortOrder));
+    },
+    [bills, sortOrder, sortBillsByDate]
+  );
 
-  // Recherche dans les factures
-  const handleSearch = (text: String) => {
-    if (!text.trim()) {
-      setFilteredBills(sortBillsByDate(bills, sortOrder));
-      return;
-    }
+  // Filtre par date - Mémoïzé
+  const handleDateFilter = useCallback(
+    (date: Date | null) => {
+      if (!date) {
+        setFilteredBills(sortBillsByDate(bills, sortOrder));
+        return;
+      }
 
-    const lowerCaseText = text.toLowerCase();
-    const filtered = bills.filter(bill => {
-      const tableName = bill.tableName || `Table ${bill.tableNumber}`;
-      const amount = bill.amount.toString();
+      const selectedDate = new Date(date);
+      selectedDate.setHours(0, 0, 0, 0);
+      const nextDay = new Date(selectedDate);
+      nextDay.setDate(selectedDate.getDate() + 1);
 
-      return (
-        tableName.toLowerCase().includes(lowerCaseText) ||
-        amount.includes(lowerCaseText) ||
-        (bill.section && bill.section.toLowerCase().includes(lowerCaseText))
-      );
-    });
+      const filtered = bills.filter((bill) => {
+        const billDate = new Date(bill.timestamp);
+        return billDate >= selectedDate && billDate < nextDay;
+      });
 
-    setFilteredBills(sortBillsByDate(filtered, sortOrder));
-  };
+      setFilteredBills(sortBillsByDate(filtered, sortOrder));
+    },
+    [bills, sortOrder, sortBillsByDate]
+  );
 
-  // Filtre par date
-  interface DateFilterHandler {
-    (date: Date | null): void;
-  }
+  // Changement de l'ordre de tri - Mémoïzé
+  const handleSortChange = useCallback(
+    (newSortOrder: 'desc' | 'asc' | 'none') => {
+      setSortOrder(newSortOrder);
+      setFilteredBills(sortBillsByDate(filteredBills, newSortOrder));
+    },
+    [filteredBills, sortBillsByDate]
+  );
 
-  const handleDateFilter: DateFilterHandler = (date) => {
-    if (!date) {
-      setFilteredBills(sortBillsByDate(bills, sortOrder));
-      return;
-    }
+  const getStatusColor = useCallback(
+    (status: Bill['status']) => STATUS_COLORS[status],
+    []
+  );
 
-    const selectedDate = new Date(date);
-    selectedDate.setHours(0, 0, 0, 0);
-    const nextDay = new Date(selectedDate);
-    nextDay.setDate(selectedDate.getDate() + 1);
-
-    const filtered = bills.filter(bill => {
-      const billDate = new Date(bill.timestamp);
-      return billDate >= selectedDate && billDate < nextDay;
-    });
-
-    setFilteredBills(sortBillsByDate(filtered, sortOrder));
-  };
-
-  // Changement de l'ordre de tri
-  interface SortChangeHandler {
-    (newSortOrder: 'desc' | 'asc' | 'none'): void;
-  }
-
-  const handleSortChange: SortChangeHandler = (newSortOrder) => {
-    setSortOrder(newSortOrder);
-    setFilteredBills(sortBillsByDate(filteredBills, newSortOrder));
-  };
-
-  const getStatusColor = (status: Bill['status']) => {
-    switch (status) {
-      case 'pending':
-        return '#FFC107';
-      case 'paid':
-        return '#4CAF50';
-      case 'split':
-        return '#2196F3';
-      default:
-        return '#E0E0E0';
-    }
-  };
-
-  const handleSelectBill = (bill: Bill) => {
+  const handleSelectBill = useCallback((bill: Bill) => {
     setSelectedBill(bill);
-  };
+  }, []);
 
-  const handleView = () => {
+  const handleView = useCallback(() => {
     if (selectedBill) {
       setViewModalVisible(true);
     } else {
-      Alert.alert('Information', 'Veuillez sélectionner une facture à visualiser.');
+      Alert.alert(
+        'Information',
+        'Veuillez sélectionner une facture à visualiser.'
+      );
     }
-  };
+  }, [selectedBill]);
 
-
-  const handleDeleteAll = async () => {
+  const handleDeleteAll = useCallback(() => {
     Alert.alert(
-      "Supprimer toutes les factures",
-      "Êtes-vous sûr de vouloir supprimer toutes les factures ?",
+      'Supprimer toutes les factures',
+      'Êtes-vous sûr de vouloir supprimer toutes les factures ?',
       [
-        { text: "Annuler", style: "cancel" },
+        { text: 'Annuler', style: 'cancel' },
         {
-          text: "Supprimer",
-          style: "destructive",
+          text: 'Supprimer',
+          style: 'destructive',
           onPress: async () => {
             try {
               setProcessingAction(true);
-
-              // Mettre à jour le stockage
               await saveBills([]);
-
-              // Mettre à jour l'état local
               setBills([]);
               setFilteredBills([]);
               setSelectedBill(null);
-
-              Alert.alert('Succès', 'Toutes les factures ont été supprimées avec succès.');
+              Alert.alert(
+                'Succès',
+                'Toutes les factures ont été supprimées avec succès.'
+              );
             } catch (error) {
               console.error('Erreur lors de la suppression:', error);
               Alert.alert('Erreur', 'Impossible de supprimer les factures.');
             } finally {
               setProcessingAction(false);
             }
-          }
-        }
+          },
+        },
       ]
     );
-  };
+  }, []);
 
-  const getBillPaymentMethodIcon = (method?: 'card' | 'cash' | 'check') => {
-    switch (method) {
-      case 'card':
-        return '💳';
-      case 'cash':
-        return '💶';
-      case 'check':
-        return '📝';
-      default:
-        return '';
-    }
-  };
-
-  // Suppression d'une facture
-  const handleDeleteBill = async () => {
+  const handleDeleteBill = useCallback(async () => {
     if (!selectedBill) return;
 
     try {
       setProcessingAction(true);
-
-      // Filtrer la facture à supprimer
-      const updatedBills = bills.filter(bill => bill.id !== selectedBill.id);
-
-      // Mettre à jour le stockage
+      const updatedBills = bills.filter((bill) => bill.id !== selectedBill.id);
       await saveBills(updatedBills);
-
-      // Mettre à jour l'état local
       setBills(updatedBills);
       setFilteredBills(sortBillsByDate(updatedBills, sortOrder));
 
-      // Si la facture supprimée était sélectionnée, sélectionner la première facture si disponible
       if (updatedBills.length > 0) {
         setSelectedBill(updatedBills[0]);
       } else {
         setSelectedBill(null);
       }
 
-      // Fermer le modal
       setViewModalVisible(false);
-
       Alert.alert('Succès', 'Facture supprimée avec succès.');
     } catch (error) {
       console.error('Erreur lors de la suppression:', error);
@@ -486,9 +559,13 @@ export default function BillsScreen() {
     } finally {
       setProcessingAction(false);
     }
-  };
+  }, [selectedBill, bills, sortOrder, sortBillsByDate]);
 
-  const generateHTML = (bill: Bill) => {
+  const generateHTML = useCallback((bill: Bill) => {
+    const paymentLabel = bill.paymentMethod
+      ? PAYMENT_METHOD_LABELS[bill.paymentMethod]
+      : '';
+
     return `
       <html>
         <head>
@@ -503,9 +580,9 @@ export default function BillsScreen() {
         </head>
         <body>
           <div class="header">
-            <h1>Restaurant Manjo Carn</h1>
-            <p>Route de la Corniche, 82140 Saint Antonin Noble Val</p>
-            <p>05 63 68 25 85</p>
+            <h1>${RESTAURANT_INFO.name}</h1>
+            <p>${RESTAURANT_INFO.address}</p>
+            <p>${RESTAURANT_INFO.phone}</p>
           </div>
           
           <div class="info">
@@ -518,10 +595,7 @@ export default function BillsScreen() {
             <p>Articles: ${bill.items}</p>
             <h2>Total: ${bill.amount.toFixed(2)} €</h2>
             <p>Statut: ${bill.status}</p>
-            ${bill.paymentMethod ? `<p>Paiement: ${bill.paymentMethod === 'card' ? 'Carte bancaire' :
-        bill.paymentMethod === 'cash' ? 'Espèces' :
-          'Chèque'
-        }</p>` : ''}
+            ${paymentLabel ? `<p>Paiement: ${paymentLabel}</p>` : ''}
           </div>
   
           <div class="payment-info">
@@ -532,11 +606,14 @@ export default function BillsScreen() {
         </body>
       </html>
     `;
-  };
+  }, []);
 
-  const handlePrint = async () => {
+  const handlePrint = useCallback(async () => {
     if (!selectedBill) {
-      Alert.alert('Information', 'Veuillez sélectionner une facture à imprimer.');
+      Alert.alert(
+        'Information',
+        'Veuillez sélectionner une facture à imprimer.'
+      );
       return;
     }
 
@@ -545,18 +622,24 @@ export default function BillsScreen() {
       await Print.printAsync({
         html: generateHTML(selectedBill),
       });
-      Alert.alert('Succès', 'Reçu envoyé à l\'imprimante.');
+      Alert.alert('Succès', "Reçu envoyé à l'imprimante.");
     } catch (error) {
-      console.error('Erreur d\'impression:', error);
-      Alert.alert('Erreur', 'Impossible d\'imprimer le reçu. Vérifiez que votre imprimante est connectée.');
+      console.error("Erreur d'impression:", error);
+      Alert.alert(
+        'Erreur',
+        "Impossible d'imprimer le reçu. Vérifiez que votre imprimante est connectée."
+      );
     } finally {
       setProcessingAction(false);
     }
-  };
+  }, [selectedBill, generateHTML]);
 
-  const handleShare = async () => {
+  const handleShare = useCallback(async () => {
     if (!selectedBill) {
-      Alert.alert('Information', 'Veuillez sélectionner une facture à partager.');
+      Alert.alert(
+        'Information',
+        'Veuillez sélectionner une facture à partager.'
+      );
       return;
     }
 
@@ -576,11 +659,14 @@ export default function BillsScreen() {
     } finally {
       setProcessingAction(false);
     }
-  };
+  }, [selectedBill, generateHTML]);
 
-  const handleExport = async () => {
+  const handleExport = useCallback(async () => {
     if (!selectedBill) {
-      Alert.alert('Information', 'Veuillez sélectionner une facture à exporter.');
+      Alert.alert(
+        'Information',
+        'Veuillez sélectionner une facture à exporter.'
+      );
       return;
     }
 
@@ -598,12 +684,33 @@ export default function BillsScreen() {
 
       Alert.alert('Succès', 'Reçu exporté avec succès.');
     } catch (error) {
-      console.error('Erreur d\'export:', error);
-      Alert.alert('Erreur', 'Impossible d\'exporter le reçu.');
+      console.error("Erreur d'export:", error);
+      Alert.alert('Erreur', "Impossible d'exporter le reçu.");
     } finally {
       setProcessingAction(false);
     }
-  };
+  }, [selectedBill, generateHTML]);
+
+  const billListMemo = useMemo(() => {
+    if (filteredBills.length === 0) {
+      return (
+        <View style={styles.noResultsContainer}>
+          <Text style={styles.noResultsText}>
+            Aucune facture ne correspond à votre recherche
+          </Text>
+        </View>
+      );
+    }
+
+    return filteredBills.map((bill) => (
+      <BillListItem
+        key={bill.id}
+        bill={bill}
+        isSelected={selectedBill?.id === bill.id}
+        onSelect={handleSelectBill}
+      />
+    ));
+  }, [filteredBills, selectedBill, handleSelectBill]);
 
   if (loading) {
     return (
@@ -620,7 +727,8 @@ export default function BillsScreen() {
         <Text style={styles.title}>Factures & Paiements</Text>
         <Pressable
           style={styles.statsButton}
-          onPress={() => setStatsModalVisible(true)}>
+          onPress={() => setStatsModalVisible(true)}
+        >
           <BarChart3 size={20} color="#673AB7" />
           <Text style={styles.statsButtonText}>Statistiques</Text>
         </Pressable>
@@ -630,15 +738,16 @@ export default function BillsScreen() {
         <View style={styles.emptyContainer}>
           <Receipt size={60} color="#cccccc" />
           <Text style={styles.emptyText}>Aucune facture trouvée</Text>
-          <Text style={styles.emptySubtext}>Les factures apparaîtront ici après les paiements</Text>
+          <Text style={styles.emptySubtext}>
+            Les factures apparaîtront ici après les paiements
+          </Text>
         </View>
       ) : (
         <View style={styles.mainContainer}>
-          {/* Barre de filtrage et recherche */}
           <FilterBar
             onSearch={handleSearch}
             onDateChange={handleDateFilter}
-            onFilter={() => { }}
+            onFilter={() => {}}
             sortOrder={sortOrder}
             onSortChange={handleSortChange}
             onDeleteAll={handleDeleteAll}
@@ -649,40 +758,12 @@ export default function BillsScreen() {
             <View style={styles.billsList}>
               <Text style={styles.listTitle}>Historique des Factures</Text>
               <Text style={styles.billCount}>
-                {filteredBills.length} facture(s) {filteredBills.length !== bills.length ? `(sur ${bills.length} total)` : ''}
+                {filteredBills.length} facture(s){' '}
+                {filteredBills.length !== bills.length
+                  ? `(sur ${bills.length} total)`
+                  : ''}
               </Text>
-              <ScrollView>
-                {filteredBills.length === 0 ? (
-                  <View style={styles.noResultsContainer}>
-                    <Text style={styles.noResultsText}>Aucune facture ne correspond à votre recherche</Text>
-                  </View>
-                ) : (
-                  filteredBills.map((bill) => (
-                    <Pressable
-                      key={bill.id}
-                      style={[
-                        styles.billListItem,
-                        selectedBill?.id === bill.id && styles.selectedBillItem
-                      ]}
-                      onPress={() => handleSelectBill(bill)}
-                    >
-                      <Text style={styles.billItemTable}>{bill.tableName || `Table ${bill.tableNumber}`}</Text>
-                      <View style={styles.billItemDetails}>
-                        <Text style={styles.billItemAmount}>{bill.amount.toFixed(2)} €</Text>
-                        <Text style={[
-                          styles.billItemStatus,
-                          { color: getStatusColor(bill.status) }
-                        ]}>
-                          {bill.status}
-                        </Text>
-                      </View>
-                      <Text style={styles.billItemDate}>
-                        {new Date(bill.timestamp).toLocaleDateString()} {new Date(bill.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                      </Text>
-                    </Pressable>
-                  ))
-                )}
-              </ScrollView>
+              <ScrollView>{billListMemo}</ScrollView>
             </View>
 
             {/* Détails de la facture sélectionnée */}
@@ -692,18 +773,23 @@ export default function BillsScreen() {
                   <View style={styles.selectedBillHeader}>
                     <View style={{ flexDirection: 'row' }}>
                       <Text style={styles.selectedBillTitle}>
-                        {selectedBill.tableName || `Table ${selectedBill.tableNumber}`}
+                        {selectedBill.tableName ||
+                          `Table ${selectedBill.tableNumber}`}
                       </Text>
                       {selectedBill.section && (
                         <View style={styles.sectionBadge}>
-                          <Text style={styles.sectionText}>{selectedBill.section}</Text>
+                          <Text style={styles.sectionText}>
+                            {selectedBill.section}
+                          </Text>
                         </View>
                       )}
                     </View>
-                    <Text style={[
-                      styles.selectedBillStatus,
-                      { color: getStatusColor(selectedBill.status) }
-                    ]}>
+                    <Text
+                      style={[
+                        styles.selectedBillStatus,
+                        { color: getStatusColor(selectedBill.status) },
+                      ]}
+                    >
                       {selectedBill.status}
                     </Text>
                   </View>
@@ -717,19 +803,17 @@ export default function BillsScreen() {
                     </View>
                     <View style={styles.detailRow}>
                       <Text style={styles.detailLabel}>Montant:</Text>
-                      <Text style={styles.detailAmount}>{selectedBill.amount.toFixed(2)} €</Text>
+                      <Text style={styles.detailAmount}>
+                        {selectedBill.amount.toFixed(2)} €
+                      </Text>
                     </View>
-                    {/* <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Articles:</Text>
-                      <Text style={styles.detailValue}>{selectedBill.items} articles</Text>
-                    </View> */}
                     {selectedBill.paymentMethod && (
                       <View style={styles.detailRow}>
-                        <Text style={styles.detailLabel}>Mode de paiement:</Text>
+                        <Text style={styles.detailLabel}>
+                          Mode de paiement:
+                        </Text>
                         <Text style={styles.detailValue}>
-                          {selectedBill.paymentMethod === 'card' ? 'Carte bancaire' :
-                            selectedBill.paymentMethod === 'cash' ? 'Espèces' :
-                              'Chèque'}
+                          {PAYMENT_METHOD_LABELS[selectedBill.paymentMethod]}
                         </Text>
                       </View>
                     )}
@@ -738,41 +822,57 @@ export default function BillsScreen() {
                   <View style={styles.actionsContainer}>
                     <Pressable style={styles.actionButton} onPress={handleView}>
                       <Eye size={20} color="#2196F3" />
-                      <Text style={[styles.actionText, { color: '#2196F3' }]}>Voir</Text>
+                      <Text style={[styles.actionText, { color: '#2196F3' }]}>
+                        Voir
+                      </Text>
                     </Pressable>
-                    <Pressable style={styles.actionButton} onPress={handlePrint}>
+                    <Pressable
+                      style={styles.actionButton}
+                      onPress={handlePrint}
+                    >
                       <Printer size={20} color="#4CAF50" />
-                      <Text style={[styles.actionText, { color: '#4CAF50' }]}>Imprimer</Text>
+                      <Text style={[styles.actionText, { color: '#4CAF50' }]}>
+                        Imprimer
+                      </Text>
                     </Pressable>
-                    <Pressable style={styles.actionButton} onPress={handleExport}>
+                    <Pressable
+                      style={styles.actionButton}
+                      onPress={handleExport}
+                    >
                       <Download size={20} color="#FF9800" />
-                      <Text style={[styles.actionText, { color: '#FF9800' }]}>Exporter</Text>
+                      <Text style={[styles.actionText, { color: '#FF9800' }]}>
+                        Exporter
+                      </Text>
                     </Pressable>
                     <Pressable
                       style={styles.actionButton}
                       onPress={() => {
                         Alert.alert(
-                          "Supprimer la facture",
-                          "Êtes-vous sûr de vouloir supprimer cette facture ?",
+                          'Supprimer la facture',
+                          'Êtes-vous sûr de vouloir supprimer cette facture ?',
                           [
-                            { text: "Annuler", style: "cancel" },
+                            { text: 'Annuler', style: 'cancel' },
                             {
-                              text: "Supprimer",
-                              style: "destructive",
-                              onPress: handleDeleteBill
-                            }
+                              text: 'Supprimer',
+                              style: 'destructive',
+                              onPress: handleDeleteBill,
+                            },
                           ]
                         );
                       }}
                     >
                       <Trash2 size={20} color="#F44336" />
-                      <Text style={[styles.actionText, { color: '#F44336' }]}>Supprimer</Text>
+                      <Text style={[styles.actionText, { color: '#F44336' }]}>
+                        Supprimer
+                      </Text>
                     </Pressable>
                   </View>
                 </>
               ) : (
                 <View style={styles.noBillSelected}>
-                  <Text style={styles.noBillText}>Sélectionnez une facture pour voir les détails</Text>
+                  <Text style={styles.noBillText}>
+                    Sélectionnez une facture pour voir les détails
+                  </Text>
                 </View>
               )}
             </View>
@@ -780,7 +880,6 @@ export default function BillsScreen() {
         </View>
       )}
 
-      {/* Modal pour voir le reçu */}
       <ViewReceiptModal
         visible={viewModalVisible}
         bill={selectedBill}
@@ -790,13 +889,13 @@ export default function BillsScreen() {
         onDelete={handleDeleteBill}
       />
 
-      {/* Indicateur de chargement pour les actions */}
       {processingAction && (
         <View style={styles.processingOverlay}>
           <ActivityIndicator size="large" color="white" />
           <Text style={styles.processingText}>Traitement en cours...</Text>
         </View>
       )}
+
       <StatsModal
         visible={statsModalVisible}
         onClose={() => setStatsModalVisible(false)}
@@ -844,7 +943,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
     justifyContent: 'space-between',
-    flexDirection: 'row'
+    flexDirection: 'row',
   },
   title: {
     fontSize: 24,
@@ -858,7 +957,6 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: 'row',
   },
-  // Barre de filtres
   filterBar: {
     padding: 12,
     backgroundColor: 'white',
@@ -896,7 +994,6 @@ const styles = StyleSheet.create({
     color: '#2196F3',
     fontWeight: '500',
   },
-
   billsList: {
     width: 300,
     backgroundColor: 'white',
