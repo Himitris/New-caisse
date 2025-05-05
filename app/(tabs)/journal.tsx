@@ -1,4 +1,4 @@
-// app/(tabs)/journal.tsx - Journal des ventes avec regroupement des articles
+// app/(tabs)/journal.tsx - Journal des ventes optimisé avec chargement paresseux
 
 import {
   View,
@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
   TextInput,
 } from 'react-native';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   BarChart3,
   Filter,
@@ -80,8 +80,24 @@ const PAYMENT_TYPES_MAP = {
   items: 'Paiement par article',
 } as const;
 
+// Batch size pour le traitement par chunks
+const BATCH_SIZE = 100;
+
+// Limite de chargement initial
+const INITIAL_LOAD_LIMIT = 500;
+
+// Cache pour les catégories d'articles
+const articleCategoryCache = new Map<string, string>();
+
 const getArticleCategory = (itemName: string): string => {
-  const lowerName = itemName.toLowerCase();
+  const cacheKey = itemName.toLowerCase();
+
+  if (articleCategoryCache.has(cacheKey)) {
+    return articleCategoryCache.get(cacheKey)!;
+  }
+
+  const lowerName = cacheKey;
+  let category = 'Autres';
 
   const categoryPatterns = {
     Plats: [
@@ -120,13 +136,15 @@ const getArticleCategory = (itemName: string): string => {
     'Paiements génériques': ['paiement', 'payment'],
   };
 
-  for (const [category, patterns] of Object.entries(categoryPatterns)) {
+  for (const [catName, patterns] of Object.entries(categoryPatterns)) {
     if (patterns.some((pattern) => lowerName.includes(pattern))) {
-      return category;
+      category = catName;
+      break;
     }
   }
 
-  return 'Autres';
+  articleCategoryCache.set(cacheKey, category);
+  return category;
 };
 
 const formatDate = (dateString: string) => {
@@ -142,9 +160,13 @@ const formatDate = (dateString: string) => {
 export default function JournalScreen() {
   const [loading, setLoading] = useState(true);
   const [bills, setBills] = useState<Bill[]>([]);
-  const [soldItems, setSoldItems] = useState<SoldItem[]>([]);
+  const [loadedBills, setLoadedBills] = useState<Bill[]>([]);
+  const [hasMore, setHasMore] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [offset, setOffset] = useState(0);
+
+  // États calculés paresseusement
   const [summaryItems, setSummaryItems] = useState<SummaryItem[]>([]);
-  const [filteredItems, setFilteredItems] = useState<SoldItem[]>([]);
   const [salesByCategory, setSalesByCategory] = useState<SalesByCategory[]>([]);
   const [paymentMethodStats, setPaymentMethodStats] =
     useState<PaymentMethodStats>({
@@ -167,177 +189,13 @@ export default function JournalScreen() {
   // Statistiques globales
   const [totalSales, setTotalSales] = useState(0);
   const [totalItems, setTotalItems] = useState(0);
-  const [topSellingItems, setTopSellingItems] = useState<SummaryItem[]>([]);
 
-  useEffect(() => {
-    loadSalesData();
-  }, []);
+  // Mémoïzation des données calculées
+  const soldItems = useMemo(() => {
+    return processBillsToSoldItems(loadedBills);
+  }, [loadedBills]);
 
-  useEffect(() => {
-    filterItems();
-  }, [searchText, dateFilterActive, selectedDate, selectedPaymentMethod]);
-
-  const loadSalesData = async () => {
-    try {
-      setLoading(true);
-      const allBills = await getBills();
-
-      const sortedBills = allBills.sort(
-        (a, b) =>
-          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-      );
-
-      setBills(sortedBills);
-
-      const {
-        itemsSold,
-        totalItemCount,
-        totalSalesAmount,
-        paymentMethodCounts,
-      } = processBillsData(sortedBills);
-
-      setSoldItems(itemsSold);
-      setFilteredItems(itemsSold);
-      setTotalItems(totalItemCount);
-      setTotalSales(totalSalesAmount);
-      setPaymentMethodStats(paymentMethodCounts);
-
-      prepareSummaryData(itemsSold);
-    } catch (error) {
-      console.error('Erreur lors du chargement des données de vente:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const processBillsData = (bills: Bill[]) => {
-    const itemsSold: SoldItem[] = [];
-    let totalItemCount = 0;
-    let totalSalesAmount = 0;
-    const paymentMethodCounts: PaymentMethodStats = {
-      card: 0,
-      cash: 0,
-      check: 0,
-      unknown: 0,
-    };
-
-    bills.forEach((bill) => {
-      // Comptabiliser les méthodes de paiement
-      if ((bill.paymentMethod ?? 'unknown') in paymentMethodCounts) {
-        paymentMethodCounts[bill.paymentMethod ?? 'unknown']++;
-      } else {
-        paymentMethodCounts.unknown++;
-      }
-
-      if (bill.paidItems && bill.paidItems.length > 0) {
-        bill.paidItems.forEach((item) => {
-          const soldItem: SoldItem = {
-            id: item.id,
-            name: item.name,
-            quantity: item.quantity || 1,
-            price: item.price,
-            totalAmount: item.price * (item.quantity || 1),
-            date: bill.timestamp,
-            tableNumber: bill.tableNumber,
-            tableName: bill.tableName,
-            section: bill.section,
-            paymentMethod: bill.paymentMethod,
-            paymentType: bill.paymentType,
-          };
-          itemsSold.push(soldItem);
-          totalItemCount += soldItem.quantity;
-          totalSalesAmount += soldItem.totalAmount;
-        });
-      } else if (bill.status === 'paid' || bill.status === 'split') {
-        const paymentTypeName =
-          bill.paymentType === 'full'
-            ? 'complet'
-            : bill.paymentType === 'split'
-            ? 'partagé'
-            : 'personnalisé';
-
-        const soldItem: SoldItem = {
-          id: bill.id,
-          name: `Paiement ${paymentTypeName}`,
-          quantity: 1,
-          price: bill.amount,
-          totalAmount: bill.amount,
-          date: bill.timestamp,
-          tableNumber: bill.tableNumber,
-          tableName: bill.tableName,
-          section: bill.section,
-          paymentMethod: bill.paymentMethod,
-          paymentType: bill.paymentType,
-        };
-        itemsSold.push(soldItem);
-        totalItemCount += 1;
-        totalSalesAmount += bill.amount;
-      }
-    });
-
-    return { itemsSold, totalItemCount, totalSalesAmount, paymentMethodCounts };
-  };
-
-  const prepareSummaryData = (items: SoldItem[]) => {
-    const itemSummary: { [key: string]: SummaryItem } = {};
-
-    items.forEach((item) => {
-      const key = item.name.toLowerCase();
-
-      if (!itemSummary[key]) {
-        itemSummary[key] = {
-          id: typeof item.id === 'number' ? item.id : 0,
-          name: item.name,
-          totalQuantity: 0,
-          totalAmount: 0,
-          occurrences: 0,
-          details: [],
-        };
-      }
-
-      itemSummary[key].totalQuantity += item.quantity;
-      itemSummary[key].totalAmount += item.totalAmount;
-      itemSummary[key].occurrences += 1;
-      itemSummary[key].details.push(item);
-    });
-
-    const summaryArray = Object.values(itemSummary).sort(
-      (a, b) => b.totalAmount - a.totalAmount
-    );
-
-    setSummaryItems(summaryArray);
-    setTopSellingItems(summaryArray.slice(0, 5));
-
-    const categorizedSales = prepareCategorizedSales(summaryArray);
-    setSalesByCategory(categorizedSales);
-  };
-
-  const prepareCategorizedSales = (summaryArray: SummaryItem[]) => {
-    const categorizedSales: { [key: string]: SalesByCategory } = {};
-
-    summaryArray.forEach((item) => {
-      const category = getArticleCategory(item.name);
-
-      if (!categorizedSales[category]) {
-        categorizedSales[category] = {
-          category,
-          totalAmount: 0,
-          itemCount: 0,
-          items: [],
-        };
-      }
-
-      categorizedSales[category].totalAmount += item.totalAmount;
-      categorizedSales[category].itemCount += 1;
-      categorizedSales[category].items.push(item);
-    });
-
-    return Object.values(categorizedSales).sort(
-      (a, b) => b.totalAmount - a.totalAmount
-    );
-  };
-
-  const filterItems = () => {
+  const filteredItems = useMemo(() => {
     let filtered = [...soldItems];
 
     if (searchText) {
@@ -368,9 +226,206 @@ export default function JournalScreen() {
       );
     }
 
-    setFilteredItems(filtered);
-    prepareSummaryData(filtered);
+    return filtered;
+  }, [
+    soldItems,
+    searchText,
+    dateFilterActive,
+    selectedDate,
+    selectedPaymentMethod,
+  ]);
+
+  const topSellingItems = useMemo(() => {
+    return summaryItems.slice(0, 5);
+  }, [summaryItems]);
+
+  useEffect(() => {
+    loadInitialData();
+  }, []);
+
+  useEffect(() => {
+    computeStatistics();
+  }, [filteredItems]);
+
+  const loadInitialData = async () => {
+    try {
+      setLoading(true);
+      const allBills = await getBills();
+
+      // Trier les factures par date décroissante
+      const sortedBills = allBills.sort(
+        (a, b) =>
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      );
+
+      setBills(sortedBills);
+
+      // Chargement initial limité
+      const initialBills = sortedBills.slice(0, INITIAL_LOAD_LIMIT);
+      setLoadedBills(initialBills);
+      setOffset(INITIAL_LOAD_LIMIT);
+      setHasMore(sortedBills.length > INITIAL_LOAD_LIMIT);
+    } catch (error) {
+      console.error('Erreur lors du chargement des données de vente:', error);
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const loadMoreData = useCallback(async () => {
+    if (isLoadingMore || !hasMore) return;
+
+    setIsLoadingMore(true);
+    try {
+      const newBatch = bills.slice(offset, offset + BATCH_SIZE);
+      setLoadedBills((prev) => [...prev, ...newBatch]);
+      setOffset((prev) => prev + BATCH_SIZE);
+      setHasMore(offset + BATCH_SIZE < bills.length);
+    } catch (error) {
+      console.error(
+        'Erreur lors du chargement de données supplémentaires:',
+        error
+      );
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [bills, offset, hasMore, isLoadingMore]);
+
+  const processBillsToSoldItems = useCallback(
+    (billsToProcess: Bill[]): SoldItem[] => {
+      const itemsSold: SoldItem[] = [];
+
+      for (let i = 0; i < billsToProcess.length; i += BATCH_SIZE) {
+        const batch = billsToProcess.slice(i, i + BATCH_SIZE);
+
+        batch.forEach((bill) => {
+          if (bill.paidItems && bill.paidItems.length > 0) {
+            bill.paidItems.forEach((item) => {
+              const soldItem: SoldItem = {
+                id: item.id,
+                name: item.name,
+                quantity: item.quantity || 1,
+                price: item.price,
+                totalAmount: item.price * (item.quantity || 1),
+                date: bill.timestamp,
+                tableNumber: bill.tableNumber,
+                tableName: bill.tableName,
+                section: bill.section,
+                paymentMethod: bill.paymentMethod,
+                paymentType: bill.paymentType,
+              };
+              itemsSold.push(soldItem);
+            });
+          } else if (bill.status === 'paid' || bill.status === 'split') {
+            const paymentTypeName =
+              bill.paymentType === 'full'
+                ? 'complet'
+                : bill.paymentType === 'split'
+                ? 'partagé'
+                : 'personnalisé';
+
+            const soldItem: SoldItem = {
+              id: bill.id,
+              name: `Paiement ${paymentTypeName}`,
+              quantity: 1,
+              price: bill.amount,
+              totalAmount: bill.amount,
+              date: bill.timestamp,
+              tableNumber: bill.tableNumber,
+              tableName: bill.tableName,
+              section: bill.section,
+              paymentMethod: bill.paymentMethod,
+              paymentType: bill.paymentType,
+            };
+            itemsSold.push(soldItem);
+          }
+        });
+      }
+
+      return itemsSold;
+    },
+    []
+  );
+
+  const computeStatistics = useCallback(() => {
+    let totalSalesAmount = 0;
+    let totalItemCount = 0;
+    const itemSummary: { [key: string]: SummaryItem } = {};
+    const paymentMethodCounts: PaymentMethodStats = {
+      card: 0,
+      cash: 0,
+      check: 0,
+      unknown: 0,
+    };
+
+    filteredItems.forEach((item) => {
+      totalItemCount += item.quantity;
+      totalSalesAmount += item.totalAmount;
+
+      // Statistiques de paiement
+      if (item.paymentMethod && item.paymentMethod in paymentMethodCounts) {
+        paymentMethodCounts[item.paymentMethod]++;
+      } else {
+        paymentMethodCounts.unknown++;
+      }
+
+      // Résumé des articles
+      const key = item.name.toLowerCase();
+      if (!itemSummary[key]) {
+        itemSummary[key] = {
+          id: typeof item.id === 'number' ? item.id : 0,
+          name: item.name,
+          totalQuantity: 0,
+          totalAmount: 0,
+          occurrences: 0,
+          details: [],
+        };
+      }
+
+      itemSummary[key].totalQuantity += item.quantity;
+      itemSummary[key].totalAmount += item.totalAmount;
+      itemSummary[key].occurrences += 1;
+      itemSummary[key].details.push(item);
+    });
+
+    const summaryArray = Object.values(itemSummary).sort(
+      (a, b) => b.totalAmount - a.totalAmount
+    );
+
+    setSummaryItems(summaryArray);
+    setTotalSales(totalSalesAmount);
+    setTotalItems(totalItemCount);
+    setPaymentMethodStats(paymentMethodCounts);
+
+    // Calcul des ventes par catégorie de manière paresseuse
+    const categorizedSales = prepareCategorizedSales(summaryArray);
+    setSalesByCategory(categorizedSales);
+  }, [filteredItems]);
+
+  const prepareCategorizedSales = useCallback((summaryArray: SummaryItem[]) => {
+    const categorizedSales: { [key: string]: SalesByCategory } = {};
+
+    summaryArray.forEach((item) => {
+      const category = getArticleCategory(item.name);
+
+      if (!categorizedSales[category]) {
+        categorizedSales[category] = {
+          category,
+          totalAmount: 0,
+          itemCount: 0,
+          items: [],
+        };
+      }
+
+      categorizedSales[category].totalAmount += item.totalAmount;
+      categorizedSales[category].itemCount += 1;
+      categorizedSales[category].items.push(item);
+    });
+
+    return Object.values(categorizedSales).sort(
+      (a, b) => b.totalAmount - a.totalAmount
+    );
+  }, []);
 
   const handleDateChange = (event: any, date?: Date) => {
     setShowDatePicker(false);
@@ -507,7 +562,21 @@ export default function JournalScreen() {
   );
 
   const renderSummaryView = () => (
-    <ScrollView style={styles.scrollContainer}>
+    <ScrollView
+      style={styles.scrollContainer}
+      onScroll={({ nativeEvent }) => {
+        // Chargement infini
+        const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
+        const isCloseToBottom =
+          layoutMeasurement.height + contentOffset.y >=
+          contentSize.height - 100;
+
+        if (isCloseToBottom && hasMore && !isLoadingMore) {
+          loadMoreData();
+        }
+      }}
+      scrollEventThrottle={400}
+    >
       <View style={styles.summarySection}>
         <Text style={styles.sectionTitle}>Top 5 des Articles Vendus</Text>
         {topSellingItems.map((item, index) => (
@@ -557,7 +626,7 @@ export default function JournalScreen() {
           Tous les Articles ({summaryItems.length})
         </Text>
 
-        {summaryItems.map((item, index) => (
+        {summaryItems.slice(0, 100).map((item, index) => (
           <View key={`summary-${index}`} style={styles.summaryItemRow}>
             <Text style={styles.summaryItemName}>{item.name}</Text>
             <View style={styles.summaryItemStats}>
@@ -570,7 +639,19 @@ export default function JournalScreen() {
             </View>
           </View>
         ))}
+        {summaryItems.length > 100 && (
+          <Text style={styles.moreSummaryItems}>
+            Et {summaryItems.length - 100} articles de plus...
+          </Text>
+        )}
       </View>
+
+      {isLoadingMore && (
+        <View style={styles.loadingMore}>
+          <ActivityIndicator size="small" color="#2196F3" />
+          <Text style={styles.loadingMoreText}>Chargement...</Text>
+        </View>
+      )}
     </ScrollView>
   );
 
@@ -588,8 +669,29 @@ export default function JournalScreen() {
     }
 
     return (
-      <ScrollView style={styles.scrollContainer}>
-        {filteredItems.map(renderDetailedItem)}
+      <ScrollView
+        style={styles.scrollContainer}
+        onScroll={({ nativeEvent }) => {
+          // Chargement infini
+          const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
+          const isCloseToBottom =
+            layoutMeasurement.height + contentOffset.y >=
+            contentSize.height - 100;
+
+          if (isCloseToBottom && hasMore && !isLoadingMore) {
+            loadMoreData();
+          }
+        }}
+        scrollEventThrottle={400}
+      >
+        {filteredItems.map((item, index) => renderDetailedItem(item, index))}
+
+        {isLoadingMore && (
+          <View style={styles.loadingMore}>
+            <ActivityIndicator size="small" color="#2196F3" />
+            <Text style={styles.loadingMoreText}>Chargement...</Text>
+          </View>
+        )}
       </ScrollView>
     );
   };
@@ -781,6 +883,7 @@ export default function JournalScreen() {
   );
 }
 
+// Styles inchangés
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1070,7 +1173,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#666',
   },
-  // Styles pour la vue résumé
   summarySection: {
     backgroundColor: 'white',
     borderRadius: 8,
@@ -1144,5 +1246,23 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     color: '#4CAF50',
+  },
+  moreSummaryItems: {
+    fontSize: 14,
+    color: '#666',
+    fontStyle: 'italic',
+    padding: 12,
+    textAlign: 'center',
+  },
+  loadingMore: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+  },
+  loadingMoreText: {
+    marginLeft: 8,
+    fontSize: 14,
+    color: '#666',
   },
 });

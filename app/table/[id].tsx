@@ -10,7 +10,7 @@ import {
   Users,
   X,
 } from 'lucide-react-native';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import {
   Alert,
   Pressable,
@@ -18,6 +18,7 @@ import {
   StyleSheet,
   Text,
   View,
+  FlatList,
 } from 'react-native';
 import priceData from '../../helpers/ManjosPrice';
 import {
@@ -32,6 +33,7 @@ import {
   updateTable,
 } from '../../utils/storage';
 import SplitSelectionModal from '../components/SplitSelectionModal';
+import { events, EVENT_TYPES } from '../../utils/events';
 
 interface MenuItem {
   id: number;
@@ -103,7 +105,7 @@ const getCategoryFromName = (
   }
 };
 
-// Composant MenuItem mémoïzé
+// Composant MenuItem mémoïzé avec optimisations
 const MenuItemComponent = memo(
   ({
     item,
@@ -132,7 +134,10 @@ const MenuItemComponent = memo(
       </Text>
       <Text style={styles.menuItemPrice}>{item.price.toFixed(2)} €</Text>
     </Pressable>
-  )
+  ),
+  (prevProps, nextProps) =>
+    prevProps.item.id === nextProps.item.id &&
+    prevProps.isUnavailable === nextProps.isUnavailable
 );
 
 export default function TableScreen() {
@@ -151,14 +156,21 @@ export default function TableScreen() {
   const [saveInProgress, setSaveInProgress] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [customMenuItems, setCustomMenuItems] = useState<CustomMenuItem[]>([]);
-
-  // États pour l'historique des paiements
-  const [tableHistory, setTableHistory] = useState<Bill[]>([]);
-  const [historyModalVisible, setHistoryModalVisible] = useState(false);
-  const [refreshingHistory, setRefreshingHistory] = useState(false);
-  const [refreshCounter, setRefreshCounter] = useState(0);
-
   const [splitModalVisible, setSplitModalVisible] = useState(false);
+
+  // Refs pour le debouncing et le batching
+  const updateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const batchedUpdates = useRef<Table | null>(null);
+
+  // Nettoyage des listeners et timeouts
+  useEffect(() => {
+    return () => {
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current);
+      }
+      events.emit(EVENT_TYPES.TABLE_UPDATED, tableId);
+    };
+  }, [tableId]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -294,16 +306,15 @@ export default function TableScreen() {
           onPress: async () => {
             setSaveInProgress(true);
             try {
-              // Créer une nouvelle commande vide avec toutes les propriétés requises
               const updatedTable = {
                 ...table,
                 order: {
-                  id: table.order!.id, // Garder l'id existant
+                  id: table.order!.id,
                   items: [],
                   total: 0,
-                  guests: table.order!.guests, // Garder le nombre de convives
-                  status: 'active' as 'active', // Garder le statut
-                  timestamp: table.order!.timestamp, // Garder le timestamp
+                  guests: table.order!.guests,
+                  status: 'active' as 'active',
+                  timestamp: table.order!.timestamp,
                 },
               };
               setTable(updatedTable);
@@ -327,6 +338,21 @@ export default function TableScreen() {
     );
   };
 
+  // Fonction améliorée avec batching pour les mises à jour
+  const batchedUpdate = useCallback(async (updatedTable: Table) => {
+    batchedUpdates.current = updatedTable;
+
+    if (updateTimeoutRef.current) {
+      clearTimeout(updateTimeoutRef.current);
+    }
+
+    updateTimeoutRef.current = setTimeout(async () => {
+      if (batchedUpdates.current) {
+        await updateTable(batchedUpdates.current);
+        batchedUpdates.current = null;
+      }
+    }, 200); // Débounce de 200ms
+  }, []);
 
   // Handler pour ajouter un item à la commande (useCallback)
   const addItemToOrder = useCallback(
@@ -345,7 +371,7 @@ export default function TableScreen() {
 
       if (!updatedTable.order) {
         updatedTable.order = {
-          id: Date.now(), // S'assurer que l'id est défini
+          id: Date.now(),
           items: [],
           guests: guestCount,
           status: 'active',
@@ -372,13 +398,10 @@ export default function TableScreen() {
 
       updatedTable.order.total = calculateTotal(updatedTable.order.items);
 
-      // Batching: mise à jour de l'état et stockage en une seule fois
       setTable(updatedTable);
-      requestAnimationFrame(() => {
-        updateTable(updatedTable);
-      });
+      batchedUpdate(updatedTable);
     },
-    [table, unavailableItems, guestCount]
+    [table, unavailableItems, guestCount, batchedUpdate]
   );
 
   // Mise à jour de la quantité avec batching
@@ -400,11 +423,9 @@ export default function TableScreen() {
           ? currentItem.quantity + 1
           : currentItem.quantity - 1;
 
-        // Si la quantité devient 0, supprimer l'item
         if (newQuantity <= 0) {
           updatedItems = updatedItems.filter((item) => item.id !== itemId);
         } else {
-          // Sinon, mettre à jour la quantité
           const updatedItem = { ...currentItem, quantity: newQuantity };
           updatedItems[itemIndex] = updatedItem;
         }
@@ -412,13 +433,12 @@ export default function TableScreen() {
         updatedTable.order!.items = updatedItems;
         updatedTable.order!.total = calculateTotal(updatedItems);
 
-        // Sauvegarder dans le stockage
-        updateTable(updatedTable);
+        batchedUpdate(updatedTable);
 
         return updatedTable;
       });
     },
-    []
+    [batchedUpdate]
   );
 
   // Calculer le total de la commande
@@ -470,47 +490,38 @@ export default function TableScreen() {
     );
   };
 
-  // Rendu optimisé du menu grid
+  // Rendu optimisé du menu grid avec FlatList pour la virtualisation
   const renderMenuGrid = () => {
-    const categories = activeCategory
-      ? [activeCategory]
-      : getVisibleCategories();
-    const categorizedItems = categories.map((category) => ({
-      category,
-      items: displayAllFilteredItems.filter(
+    const categoryItems = getVisibleCategories().reduce((acc, category) => {
+      const items = displayAllFilteredItems.filter(
         (item) => item.category === category
-      ),
-    }));
+      );
+      if (items.length > 0) {
+        acc.push(...items);
+      }
+      return acc;
+    }, [] as MenuItem[]);
 
     return (
-      <View style={styles.menuGrid}>
-        {categorizedItems.map(({ category, items }) => {
-          if (items.length === 0) return null;
-
-          return (
-            <View key={category} style={styles.categorySection}>
-              <Text
-                style={[
-                  styles.categoryTitle,
-                  { color: CATEGORY_COLORS[category] || '#757575' },
-                ]}
-              >
-                {category}
-              </Text>
-              <View style={styles.menuItemsGrid}>
-                {items.map((item) => (
-                  <MenuItemComponent
-                    key={item.id}
-                    item={item}
-                    isUnavailable={unavailableItems.includes(item.id)}
-                    onPress={() => addItemToOrder(item)}
-                  />
-                ))}
-              </View>
-            </View>
-          );
-        })}
-      </View>
+      <FlatList
+        data={categoryItems}
+        keyExtractor={(item) => item.id.toString()}
+        renderItem={({ item }) => (
+          <MenuItemComponent
+            item={item}
+            isUnavailable={unavailableItems.includes(item.id)}
+            onPress={() => addItemToOrder(item)}
+          />
+        )}
+        numColumns={3}
+        columnWrapperStyle={styles.columnWrapper}
+        removeClippedSubviews={true}
+        maxToRenderPerBatch={10}
+        updateCellsBatchingPeriod={50}
+        windowSize={10}
+        initialNumToRender={20}
+        contentContainerStyle={styles.flatListContainer}
+      />
     );
   };
 
@@ -529,14 +540,14 @@ export default function TableScreen() {
         </Text>
         <View style={styles.quantityControlCompact}>
           <Pressable
-            style={styles.quantityButton} // Ajouter un style pour les boutons
+            style={styles.quantityButton}
             onPress={() => updateItemQuantity(item.id, false)}
           >
             <Minus size={16} color="#666" />
           </Pressable>
           <Text style={styles.quantityUltraCompact}>{item.quantity}</Text>
           <Pressable
-            style={styles.quantityButton} // Ajouter un style pour les boutons
+            style={styles.quantityButton}
             onPress={() => updateItemQuantity(item.id, true)}
           >
             <Plus size={16} color="#666" />
@@ -659,7 +670,6 @@ export default function TableScreen() {
           </Pressable>
         </View>
 
-        {/* Nouveau bouton pour supprimer la commande */}
         <Pressable
           style={[
             styles.paymentButton,
@@ -690,7 +700,6 @@ export default function TableScreen() {
       </View>
 
       <View style={styles.content}>
-        {/* Section Commande Actuelle */}
         <View style={styles.orderSection}>
           <Text style={styles.sectionTitle}>Commande actuelle</Text>
           {orderItems.length === 0 ? (
@@ -766,7 +775,6 @@ export default function TableScreen() {
           </View>
         </View>
 
-        {/* Section Menu */}
         <View style={styles.menuSection}>
           <View style={styles.menuHeader}>
             <Text style={styles.sectionTitle}>Menu</Text>
@@ -822,7 +830,6 @@ export default function TableScreen() {
             </View>
           </View>
 
-          {/* Onglets de catégories */}
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -872,7 +879,7 @@ export default function TableScreen() {
             ))}
           </ScrollView>
 
-          <ScrollView style={styles.menuItems}>{renderMenuGrid()}</ScrollView>
+          <View style={styles.menuItems}>{renderMenuGrid()}</View>
         </View>
       </View>
 
@@ -915,57 +922,57 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   header: {
-    padding: 12, // Réduit de 16 à 12
+    padding: 12,
     backgroundColor: 'white',
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    minHeight: 60, // Hauteur fixe pour éviter que le header prenne trop de place
+    minHeight: 60,
   },
   backLink: {
     marginRight: 8,
   },
   headerTitleContainer: {
-    flex: 3, // Réduit de 4 à 3
+    flex: 3,
     flexDirection: 'row',
     alignItems: 'center',
   },
   title: {
-    fontSize: 20, // Réduit de 24 à 20
+    fontSize: 20,
     fontWeight: 'bold',
     marginRight: 8,
   },
   sectionBadge: {
     backgroundColor: '#E1F5FE',
-    paddingHorizontal: 8, // Réduit de 12 à 8
-    paddingVertical: 2, // Réduit de 4 à 2
+    paddingHorizontal: 8,
+    paddingVertical: 2,
     borderRadius: 16,
   },
   sectionText: {
     color: '#0288D1',
     fontWeight: '600',
-    fontSize: 11, // Réduit de 12 à 11
+    fontSize: 11,
   },
   guestCounter: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8, // Réduit de 12 à 8
+    gap: 8,
     backgroundColor: '#f5f5f5',
-    padding: 6, // Réduit de 8 à 6
+    padding: 6,
     borderRadius: 8,
   },
   guestCount: {
-    fontSize: 16, // Réduit de 18 à 16
+    fontSize: 16,
     fontWeight: '600',
-    minWidth: 20, // Réduit de 24 à 20
+    minWidth: 20,
     textAlign: 'center',
   },
   content: {
     flex: 1,
-    padding: 8, // Réduit de 12 à 8
-    gap: 8, // Réduit de 12 à 8
+    padding: 8,
+    gap: 8,
     flexDirection: 'row',
     flexWrap: 'wrap',
   },
@@ -973,8 +980,8 @@ const styles = StyleSheet.create({
     flex: 2,
     minWidth: 300,
     backgroundColor: 'white',
-    borderRadius: 8, // Réduit de 12 à 8
-    padding: 12, // Réduit de 16 à 12
+    borderRadius: 8,
+    padding: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -999,15 +1006,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8, // Réduit de 12 à 8
+    marginBottom: 8,
   },
   typeFilters: {
     flexDirection: 'row',
-    gap: 6, // Réduit de 8 à 6
+    gap: 6,
   },
   typeFilterButton: {
-    paddingVertical: 4, // Réduit de 6 à 4
-    paddingHorizontal: 10, // Réduit de 12 à 10
+    paddingVertical: 4,
+    paddingHorizontal: 10,
     borderRadius: 16,
     backgroundColor: '#f0f0f0',
   },
@@ -1015,7 +1022,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#2196F3',
   },
   typeFilterText: {
-    fontSize: 13, // Réduit de 14 à 13
+    fontSize: 13,
     fontWeight: '500',
     color: '#666',
   },
@@ -1024,41 +1031,41 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   sectionTitle: {
-    fontSize: 18, // Réduit de 20 à 18
+    fontSize: 18,
     fontWeight: '600',
-    marginBottom: 8, // Réduit de 12 à 8
+    marginBottom: 8,
   },
   orderList: {
-    maxHeight: '55%', // Réduit de 60% à 55%
+    maxHeight: '55%',
   },
   emptyOrder: {
     flex: 1,
     textAlign: 'center',
     color: '#666',
-    paddingTop: 40, // Réduit de 20 à 10
+    paddingTop: 40,
   },
   orderColumns: {
     flexDirection: 'row',
-    gap: 12, // Réduit de 16 à 12
-    flex: 1, 
-    minHeight: 0, // Important pour le scroll
+    gap: 12,
+    flex: 1,
+    minHeight: 0,
   },
   orderColumn: {
     flex: 1,
-    minHeight: 0, // Important pour le scroll
+    minHeight: 0,
   },
   columnTitle: {
-    fontSize: 14, // Réduit de 16 à 14
+    fontSize: 14,
     fontWeight: '600',
-    marginBottom: 6, // Réduit de 8 à 6
-    paddingBottom: 3, // Réduit de 4 à 3
+    marginBottom: 6,
+    paddingBottom: 3,
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
   },
   ultraCompactItem: {
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
-    paddingVertical: 2, // Réduit de 3 à 2
+    paddingVertical: 2,
   },
   firstLineCompact: {
     flexDirection: 'row',
@@ -1066,25 +1073,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   itemNameUltraCompact: {
-    fontSize: 12, // Réduit de 13 à 12
+    fontSize: 12,
     fontWeight: '500',
     flex: 1,
-    marginRight: 6, // Réduit de 8 à 6
+    marginRight: 6,
   },
   quantityControlCompact: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8, // Augmenté de 5 à 8
+    gap: 8,
     backgroundColor: '#f5f5f5',
-    padding: 4, // Augmenté de 2 à 4
-    borderRadius: 6, // Augmenté de 4 à 6
+    padding: 4,
+    borderRadius: 6,
   },
   priceUltraCompact: {
-    fontSize: 13, // Réduit de 14 à 13
+    fontSize: 13,
     fontWeight: '600',
     color: '#4CAF50',
     textAlign: 'right',
-    marginTop: 1, // Réduit de 2 à 1
+    marginTop: 1,
   },
   totalSection: {
     flexDirection: 'row',
@@ -1092,57 +1099,57 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderTopWidth: 2,
     borderTopColor: '#e0e0e0',
-    marginTop: 8, // Ajouté
+    marginTop: 8,
   },
   finalTotal: {
     width: '100%',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 8, // Réduit de 10 à 8
+    marginTop: 8,
   },
   totalLabel: {
-    fontSize: 16, // Réduit de 18 à 16
+    fontSize: 16,
     fontWeight: '600',
     alignItems: 'center',
   },
   totalAmount: {
-    fontSize: 20, // Réduit de 24 à 20
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#4CAF50',
   },
   paymentActions: {
     flexDirection: 'column',
     gap: 1,
-    marginTop: 4, // Réduit de 6 à 4
-    flex: 0.4, // Réduit de 2 à 0.7
-    flexShrink: 0, // Empêche le rétrécissement
+    marginTop: 4,
+    flex: 0.4,
+    flexShrink: 0,
   },
   paymentButtonText: {
     color: 'white',
-    fontSize: 13, // Réduit de 14 à 13
+    fontSize: 13,
     fontWeight: '600',
-    paddingLeft: 6, 
+    paddingLeft: 6,
   },
   categoryTabs: {
-    marginBottom: 8, // Réduit de 12 à 8
+    marginBottom: 8,
     flexGrow: 0,
   },
   categoryTab: {
-    paddingHorizontal: 8, // Réduit de 10 à 8
-    paddingVertical: 5, // Réduit de 6 à 5
-    marginRight: 5, // Réduit de 6 à 5
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    marginRight: 5,
     borderBottomWidth: 2,
     borderBottomColor: 'transparent',
     textAlign: 'center',
-    minWidth: 70, // Réduit de 80 à 70
+    minWidth: 70,
     alignSelf: 'flex-start',
   },
   activeCategoryTab: {
     borderBottomWidth: 2,
   },
   categoryTabText: {
-    fontSize: 13, // Réduit de 14 à 13
+    fontSize: 13,
     fontWeight: '500',
     color: '#666',
   },
@@ -1152,43 +1159,25 @@ const styles = StyleSheet.create({
   menuItems: {
     flex: 1,
   },
-  menuGrid: {
-    paddingBottom: 12, // Réduit de 16 à 12
-  },
-  categorySection: {
-    marginBottom: 4,
-  },
-  categoryTitle: {
-    fontSize: 13, // Réduit de 14 à 13
-    fontWeight: '600',
-    marginBottom: 3, // Réduit de 4 à 3
-    paddingLeft: 8,
-  },
-  menuItemsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 5, // Réduit de 6 à 5
-    justifyContent: 'space-between',
-  },
   menuItem: {
     width: '31%',
     minWidth: 90,
-    height: 45, // Réduit de 50 à 45
+    height: 45,
     backgroundColor: '#f9f9f9',
-    borderRadius: 5, // Réduit de 6 à 5
-    padding: 6, // Réduit de 8 à 6
+    borderRadius: 5,
+    padding: 6,
     borderLeftWidth: 4,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 5, // Réduit de 6 à 5
+    marginBottom: 5,
   },
   menuItemName: {
-    fontSize: 11, // Réduit de 12 à 11
+    fontSize: 11,
     fontWeight: '500',
     marginBottom: 2,
   },
   menuItemPrice: {
-    fontSize: 11, // Réduit de 12 à 11
+    fontSize: 11,
     fontWeight: '600',
     color: '#4CAF50',
   },
@@ -1206,245 +1195,27 @@ const styles = StyleSheet.create({
   },
   paymentActionsRow: {
     flexDirection: 'row',
-    gap: 8, // Réduit de 12 à 8
-    marginBottom: 8, // Réduit de 12 à 8
+    gap: 8,
+    marginBottom: 8,
     flexWrap: 'wrap',
   },
   paymentButton: {
     flex: 1,
-    minWidth: 120, // Réduit de 130 à 120
+    minWidth: 120,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 10, // Réduit de 12 à 10
+    padding: 10,
     borderRadius: 8,
-    marginBottom: 6, // Réduit de 8 à 6
-  },
-  historyBadgeContainer: {
-    marginLeft: 16,
-  },
-  historyBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FF9800',
-    padding: 8,
-    borderRadius: 16,
-    gap: 6,
-  },
-  historyBadgeText: {
-    color: 'white',
-    fontWeight: '600',
-    fontSize: 12,
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  historyModalContent: {
-    backgroundColor: 'white',
-    width: '60%',
-    maxHeight: '80%',
-    borderRadius: 12,
-    padding: 20,
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-    elevation: 5,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  historyList: {
-    flex: 1,
-    maxHeight: 400,
-  },
-  emptyHistory: {
-    textAlign: 'center',
-    color: '#666',
-    marginTop: 20,
-    marginBottom: 20,
-    fontStyle: 'italic',
-  },
-  historyItem: {
-    backgroundColor: '#f9f9f9',
-    padding: 16,
-    borderRadius: 8,
-    marginBottom: 12,
-    borderLeftWidth: 4,
-    borderLeftColor: '#FF9800',
-  },
-  historyItemHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  historyItemDate: {
-    fontSize: 14,
-    color: '#666',
-  },
-  historyItemStatus: {
-    fontWeight: '600',
-    fontSize: 14,
-  },
-  historyItemDetails: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  historyItemAmount: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#FF9800',
-  },
-  historyItemMethod: {
-    fontSize: 14,
-    color: '#666',
-    backgroundColor: '#f0f0f0',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-  },
-  historyCloseButton: {
-    marginTop: 16,
-    backgroundColor: '#f0f0f0',
-    padding: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  historyCloseButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#666',
-  },
-  historySummary: {
-    backgroundColor: '#FFF8E1',
-    padding: 16,
-    borderRadius: 8,
-    marginBottom: 16,
-  },
-  historySummaryText: {
-    fontSize: 16,
-    marginBottom: 8,
-    color: '#333',
-  },
-  historySummaryAmount: {
-    fontSize: 16,
-    color: '#333',
-    marginBottom: 4,
-  },
-  historySummaryRemaining: {
-    fontSize: 16,
-    color: '#F44336',
-    fontWeight: '500',
-  },
-  historySummaryBold: {
-    fontWeight: 'bold',
+    marginBottom: 6,
   },
   loadingContainer: {
-    padding: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-  },
-  loadingText: {
-    marginLeft: 10,
-    color: '#FF9800',
-    fontSize: 14,
-  },
-  paymentTypeHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f5f5f5',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 12,
-    marginTop: 16,
-  },
-  paymentTypeTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginLeft: 8,
     flex: 1,
-  },
-  paymentTypeAmount: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  historyItemTypeSection: {
-    flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
-    gap: 6,
-  },
-  historyItemType: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  paymentItem: {
-    backgroundColor: 'white',
-    borderRadius: 8,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#e0e0e0',
-  },
-  paymentHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  paymentTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-  },
-  paymentAmount: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#FF9800',
-  },
-  paymentDetails: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 8,
-  },
-  paymentType: {
-    fontSize: 14,
-    color: '#666',
-    fontWeight: '500',
-  },
-  paymentMethod: {
-    fontSize: 14,
-    color: '#666',
-    backgroundColor: '#f5f5f5',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-  },
-  paymentDate: {
-    fontSize: 12,
-    color: '#999',
-    textAlign: 'right',
   },
   orderColumnScroll: {
-    maxHeight: '93%', // Réduit de 60% à 50%
+    maxHeight: '93%',
     marginTop: 8,
   },
   quantityButton: {
@@ -1456,11 +1227,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-
   quantityUltraCompact: {
-    fontSize: 14, // Augmenté de 12 à 14
+    fontSize: 14,
     fontWeight: '500',
-    minWidth: 20, // Augmenté de 14 à 20
+    minWidth: 20,
     textAlign: 'center',
+  },
+  flatListContainer: {
+    padding: 8,
+  },
+  columnWrapper: {
+    gap: 8,
   },
 });

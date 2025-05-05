@@ -27,6 +27,8 @@ import {
   ArrowUpAZ,
   ArrowUpDown,
   BarChart3,
+  RefreshCw,
+  CreditCard,
 } from 'lucide-react-native';
 import { getBills, saveBills } from '../../utils/storage';
 import * as Print from 'expo-print';
@@ -86,6 +88,27 @@ const RESTAURANT_INFO = {
 
 const ITEM_HEIGHT = 80;
 const PAGE_SIZE = 20;
+const MAX_BILLS_IN_STORAGE = 1000; // Limite pour éviter les problèmes de mémoire
+
+// Fonction de nettoyage optimisée
+const cleanupOldBills = async (currentBills: Bill[]): Promise<Bill[]> => {
+  if (currentBills.length <= MAX_BILLS_IN_STORAGE) {
+    return currentBills;
+  }
+
+  // Trier par date et garder les plus récents
+  const sortedBills = [...currentBills].sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  );
+
+  // Garder les 1000 plus récents
+  const cleanedBills = sortedBills.slice(0, MAX_BILLS_IN_STORAGE);
+
+  await saveBills(cleanedBills);
+  console.log(`Cleaned ${currentBills.length - cleanedBills.length} old bills`);
+
+  return cleanedBills;
+};
 
 // Modal pour voir le reçu - Mémoïzé
 const ViewReceiptModal = memo<ViewReceiptModalProps>(
@@ -212,7 +235,7 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
   }
 );
 
-// Composant pour le filtrage - Mémoïzé
+// Composant pour le filtrage - Amélioré avec les nouveaux filtres
 interface FilterBarProps {
   onSearch: (text: string) => void;
   onDateChange: (date: Date | null) => void;
@@ -220,6 +243,11 @@ interface FilterBarProps {
   onSortChange: (order: 'desc' | 'asc' | 'none') => void;
   onDeleteAll: () => void;
   onFilter: () => void;
+  searchText: string;
+  selectedDate: Date | null;
+  onPaymentMethodChange: (method: Bill['paymentMethod'] | null) => void;
+  selectedPaymentMethod: Bill['paymentMethod'] | null;
+  onResetFilters: () => void;
 }
 
 const FilterBar = memo<FilterBarProps>(
@@ -230,14 +258,18 @@ const FilterBar = memo<FilterBarProps>(
     sortOrder,
     onSortChange,
     onDeleteAll,
+    searchText,
+    selectedDate,
+    onPaymentMethodChange,
+    selectedPaymentMethod,
+    onResetFilters,
   }) => {
     const [showDatePicker, setShowDatePicker] = useState(false);
-    const [searchText, setSearchText] = useState('');
-    const [selectedDate, setSelectedDate] = useState(new Date());
+    const [showPaymentPicker, setShowPaymentPicker] = useState(false);
+    const [tempDate, setTempDate] = useState(selectedDate || new Date());
 
     const handleSearch = useCallback(
       (text: string) => {
-        setSearchText(text);
         onSearch(text);
       },
       [onSearch]
@@ -247,12 +279,16 @@ const FilterBar = memo<FilterBarProps>(
       (event: any, date?: Date) => {
         setShowDatePicker(false);
         if (date) {
-          setSelectedDate(date);
+          setTempDate(date);
           onDateChange(date);
         }
       },
       [onDateChange]
     );
+
+    const handleClearDate = useCallback(() => {
+      onDateChange(null);
+    }, [onDateChange]);
 
     const handleSortToggle = useCallback(() => {
       let newSortOrder: 'none' | 'desc' | 'asc';
@@ -282,6 +318,16 @@ const FilterBar = memo<FilterBarProps>(
       return 'Récent→Ancien';
     }, [sortOrder]);
 
+    const dateLabel = useMemo(() => {
+      if (!selectedDate) return 'Par date';
+      return new Date(selectedDate).toLocaleDateString();
+    }, [selectedDate]);
+
+    const paymentMethodLabel = useMemo(() => {
+      if (!selectedPaymentMethod) return 'Mode de paiement';
+      return PAYMENT_METHOD_LABELS[selectedPaymentMethod];
+    }, [selectedPaymentMethod]);
+
     return (
       <View style={styles.filterBar}>
         <View style={styles.searchContainer}>
@@ -305,7 +351,28 @@ const FilterBar = memo<FilterBarProps>(
             onPress={() => setShowDatePicker(true)}
           >
             <Calendar size={20} color="#2196F3" />
-            <Text style={styles.filterButtonText}>Par date</Text>
+            <Text style={styles.filterButtonText}>{dateLabel}</Text>
+            {selectedDate && (
+              <Pressable onPress={handleClearDate} style={styles.clearButton}>
+                <X size={16} color="#F44336" />
+              </Pressable>
+            )}
+          </Pressable>
+
+          <Pressable
+            style={styles.filterButton}
+            onPress={() => setShowPaymentPicker(!showPaymentPicker)}
+          >
+            <CreditCard size={20} color="#2196F3" />
+            <Text style={styles.filterButtonText}>{paymentMethodLabel}</Text>
+            {selectedPaymentMethod && (
+              <Pressable
+                onPress={() => onPaymentMethodChange(null)}
+                style={styles.clearButton}
+              >
+                <X size={16} color="#F44336" />
+              </Pressable>
+            )}
           </Pressable>
 
           <Pressable style={styles.filterButton} onPress={handleSortToggle}>
@@ -319,15 +386,55 @@ const FilterBar = memo<FilterBarProps>(
               Supprimer toutes les notes
             </Text>
           </Pressable>
+
+          <Pressable style={styles.resetButton} onPress={onResetFilters}>
+            <RefreshCw size={20} color="#2196F3" />
+            <Text style={[styles.filterButtonText, { color: '#2196F3' }]}>
+              Réinitialiser filtres
+            </Text>
+          </Pressable>
         </View>
 
         {showDatePicker && (
           <DateTimePicker
-            value={selectedDate}
+            value={tempDate}
             mode="date"
             display="default"
             onChange={handleDateChange}
           />
+        )}
+
+        {showPaymentPicker && (
+          <View style={styles.paymentPickerContainer}>
+            <Pressable
+              style={[
+                styles.paymentOption,
+                !selectedPaymentMethod && styles.selectedPaymentOption,
+              ]}
+              onPress={() => {
+                onPaymentMethodChange(null);
+                setShowPaymentPicker(false);
+              }}
+            >
+              <Text style={styles.paymentOptionText}>Tous les modes</Text>
+            </Pressable>
+            {Object.entries(PAYMENT_METHOD_LABELS).map(([method, label]) => (
+              <Pressable
+                key={method}
+                style={[
+                  styles.paymentOption,
+                  selectedPaymentMethod === method &&
+                    styles.selectedPaymentOption,
+                ]}
+                onPress={() => {
+                  onPaymentMethodChange(method as Bill['paymentMethod']);
+                  setShowPaymentPicker(false);
+                }}
+              >
+                <Text style={styles.paymentOptionText}>{label}</Text>
+              </Pressable>
+            ))}
+          </View>
         )}
       </View>
     );
@@ -387,8 +494,13 @@ export default function BillsScreen() {
   const [statsModalVisible, setStatsModalVisible] = useState(false);
   const [page, setPage] = useState(0);
   const [hasMorePages, setHasMorePages] = useState(true);
+  const [searchText, setSearchText] = useState('');
+  const [dateFilter, setDateFilter] = useState<Date | null>(null);
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState<
+    Bill['paymentMethod'] | null
+  >(null);
 
-  // Chargement des factures
+  // Chargement des factures avec nettoyage automatique
   useEffect(() => {
     let mounted = true;
 
@@ -396,8 +508,12 @@ export default function BillsScreen() {
       try {
         setLoading(true);
         const loadedBills = await getBills();
+
+        // Nettoyer les anciennes factures si nécessaire
+        const cleanedBills = await cleanupOldBills(loadedBills);
+
         if (mounted) {
-          const sortedBills = sortBillsByDate(loadedBills, 'desc');
+          const sortedBills = sortBillsByDate(cleanedBills, 'desc');
           setBills(sortedBills);
           setFilteredBills(sortedBills);
           if (sortedBills.length > 0) {
@@ -434,16 +550,13 @@ export default function BillsScreen() {
     []
   );
 
-  // Recherche dans les factures - Mémoïzé avec debounce
-  const handleSearch = useCallback(
-    (text: string) => {
-      if (!text.trim()) {
-        setFilteredBills(sortBillsByDate(bills, sortOrder));
-        return;
-      }
+  // Filtrage optimisé avec useMemo
+  const appliedFilters = useMemo(() => {
+    let filtered = bills;
 
-      const lowerCaseText = text.toLowerCase();
-      const filtered = bills.filter((bill) => {
+    if (searchText.trim()) {
+      const lowerCaseText = searchText.toLowerCase();
+      filtered = filtered.filter((bill) => {
         const tableName = bill.tableName || `Table ${bill.tableNumber}`;
         const amount = bill.amount.toString();
 
@@ -453,43 +566,71 @@ export default function BillsScreen() {
           (bill.section && bill.section.toLowerCase().includes(lowerCaseText))
         );
       });
+    }
 
-      setFilteredBills(sortBillsByDate(filtered, sortOrder));
-    },
-    [bills, sortOrder, sortBillsByDate]
-  );
-
-  // Filtre par date - Mémoïzé
-  const handleDateFilter = useCallback(
-    (date: Date | null) => {
-      if (!date) {
-        setFilteredBills(sortBillsByDate(bills, sortOrder));
-        return;
-      }
-
-      const selectedDate = new Date(date);
+    if (dateFilter) {
+      const selectedDate = new Date(dateFilter);
       selectedDate.setHours(0, 0, 0, 0);
       const nextDay = new Date(selectedDate);
       nextDay.setDate(selectedDate.getDate() + 1);
 
-      const filtered = bills.filter((bill) => {
+      filtered = filtered.filter((bill) => {
         const billDate = new Date(bill.timestamp);
         return billDate >= selectedDate && billDate < nextDay;
       });
+    }
 
-      setFilteredBills(sortBillsByDate(filtered, sortOrder));
+    if (paymentMethodFilter) {
+      filtered = filtered.filter(
+        (bill) => bill.paymentMethod === paymentMethodFilter
+      );
+    }
+
+    return sortBillsByDate(filtered, sortOrder);
+  }, [
+    bills,
+    searchText,
+    dateFilter,
+    paymentMethodFilter,
+    sortOrder,
+    sortBillsByDate,
+  ]);
+
+  // Mise à jour des filtres avec debounce
+  useEffect(() => {
+    setFilteredBills(appliedFilters);
+    setPage(0);
+    setHasMorePages(appliedFilters.length > PAGE_SIZE);
+  }, [appliedFilters]);
+
+  const handleSearch = useCallback((text: string) => {
+    setSearchText(text);
+  }, []);
+
+  const handleDateFilter = useCallback((date: Date | null) => {
+    setDateFilter(date);
+  }, []);
+
+  const handlePaymentMethodFilter = useCallback(
+    (method: Bill['paymentMethod'] | null) => {
+      setPaymentMethodFilter(method);
     },
-    [bills, sortOrder, sortBillsByDate]
+    []
   );
 
-  // Changement de l'ordre de tri - Mémoïzé
   const handleSortChange = useCallback(
     (newSortOrder: 'desc' | 'asc' | 'none') => {
       setSortOrder(newSortOrder);
-      setFilteredBills(sortBillsByDate(filteredBills, newSortOrder));
     },
-    [filteredBills, sortBillsByDate]
+    []
   );
+
+  const handleResetFilters = useCallback(() => {
+    setSearchText('');
+    setDateFilter(null);
+    setPaymentMethodFilter(null);
+    setSortOrder('desc');
+  }, []);
 
   const getStatusColor = useCallback(
     (status: Bill['status']) => STATUS_COLORS[status],
@@ -641,7 +782,6 @@ export default function BillsScreen() {
       </html>
     `;
   }, []);
-
 
   const handlePrint = useCallback(async () => {
     if (!selectedBill) {
@@ -814,6 +954,11 @@ export default function BillsScreen() {
             sortOrder={sortOrder}
             onSortChange={handleSortChange}
             onDeleteAll={handleDeleteAll}
+            searchText={searchText}
+            selectedDate={dateFilter}
+            onPaymentMethodChange={handlePaymentMethodFilter}
+            selectedPaymentMethod={paymentMethodFilter}
+            onResetFilters={handleResetFilters}
           />
 
           <View style={styles.content}>
@@ -977,6 +1122,8 @@ export default function BillsScreen() {
     </View>
   );
 }
+
+// Styles mis à jour pour inclure les nouveaux éléments
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1051,7 +1198,9 @@ const styles = StyleSheet.create({
   },
   filterActions: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-start',
+    flexWrap: 'wrap',
+    gap: 8,
   },
   filterButton: {
     flexDirection: 'row',
@@ -1060,7 +1209,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 8,
-    marginRight: 8,
+    minWidth: 120,
   },
   filterButtonText: {
     marginLeft: 8,
@@ -1395,5 +1544,51 @@ const styles = StyleSheet.create({
   loadingMoreText: {
     marginTop: 5,
     color: '#666',
+  },
+  // Nouveaux styles ajoutés
+  clearButton: {
+    marginLeft: 8,
+    padding: 4,
+  },
+  resetButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#E3F2FD',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2196F3',
+  },
+  paymentPickerContainer: {
+    position: 'absolute',
+    top: '100%',
+    right: 0,
+    backgroundColor: 'white',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
+    elevation: 5,
+    zIndex: 1000,
+    minWidth: 200,
+  },
+  paymentOption: {
+    padding: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  selectedPaymentOption: {
+    backgroundColor: '#E3F2FD',
+  },
+  paymentOptionText: {
+    fontSize: 16,
+    color: '#333',
   },
 });

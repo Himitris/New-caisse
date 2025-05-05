@@ -1,4 +1,4 @@
-// app/(tabs)/menu.tsx - Version optimisée
+// app/(tabs)/menu.tsx - Version optimisée avec corrections
 import {
   View,
   Text,
@@ -67,6 +67,23 @@ const CATEGORY_COLORS: { [key: string]: string } = {
   Glaces: '#00BCD4',
 };
 
+// Debounce utilitaire
+const useDebounce = (value: any, delay: number) => {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value);
+    }, delay);
+
+    return () => {
+      clearTimeout(handler);
+    };
+  }, [value, delay]);
+
+  return debouncedValue;
+};
+
 // Composant MenuItem optimisé avec React.memo
 const MenuItemCard = memo(
   ({
@@ -82,6 +99,16 @@ const MenuItemCard = memo(
     onEdit: () => void;
     onDelete: () => void;
   }) => {
+    // Debounce pour les actions rapides
+    const [isToggling, setIsToggling] = useState(false);
+
+    const handleToggleAvailability = useCallback(() => {
+      if (isToggling) return;
+      setIsToggling(true);
+      onToggleAvailability();
+      setTimeout(() => setIsToggling(false), 300);
+    }, [isToggling, onToggleAvailability]);
+
     return (
       <View
         key={item.id}
@@ -99,7 +126,8 @@ const MenuItemCard = memo(
               styles.actionButton,
               { backgroundColor: item.available ? '#f44336' : '#4CAF50' },
             ]}
-            onPress={onToggleAvailability}
+            onPress={handleToggleAvailability}
+            disabled={isToggling}
           >
             {item.available ? (
               <MinusCircle size={16} color="#fff" />
@@ -130,6 +158,16 @@ const MenuItemCard = memo(
         </View>
       </View>
     );
+  },
+  (prevProps, nextProps) => {
+    // Custom comparaison pour éviter les re-renders inutiles
+    return (
+      prevProps.item.id === nextProps.item.id &&
+      prevProps.item.available === nextProps.item.available &&
+      prevProps.item.name === nextProps.item.name &&
+      prevProps.item.price === nextProps.item.price &&
+      prevProps.isCustom === nextProps.isCustom
+    );
   }
 );
 
@@ -139,6 +177,10 @@ const EditItemModal: React.FC<EditModalProps> = memo(
     const [name, setName] = useState('');
     const [price, setPrice] = useState('');
     const [available, setAvailable] = useState(true);
+
+    // Debounce pour les inputs
+    const debouncedName = useDebounce(name, 300);
+    const debouncedPrice = useDebounce(price, 300);
 
     useEffect(() => {
       if (item) {
@@ -153,14 +195,14 @@ const EditItemModal: React.FC<EditModalProps> = memo(
 
       const updatedItem = {
         ...item,
-        name,
-        price: parseFloat(price) || item.price,
+        name: debouncedName,
+        price: parseFloat(debouncedPrice) || item.price,
         available,
       };
 
       onSave(updatedItem);
       onClose();
-    }, [item, name, price, available, onSave, onClose]);
+    }, [item, debouncedName, debouncedPrice, available, onSave, onClose]);
 
     if (!item) return null;
 
@@ -258,11 +300,15 @@ const AddItemModal: React.FC<EditModalProps> = memo(
     const [type, setType] = useState<'resto' | 'boisson'>('resto');
     const [category, setCategory] = useState('Plats Principaux');
 
+    // Debounce pour les inputs
+    const debouncedName = useDebounce(name, 300);
+    const debouncedPrice = useDebounce(price, 300);
+
     const handleSave = useCallback(() => {
       const newItem: MenuItem = {
         id: Date.now(),
-        name,
-        price: parseFloat(price) || 0,
+        name: debouncedName,
+        price: parseFloat(debouncedPrice) || 0,
         category,
         available,
         type,
@@ -271,7 +317,15 @@ const AddItemModal: React.FC<EditModalProps> = memo(
 
       onSave(newItem);
       onClose();
-    }, [name, price, category, available, type, onSave, onClose]);
+    }, [
+      debouncedName,
+      debouncedPrice,
+      category,
+      available,
+      type,
+      onSave,
+      onClose,
+    ]);
 
     const categories = useMemo(
       () =>
@@ -450,54 +504,80 @@ const AddItemModal: React.FC<EditModalProps> = memo(
   }
 );
 
+// Séparation des états pour éviter les re-renders inutiles
+interface MenuState {
+  activeType: 'resto' | 'boisson' | null;
+  selectedCategory: string | null;
+}
+
+interface DataState {
+  menuItems: MenuItem[];
+  customItems: CustomMenuItem[];
+}
+
 export default function MenuScreen() {
-  const [activeType, setActiveType] = useState<'resto' | 'boisson' | null>(
-    null
-  );
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
-  const [customItems, setCustomItems] = useState<CustomMenuItem[]>([]);
+  // État pour l'UI - optimisé
+  const [menuState, setMenuState] = useState<MenuState>({
+    activeType: null,
+    selectedCategory: null,
+  });
+
+  // État pour les données - immuable
+  const [dataState, setDataState] = useState<DataState>({
+    menuItems: [],
+    customItems: [],
+  });
+
   const [editItem, setEditItem] = useState<MenuItem | null>(null);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [addModalVisible, setAddModalVisible] = useState(false);
 
   // Mémoïsation des catégories
   const categories = useMemo(() => {
-    const allCategories = [...new Set(menuItems.map((item) => item.category))];
+    const allCategories = [
+      ...new Set(dataState.menuItems.map((item) => item.category)),
+    ];
 
-    if (activeType) {
+    if (menuState.activeType) {
       return allCategories.filter((category) =>
-        menuItems.some(
-          (item) => item.category === category && item.type === activeType
+        dataState.menuItems.some(
+          (item) =>
+            item.category === category && item.type === menuState.activeType
         )
       );
     }
 
     return allCategories.sort();
-  }, [menuItems, activeType]);
+  }, [dataState.menuItems, menuState.activeType]);
 
-  // Mémoïsation des items filtrés
+  // Mémoïsation des items filtrés - Chargement paresseux
   const filteredItems = useMemo(() => {
-    let filtered = menuItems;
+    let filtered = dataState.menuItems;
 
-    if (activeType) {
-      filtered = filtered.filter((item) => item.type === activeType);
+    if (menuState.activeType) {
+      filtered = filtered.filter((item) => item.type === menuState.activeType);
     }
 
-    if (selectedCategory) {
-      filtered = filtered.filter((item) => item.category === selectedCategory);
+    if (menuState.selectedCategory) {
+      filtered = filtered.filter(
+        (item) => item.category === menuState.selectedCategory
+      );
     }
 
     return filtered;
-  }, [menuItems, activeType, selectedCategory]);
+  }, [dataState.menuItems, menuState.activeType, menuState.selectedCategory]);
 
-  // Initialiser les items de menu si pas de données sauvegardées
+  // Initialiser les items de menu si pas de données sauvegardées - Optimisé
   const initializeMenuItems = useCallback(async () => {
     try {
       const customItems = await getCustomMenuItems();
 
-      let initialItems = priceData.map((item) => {
-        const category = getCategoryFromName(item.name, item.type as 'resto' | 'boisson');
+      // Chargement lazy des items standards
+      const standardItems = priceData.map((item) => {
+        const category = getCategoryFromName(
+          item.name,
+          item.type as 'resto' | 'boisson'
+        );
 
         return {
           id: item.id,
@@ -524,15 +604,21 @@ export default function MenuScreen() {
         };
       });
 
-      const allItems = [...initialItems, ...customMenuItems];
+      const allItems = [...standardItems, ...customMenuItems];
 
-      setMenuItems(allItems);
-      setCustomItems(customItems);
+      // Mise à jour en batch
+      setDataState({
+        menuItems: allItems,
+        customItems,
+      });
     } catch (error) {
       console.error('Error initializing menu items:', error);
 
       const standardItems = priceData.map((item) => {
-        const category = getCategoryFromName(item.name, item.type as 'resto' | 'boisson');
+        const category = getCategoryFromName(
+          item.name,
+          item.type as 'resto' | 'boisson'
+        );
 
         return {
           id: item.id,
@@ -545,7 +631,10 @@ export default function MenuScreen() {
         };
       });
 
-      setMenuItems(standardItems);
+      setDataState({
+        menuItems: standardItems,
+        customItems: [],
+      });
     }
   }, []);
 
@@ -595,8 +684,10 @@ export default function MenuScreen() {
 
       const allItems = [...standardItems, ...customMenuItems];
 
-      setMenuItems(allItems);
-      setCustomItems(customItems);
+      setDataState({
+        menuItems: allItems,
+        customItems,
+      });
     } catch (error) {
       console.error('Error loading menu items status:', error);
       initializeMenuItems();
@@ -621,8 +712,10 @@ export default function MenuScreen() {
 
       await addCustomMenuItem(customMenuItem);
 
-      setCustomItems((prev) => [...prev, customMenuItem]);
-      setMenuItems((prev) => [...prev, newItem]);
+      setDataState((prev) => ({
+        menuItems: [...prev.menuItems, newItem],
+        customItems: [...prev.customItems, customMenuItem],
+      }));
 
       const itemStatus: MenuItemAvailability = {
         id: newItem.id,
@@ -639,33 +732,33 @@ export default function MenuScreen() {
     }
   }, []);
 
-  // Handler optimisé pour toggle availability
+  // Handler optimisé pour toggle availability - Avec debounce
   const toggleItemAvailability = useCallback(
     async (itemId: number) => {
       try {
-        const itemToToggle = menuItems.find((item) => item.id === itemId);
+        const itemToToggle = dataState.menuItems.find(
+          (item) => item.id === itemId
+        );
         if (!itemToToggle) return;
 
         const newAvailability = !itemToToggle.available;
 
-        // Mise à jour avec structure immuable
-        setMenuItems((prev) =>
-          prev.map((item) =>
+        // Mise à jour avec structure immuable - optimisée
+        setDataState((prev) => ({
+          ...prev,
+          menuItems: prev.menuItems.map((item) =>
             item.id === itemId ? { ...item, available: newAvailability } : item
-          )
+          ),
+          customItems: prev.customItems.map((item) =>
+            item.id === itemId ? { ...item, available: newAvailability } : item
+          ),
+        }));
+
+        const isCustomItem = dataState.customItems.some(
+          (item) => item.id === itemId
         );
-
-        const isCustomItem = customItems.some((item) => item.id === itemId);
         if (isCustomItem) {
-          setCustomItems((prev) =>
-            prev.map((item) =>
-              item.id === itemId
-                ? { ...item, available: newAvailability }
-                : item
-            )
-          );
-
-          const updatedCustomItems = customItems.map((item) =>
+          const updatedCustomItems = dataState.customItems.map((item) =>
             item.id === itemId ? { ...item, available: newAvailability } : item
           );
           await saveCustomMenuItems(updatedCustomItems);
@@ -702,7 +795,7 @@ export default function MenuScreen() {
         );
       }
     },
-    [menuItems, customItems]
+    [dataState.menuItems, dataState.customItems]
   );
 
   // Handler optimisé pour édition
@@ -715,7 +808,7 @@ export default function MenuScreen() {
   const handleSaveEdit = useCallback(
     async (updatedItem: MenuItem) => {
       try {
-        const isCustomItem = customItems.some(
+        const isCustomItem = dataState.customItems.some(
           (item) => item.id === updatedItem.id
         );
 
@@ -731,16 +824,23 @@ export default function MenuScreen() {
 
           await updateCustomMenuItem(customMenuItem);
 
-          setCustomItems((prev) =>
-            prev.map((item) =>
+          setDataState((prev) => ({
+            ...prev,
+            menuItems: prev.menuItems.map((item) =>
+              item.id === updatedItem.id ? updatedItem : item
+            ),
+            customItems: prev.customItems.map((item) =>
               item.id === updatedItem.id ? customMenuItem : item
-            )
-          );
+            ),
+          }));
+        } else {
+          setDataState((prev) => ({
+            ...prev,
+            menuItems: prev.menuItems.map((item) =>
+              item.id === updatedItem.id ? updatedItem : item
+            ),
+          }));
         }
-
-        setMenuItems((prev) =>
-          prev.map((item) => (item.id === updatedItem.id ? updatedItem : item))
-        );
 
         const availability = await getMenuAvailability();
         const updatedAvailability = availability.some(
@@ -772,13 +872,15 @@ export default function MenuScreen() {
         Alert.alert('Erreur', "Impossible de mettre à jour l'article.");
       }
     },
-    [customItems]
+    [dataState.customItems]
   );
 
   // Handler optimisé pour suppression
   const handleDeleteMenuItem = useCallback(
     (itemId: number) => {
-      const isCustomItem = customItems.some((item) => item.id === itemId);
+      const isCustomItem = dataState.customItems.some(
+        (item) => item.id === itemId
+      );
 
       if (!isCustomItem) {
         Alert.alert(
@@ -800,12 +902,14 @@ export default function MenuScreen() {
               try {
                 await deleteCustomMenuItem(itemId);
 
-                setCustomItems((prev) =>
-                  prev.filter((item) => item.id !== itemId)
-                );
-                setMenuItems((prev) =>
-                  prev.filter((item) => item.id !== itemId)
-                );
+                setDataState((prev) => ({
+                  menuItems: prev.menuItems.filter(
+                    (item) => item.id !== itemId
+                  ),
+                  customItems: prev.customItems.filter(
+                    (item) => item.id !== itemId
+                  ),
+                }));
 
                 const availability = await getMenuAvailability();
                 const updatedAvailability = availability.filter(
@@ -829,15 +933,22 @@ export default function MenuScreen() {
         ]
       );
     },
-    [customItems]
+    [dataState.customItems]
   );
 
-  const handleCategorySelect = useCallback(
-    (category: string) => {
-      setSelectedCategory(selectedCategory === category ? null : category);
-    },
-    [selectedCategory]
-  );
+  const handleCategorySelect = useCallback((category: string) => {
+    setMenuState((prev) => ({
+      ...prev,
+      selectedCategory: prev.selectedCategory === category ? null : category,
+    }));
+  }, []);
+
+  const setActiveType = useCallback((type: 'resto' | 'boisson' | null) => {
+    setMenuState((prev) => ({
+      ...prev,
+      activeType: type,
+    }));
+  }, []);
 
   return (
     <View style={styles.container}>
@@ -847,16 +958,16 @@ export default function MenuScreen() {
           <Pressable
             style={[
               styles.typeFilterButton,
-              activeType === 'resto' && styles.activeTypeButton,
+              menuState.activeType === 'resto' && styles.activeTypeButton,
             ]}
             onPress={() =>
-              setActiveType(activeType === 'resto' ? null : 'resto')
+              setActiveType(menuState.activeType === 'resto' ? null : 'resto')
             }
           >
             <Text
               style={[
                 styles.typeFilterText,
-                activeType === 'resto' && styles.activeTypeText,
+                menuState.activeType === 'resto' && styles.activeTypeText,
               ]}
             >
               Plats
@@ -865,16 +976,18 @@ export default function MenuScreen() {
           <Pressable
             style={[
               styles.typeFilterButton,
-              activeType === 'boisson' && styles.activeTypeButton,
+              menuState.activeType === 'boisson' && styles.activeTypeButton,
             ]}
             onPress={() =>
-              setActiveType(activeType === 'boisson' ? null : 'boisson')
+              setActiveType(
+                menuState.activeType === 'boisson' ? null : 'boisson'
+              )
             }
           >
             <Text
               style={[
                 styles.typeFilterText,
-                activeType === 'boisson' && styles.activeTypeText,
+                menuState.activeType === 'boisson' && styles.activeTypeText,
               ]}
             >
               Boissons
@@ -902,14 +1015,16 @@ export default function MenuScreen() {
             <Pressable
               style={[
                 styles.categoryItem,
-                !selectedCategory && styles.activeCategoryItem,
+                !menuState.selectedCategory && styles.activeCategoryItem,
               ]}
-              onPress={() => setSelectedCategory(null)}
+              onPress={() =>
+                setMenuState((prev) => ({ ...prev, selectedCategory: null }))
+              }
             >
               <Text
                 style={[
                   styles.categoryItemText,
-                  !selectedCategory && styles.activeCategoryItemText,
+                  !menuState.selectedCategory && styles.activeCategoryItemText,
                 ]}
               >
                 Toutes les catégories
@@ -921,7 +1036,8 @@ export default function MenuScreen() {
                 key={category}
                 style={[
                   styles.categoryItem,
-                  selectedCategory === category && styles.activeCategoryItem,
+                  menuState.selectedCategory === category &&
+                    styles.activeCategoryItem,
                   { borderLeftColor: CATEGORY_COLORS[category] || '#757575' },
                 ]}
                 onPress={() => handleCategorySelect(category)}
@@ -929,7 +1045,7 @@ export default function MenuScreen() {
                 <Text
                   style={[
                     styles.categoryItemText,
-                    selectedCategory === category &&
+                    menuState.selectedCategory === category &&
                       styles.activeCategoryItemText,
                   ]}
                 >
@@ -944,7 +1060,7 @@ export default function MenuScreen() {
           <ScrollView>
             <View style={styles.menuItemsGrid}>
               {filteredItems.map((item) => {
-                const isCustomItem = customItems.some(
+                const isCustomItem = dataState.customItems.some(
                   (customItem) => customItem.id === item.id
                 );
 
@@ -1014,7 +1130,7 @@ function getCategoryFromName(name: string, type: 'resto' | 'boisson'): string {
   }
 }
 
-// Styles restent inchangés
+// Styles optimisés
 const styles = StyleSheet.create({
   container: {
     flex: 1,
