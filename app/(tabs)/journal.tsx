@@ -1,8 +1,26 @@
 // app/(tabs)/journal.tsx - Journal des ventes avec regroupement des articles
 
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, TextInput } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Pressable,
+  ActivityIndicator,
+  TextInput,
+} from 'react-native';
 import { useState, useEffect } from 'react';
-import { BarChart3, Filter, Search, Calendar, X, FileDown, ClipboardList, Tag, Grid } from 'lucide-react-native';
+import {
+  BarChart3,
+  Filter,
+  Search,
+  Calendar,
+  X,
+  FileDown,
+  ClipboardList,
+  Tag,
+  Grid,
+} from 'lucide-react-native';
 import { getBills, Bill } from '../../utils/storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Sharing from 'expo-sharing';
@@ -45,6 +63,82 @@ interface PaymentMethodStats {
   unknown: number;
 }
 
+type ViewMode = 'detailed' | 'summary';
+type GroupByMode = 'article' | 'transaction';
+type PaymentFilter = 'all' | 'card' | 'cash' | 'check';
+
+const PAYMENT_METHODS_MAP = {
+  card: 'Carte bancaire',
+  cash: 'Espèces',
+  check: 'Chèque',
+} as const;
+
+const PAYMENT_TYPES_MAP = {
+  full: 'Paiement complet',
+  split: 'Paiement partagé',
+  custom: 'Paiement personnalisé',
+  items: 'Paiement par article',
+} as const;
+
+const getArticleCategory = (itemName: string): string => {
+  const lowerName = itemName.toLowerCase();
+
+  const categoryPatterns = {
+    Plats: [
+      'magret',
+      'confit',
+      'tartare',
+      'cassoulet',
+      'saucisse',
+      'plat',
+      'maxi',
+    ],
+    Salades: ['salade'],
+    Desserts: ['dessert', 'glace'],
+    Boissons: [
+      'verre',
+      'pichet',
+      'btl',
+      'vin',
+      'biere',
+      'blonde',
+      'ambree',
+      'soft',
+      'eau',
+      'café',
+      'thé',
+    ],
+    'Apéritifs et Alcools': [
+      'apero',
+      'digestif',
+      'ricard',
+      'alcool',
+      'cocktail',
+    ],
+    'Menu Enfant': ['enfant'],
+    Accompagnements: ['frites', 'accompagnement'],
+    'Paiements génériques': ['paiement', 'payment'],
+  };
+
+  for (const [category, patterns] of Object.entries(categoryPatterns)) {
+    if (patterns.some((pattern) => lowerName.includes(pattern))) {
+      return category;
+    }
+  }
+
+  return 'Autres';
+};
+
+const formatDate = (dateString: string) => {
+  return new Date(dateString).toLocaleDateString('fr-FR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+};
+
 export default function JournalScreen() {
   const [loading, setLoading] = useState(true);
   const [bills, setBills] = useState<Bill[]>([]);
@@ -52,21 +146,23 @@ export default function JournalScreen() {
   const [summaryItems, setSummaryItems] = useState<SummaryItem[]>([]);
   const [filteredItems, setFilteredItems] = useState<SoldItem[]>([]);
   const [salesByCategory, setSalesByCategory] = useState<SalesByCategory[]>([]);
-  const [paymentMethodStats, setPaymentMethodStats] = useState<PaymentMethodStats>({
-    card: 0,
-    cash: 0,
-    check: 0,
-    unknown: 0
-  });
-  
+  const [paymentMethodStats, setPaymentMethodStats] =
+    useState<PaymentMethodStats>({
+      card: 0,
+      cash: 0,
+      check: 0,
+      unknown: 0,
+    });
+
   // États pour le filtrage
   const [searchText, setSearchText] = useState('');
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [dateFilterActive, setDateFilterActive] = useState(false);
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState<'all' | 'card' | 'cash' | 'check'>('all');
-  const [viewMode, setViewMode] = useState<'detailed' | 'summary'>('summary');
-  const [groupByMode, setGroupByMode] = useState<'article' | 'transaction'>('article');
+  const [selectedPaymentMethod, setSelectedPaymentMethod] =
+    useState<PaymentFilter>('all');
+  const [viewMode, setViewMode] = useState<ViewMode>('summary');
+  const [groupByMode, setGroupByMode] = useState<GroupByMode>('article');
 
   // Statistiques globales
   const [totalSales, setTotalSales] = useState(0);
@@ -77,145 +173,28 @@ export default function JournalScreen() {
     loadSalesData();
   }, []);
 
-  // Fonction utilitaire pour trier les articles
-  const getArticleCategory = (itemName: string): string => {
-    const lowerName = itemName.toLowerCase();
-    
-    // Plats
-    if (lowerName.includes('magret') || 
-        lowerName.includes('confit') || 
-        lowerName.includes('tartare') || 
-        lowerName.includes('cassoulet') ||
-        lowerName.includes('saucisse') ||
-        lowerName.includes('plat') ||
-        lowerName.includes('maxi')) {
-      return 'Plats';
-    }
-    // Salades
-    else if (lowerName.includes('salade')) {
-      return 'Salades';
-    }
-    // Desserts
-    else if (lowerName.includes('dessert')) {
-      return 'Desserts';
-    }
-    // Boissons
-    else if (lowerName.includes('verre') || 
-            lowerName.includes('pichet') ||
-            lowerName.includes('btl') ||
-            lowerName.includes('vin') ||
-            lowerName.includes('biere') ||
-            lowerName.includes('blonde') ||
-            lowerName.includes('ambree') ||
-            lowerName.includes('soft') ||
-            lowerName.includes('eau') ||
-            lowerName.includes('café') ||
-            lowerName.includes('thé')) {
-      return 'Boissons';
-    }
-    // Apéritifs et Alcools
-    else if (lowerName.includes('apero') || 
-            lowerName.includes('digestif') ||
-            lowerName.includes('ricard') ||
-            lowerName.includes('alcool') ||
-            lowerName.includes('cocktail')) {
-      return 'Apéritifs et Alcools';
-    }
-    // Menu enfant
-    else if (lowerName.includes('enfant')) {
-      return 'Menu Enfant';
-    }
-    // Accompagnements
-    else if (lowerName.includes('frites') || 
-            lowerName.includes('accompagnement')) {
-      return 'Accompagnements';
-    }
-    // Glaces
-    else if (lowerName.includes('glace')) {
-      return 'Desserts';
-    }
-    // Si le système ne peut pas déterminer
-    else if (lowerName.includes('paiement') || lowerName.includes('payment')) {
-      return 'Paiements génériques';
-    }
-    else {
-      return 'Autres';
-    }
-  };
+  useEffect(() => {
+    filterItems();
+  }, [searchText, dateFilterActive, selectedDate, selectedPaymentMethod]);
 
-  // Charger les données de vente
   const loadSalesData = async () => {
     try {
       setLoading(true);
       const allBills = await getBills();
-      
-      // Trier les factures par date (la plus récente en premier)
-      const sortedBills = allBills.sort((a, b) => {
-        return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
-      });
+
+      const sortedBills = allBills.sort(
+        (a, b) =>
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      );
 
       setBills(sortedBills);
 
-      // Extraire tous les articles vendus
-      const itemsSold: SoldItem[] = [];
-      let totalItemCount = 0;
-      let totalSalesAmount = 0;
-      const paymentMethodCounts = {
-        card: 0,
-        cash: 0,
-        check: 0,
-        unknown: 0
-      };
-
-      sortedBills.forEach(bill => {
-        // Comptabiliser les méthodes de paiement
-        if (bill.paymentMethod === 'card') paymentMethodCounts.card++;
-        else if (bill.paymentMethod === 'cash') paymentMethodCounts.cash++;
-        else if (bill.paymentMethod === 'check') paymentMethodCounts.check++;
-        else paymentMethodCounts.unknown++;
-
-        // Si la facture a des articles spécifiquement payés (paiement par article)
-        if (bill.paidItems && bill.paidItems.length > 0) {
-          bill.paidItems.forEach(item => {
-            const soldItem: SoldItem = {
-              id: item.id,
-              name: item.name,
-              quantity: item.quantity || 1,
-              price: item.price,
-              totalAmount: item.price * (item.quantity || 1),
-              date: bill.timestamp,
-              tableNumber: bill.tableNumber,
-              tableName: bill.tableName,
-              section: bill.section,
-              paymentMethod: bill.paymentMethod,
-              paymentType: bill.paymentType
-            };
-            itemsSold.push(soldItem);
-            totalItemCount += soldItem.quantity;
-            totalSalesAmount += soldItem.totalAmount;
-          });
-        } 
-        // Si la facture n'a pas d'articles spécifiques, mais représente un paiement complet ou partiel
-        else if (bill.status === 'paid' || bill.status === 'split') {
-          // Nous n'avons pas les détails des articles, mais nous pouvons compter ça comme une vente générique
-          const soldItem: SoldItem = {
-            id: bill.id,
-            name: `Paiement ${bill.paymentType === 'full' ? 'complet' : bill.paymentType === 'split' ? 'partagé' : 'personnalisé'}`,
-            quantity: 1,
-            price: bill.amount,
-            totalAmount: bill.amount,
-            date: bill.timestamp,
-            tableNumber: bill.tableNumber,
-            tableName: bill.tableName,
-            section: bill.section,
-            paymentMethod: bill.paymentMethod,
-            paymentType: bill.paymentType
-          };
-          itemsSold.push(soldItem);
-          totalItemCount += 1;
-          totalSalesAmount += bill.amount;
-        }
-      });
+      const {
+        itemsSold,
+        totalItemCount,
+        totalSalesAmount,
+        paymentMethodCounts,
+      } = processBillsData(sortedBills);
 
       setSoldItems(itemsSold);
       setFilteredItems(itemsSold);
@@ -223,9 +202,7 @@ export default function JournalScreen() {
       setTotalSales(totalSalesAmount);
       setPaymentMethodStats(paymentMethodCounts);
 
-      // Préparer les données pour le résumé
       prepareSummaryData(itemsSold);
-      
     } catch (error) {
       console.error('Erreur lors du chargement des données de vente:', error);
     } finally {
@@ -233,14 +210,80 @@ export default function JournalScreen() {
     }
   };
 
-  // Préparer les données pour le résumé
+  const processBillsData = (bills: Bill[]) => {
+    const itemsSold: SoldItem[] = [];
+    let totalItemCount = 0;
+    let totalSalesAmount = 0;
+    const paymentMethodCounts: PaymentMethodStats = {
+      card: 0,
+      cash: 0,
+      check: 0,
+      unknown: 0,
+    };
+
+    bills.forEach((bill) => {
+      // Comptabiliser les méthodes de paiement
+      if ((bill.paymentMethod ?? 'unknown') in paymentMethodCounts) {
+        paymentMethodCounts[bill.paymentMethod ?? 'unknown']++;
+      } else {
+        paymentMethodCounts.unknown++;
+      }
+
+      if (bill.paidItems && bill.paidItems.length > 0) {
+        bill.paidItems.forEach((item) => {
+          const soldItem: SoldItem = {
+            id: item.id,
+            name: item.name,
+            quantity: item.quantity || 1,
+            price: item.price,
+            totalAmount: item.price * (item.quantity || 1),
+            date: bill.timestamp,
+            tableNumber: bill.tableNumber,
+            tableName: bill.tableName,
+            section: bill.section,
+            paymentMethod: bill.paymentMethod,
+            paymentType: bill.paymentType,
+          };
+          itemsSold.push(soldItem);
+          totalItemCount += soldItem.quantity;
+          totalSalesAmount += soldItem.totalAmount;
+        });
+      } else if (bill.status === 'paid' || bill.status === 'split') {
+        const paymentTypeName =
+          bill.paymentType === 'full'
+            ? 'complet'
+            : bill.paymentType === 'split'
+            ? 'partagé'
+            : 'personnalisé';
+
+        const soldItem: SoldItem = {
+          id: bill.id,
+          name: `Paiement ${paymentTypeName}`,
+          quantity: 1,
+          price: bill.amount,
+          totalAmount: bill.amount,
+          date: bill.timestamp,
+          tableNumber: bill.tableNumber,
+          tableName: bill.tableName,
+          section: bill.section,
+          paymentMethod: bill.paymentMethod,
+          paymentType: bill.paymentType,
+        };
+        itemsSold.push(soldItem);
+        totalItemCount += 1;
+        totalSalesAmount += bill.amount;
+      }
+    });
+
+    return { itemsSold, totalItemCount, totalSalesAmount, paymentMethodCounts };
+  };
+
   const prepareSummaryData = (items: SoldItem[]) => {
-    // Regrouper les articles par nom
-    const itemSummary: {[key: string]: SummaryItem} = {};
-    
-    items.forEach(item => {
+    const itemSummary: { [key: string]: SummaryItem } = {};
+
+    items.forEach((item) => {
       const key = item.name.toLowerCase();
-      
+
       if (!itemSummary[key]) {
         itemSummary[key] = {
           id: typeof item.id === 'number' ? item.id : 0,
@@ -248,135 +291,109 @@ export default function JournalScreen() {
           totalQuantity: 0,
           totalAmount: 0,
           occurrences: 0,
-          details: []
+          details: [],
         };
       }
-      
+
       itemSummary[key].totalQuantity += item.quantity;
       itemSummary[key].totalAmount += item.totalAmount;
       itemSummary[key].occurrences += 1;
       itemSummary[key].details.push(item);
     });
 
-    // Convertir l'objet en tableau
-    const summaryArray = Object.values(itemSummary);
-    
-    // Trier par montant total (du plus élevé au plus bas)
-    summaryArray.sort((a, b) => b.totalAmount - a.totalAmount);
-    
+    const summaryArray = Object.values(itemSummary).sort(
+      (a, b) => b.totalAmount - a.totalAmount
+    );
+
     setSummaryItems(summaryArray);
-    
-    // Définir les top articles (Top 5)
     setTopSellingItems(summaryArray.slice(0, 5));
 
-    // Catégoriser les ventes
-    const categorizedSales: {[key: string]: SalesByCategory} = {};
-    
-    // Parcourir tous les articles résumés et les classer par catégorie
-    summaryArray.forEach(item => {
+    const categorizedSales = prepareCategorizedSales(summaryArray);
+    setSalesByCategory(categorizedSales);
+  };
+
+  const prepareCategorizedSales = (summaryArray: SummaryItem[]) => {
+    const categorizedSales: { [key: string]: SalesByCategory } = {};
+
+    summaryArray.forEach((item) => {
       const category = getArticleCategory(item.name);
-      
+
       if (!categorizedSales[category]) {
         categorizedSales[category] = {
           category,
           totalAmount: 0,
           itemCount: 0,
-          items: []
+          items: [],
         };
       }
-      
+
       categorizedSales[category].totalAmount += item.totalAmount;
-      categorizedSales[category].itemCount += 1; 
+      categorizedSales[category].itemCount += 1;
       categorizedSales[category].items.push(item);
     });
-    
-    // Convertir l'objet en tableau et trier par montant total
-    const categoriesArray = Object.values(categorizedSales)
-      .sort((a, b) => b.totalAmount - a.totalAmount);
-    
-    setSalesByCategory(categoriesArray);
+
+    return Object.values(categorizedSales).sort(
+      (a, b) => b.totalAmount - a.totalAmount
+    );
   };
 
-  // Fonction pour filtrer les articles
   const filterItems = () => {
     let filtered = [...soldItems];
 
-    // Filtre par terme de recherche
     if (searchText) {
       const lowerCaseSearch = searchText.toLowerCase();
-      filtered = filtered.filter(item => 
-        item.name.toLowerCase().includes(lowerCaseSearch) ||
-        (item.tableName && item.tableName.toLowerCase().includes(lowerCaseSearch))
+      filtered = filtered.filter(
+        (item) =>
+          item.name.toLowerCase().includes(lowerCaseSearch) ||
+          (item.tableName &&
+            item.tableName.toLowerCase().includes(lowerCaseSearch))
       );
     }
 
-    // Filtre par date
     if (dateFilterActive && selectedDate) {
       const filterDate = new Date(selectedDate);
       filterDate.setHours(0, 0, 0, 0);
       const nextDay = new Date(filterDate);
       nextDay.setDate(nextDay.getDate() + 1);
 
-      filtered = filtered.filter(item => {
+      filtered = filtered.filter((item) => {
         const itemDate = new Date(item.date);
         return itemDate >= filterDate && itemDate < nextDay;
       });
     }
 
-    // Filtre par méthode de paiement
     if (selectedPaymentMethod !== 'all') {
-      filtered = filtered.filter(item => item.paymentMethod === selectedPaymentMethod);
+      filtered = filtered.filter(
+        (item) => item.paymentMethod === selectedPaymentMethod
+      );
     }
 
     setFilteredItems(filtered);
-    
-    // Mettre à jour les résumés basés sur les filtres
     prepareSummaryData(filtered);
   };
 
-  // Appliquer les filtres lorsque les critères changent
-  useEffect(() => {
-    filterItems();
-  }, [searchText, dateFilterActive, selectedDate, selectedPaymentMethod]);
-
-  // Gérer le changement de date
   const handleDateChange = (event: any, date?: Date) => {
     setShowDatePicker(false);
-    
     if (date) {
       setSelectedDate(date);
       setDateFilterActive(true);
     }
   };
 
-  // Réinitialiser le filtre de date
   const clearDateFilter = () => {
     setSelectedDate(null);
     setDateFilterActive(false);
   };
 
-  // Formater la date pour l'affichage
-  const formatDate = (dateString: string) => {
-    const date = new Date(dateString);
-    return date.toLocaleDateString('fr-FR', { 
-      day: '2-digit', 
-      month: '2-digit', 
-      year: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
-
-  // Exporter les données en CSV
   const exportToCSV = async () => {
     try {
-      // Déterminer les données à exporter en fonction du mode de vue
-      let csvContent = "";
-      
+      let csvContent = '';
+
       if (viewMode === 'detailed') {
-        csvContent = "Nom de l'article,Quantité,Prix unitaire,Montant total,Date,Table,Section,Méthode de paiement\n";
-        
-        filteredItems.forEach(item => {
+        csvContent =
+          "Nom de l'article,Quantité,Prix unitaire,Montant total,Date,Table,Section,Méthode de paiement\n";
+
+        filteredItems.forEach((item) => {
           const row = [
             `"${item.name.replace(/"/g, '""')}"`,
             item.quantity,
@@ -385,36 +402,36 @@ export default function JournalScreen() {
             formatDate(item.date),
             item.tableName || `Table ${item.tableNumber}`,
             item.section || 'N/A',
-            item.paymentMethod || 'N/A'
+            item.paymentMethod || 'N/A',
           ].join(',');
-          
+
           csvContent += row + '\n';
         });
       } else {
-        csvContent = "Article,Quantité totale,Montant total,Nombre de ventes\n";
-        
-        summaryItems.forEach(item => {
+        csvContent = 'Article,Quantité totale,Montant total,Nombre de ventes\n';
+
+        summaryItems.forEach((item) => {
           const row = [
             `"${item.name.replace(/"/g, '""')}"`,
             item.totalQuantity,
             item.totalAmount.toFixed(2),
-            item.occurrences
+            item.occurrences,
           ].join(',');
-          
+
           csvContent += row + '\n';
         });
       }
-      
+
       const fileUri = FileSystem.documentDirectory + 'journal_ventes.csv';
       await FileSystem.writeAsStringAsync(fileUri, csvContent);
-      
+
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(fileUri);
       } else {
         alert("Le partage n'est pas disponible sur cet appareil.");
       }
     } catch (error) {
-      console.error('Erreur lors de l\'exportation:', error);
+      console.error("Erreur lors de l'exportation:", error);
       alert("Une erreur s'est produite lors de l'exportation des données.");
     }
   };
@@ -427,41 +444,214 @@ export default function JournalScreen() {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#2196F3" />
-        <Text style={styles.loadingText}>Chargement du journal de ventes...</Text>
+        <Text style={styles.loadingText}>
+          Chargement du journal de ventes...
+        </Text>
       </View>
     );
   }
+
+  const renderDetailedItem = (item: SoldItem, index: number) => (
+    <View key={`${item.id}-${index}`} style={styles.itemCard}>
+      <View style={styles.itemHeader}>
+        <Text style={styles.itemName}>{item.name}</Text>
+        <Text style={styles.itemPrice}>{item.totalAmount.toFixed(2)} €</Text>
+      </View>
+      <View style={styles.itemDetails}>
+        <View style={styles.detailRow}>
+          <Text style={styles.detailLabel}>Quantité:</Text>
+          <Text style={styles.detailValue}>
+            {item.quantity} x {item.price.toFixed(2)} €
+          </Text>
+        </View>
+        <View style={styles.detailRow}>
+          <Text style={styles.detailLabel}>Date:</Text>
+          <Text style={styles.detailValue}>{formatDate(item.date)}</Text>
+        </View>
+        <View style={styles.detailRow}>
+          <Text style={styles.detailLabel}>Table:</Text>
+          <Text style={styles.detailValue}>
+            {item.tableName || `Table ${item.tableNumber}`}
+          </Text>
+        </View>
+        {item.section && (
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Section:</Text>
+            <Text style={styles.detailValue}>{item.section}</Text>
+          </View>
+        )}
+        {item.paymentMethod && (
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Paiement:</Text>
+            <Text style={styles.detailValue}>
+              {PAYMENT_METHODS_MAP[item.paymentMethod] || item.paymentMethod}
+            </Text>
+          </View>
+        )}
+        {item.paymentType && (
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>Type:</Text>
+            <Text style={styles.detailValue}>
+              {PAYMENT_TYPES_MAP[item.paymentType] || item.paymentType}
+            </Text>
+          </View>
+        )}
+      </View>
+      <View style={styles.categoryTag}>
+        <Tag size={14} color="#666" />
+        <Text style={styles.categoryTagText}>
+          {getArticleCategory(item.name)}
+        </Text>
+      </View>
+    </View>
+  );
+
+  const renderSummaryView = () => (
+    <ScrollView style={styles.scrollContainer}>
+      <View style={styles.summarySection}>
+        <Text style={styles.sectionTitle}>Top 5 des Articles Vendus</Text>
+        {topSellingItems.map((item, index) => (
+          <View key={`top-${index}`} style={styles.summaryItemRow}>
+            <View style={styles.summaryItemInfo}>
+              <Text style={styles.summaryItemRank}>#{index + 1}</Text>
+              <Text style={styles.summaryItemName}>{item.name}</Text>
+            </View>
+            <View style={styles.summaryItemStats}>
+              <Text style={styles.summaryItemQuantity}>
+                {item.totalQuantity} vendus
+              </Text>
+              <Text style={styles.summaryItemAmount}>
+                {item.totalAmount.toFixed(2)} €
+              </Text>
+            </View>
+          </View>
+        ))}
+      </View>
+
+      <View style={styles.summarySection}>
+        <Text style={styles.sectionTitle}>Ventes par Catégorie</Text>
+        {salesByCategory.map((category, index) => (
+          <Pressable
+            key={`cat-${index}`}
+            style={styles.categoryRow}
+            onPress={() => setSearchText(category.category)}
+          >
+            <Text style={styles.categoryName}>
+              {category.category.charAt(0).toUpperCase() +
+                category.category.slice(1)}
+            </Text>
+            <View style={styles.categoryStats}>
+              <Text style={styles.categoryCount}>
+                {category.itemCount} articles
+              </Text>
+              <Text style={styles.categoryAmount}>
+                {category.totalAmount.toFixed(2)} €
+              </Text>
+            </View>
+          </Pressable>
+        ))}
+      </View>
+
+      <View style={styles.summarySection}>
+        <Text style={styles.sectionTitle}>
+          Tous les Articles ({summaryItems.length})
+        </Text>
+
+        {summaryItems.map((item, index) => (
+          <View key={`summary-${index}`} style={styles.summaryItemRow}>
+            <Text style={styles.summaryItemName}>{item.name}</Text>
+            <View style={styles.summaryItemStats}>
+              <Text style={styles.summaryItemQuantity}>
+                {item.totalQuantity} vendus
+              </Text>
+              <Text style={styles.summaryItemAmount}>
+                {item.totalAmount.toFixed(2)} €
+              </Text>
+            </View>
+          </View>
+        ))}
+      </View>
+    </ScrollView>
+  );
+
+  const renderDetailedView = () => {
+    if (filteredItems.length === 0) {
+      return (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>Aucun article vendu trouvé</Text>
+          <Text style={styles.emptySubtext}>
+            Ajustez vos filtres ou effectuez des ventes pour voir les données
+            ici
+          </Text>
+        </View>
+      );
+    }
+
+    return (
+      <ScrollView style={styles.scrollContainer}>
+        {filteredItems.map(renderDetailedItem)}
+      </ScrollView>
+    );
+  };
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Journal des Ventes</Text>
         <View style={styles.headerButtons}>
-          <Pressable 
-            style={[styles.viewModeButton, viewMode === 'detailed' && styles.activeViewModeButton]} 
-            onPress={() => setViewMode('detailed')}>
-            <ClipboardList size={20} color={viewMode === 'detailed' ? '#2196F3' : '#666'} />
-            <Text style={[styles.viewModeText, viewMode === 'detailed' && styles.activeViewModeText]}>Détaillé</Text>
+          <Pressable
+            style={[
+              styles.viewModeButton,
+              viewMode === 'detailed' && styles.activeViewModeButton,
+            ]}
+            onPress={() => setViewMode('detailed')}
+          >
+            <ClipboardList
+              size={20}
+              color={viewMode === 'detailed' ? '#2196F3' : '#666'}
+            />
+            <Text
+              style={[
+                styles.viewModeText,
+                viewMode === 'detailed' && styles.activeViewModeText,
+              ]}
+            >
+              Détaillé
+            </Text>
           </Pressable>
-          <Pressable 
-            style={[styles.viewModeButton, viewMode === 'summary' && styles.activeViewModeButton]} 
-            onPress={() => setViewMode('summary')}>
-            <BarChart3 size={20} color={viewMode === 'summary' ? '#2196F3' : '#666'} />
-            <Text style={[styles.viewModeText, viewMode === 'summary' && styles.activeViewModeText]}>Résumé</Text>
+          <Pressable
+            style={[
+              styles.viewModeButton,
+              viewMode === 'summary' && styles.activeViewModeButton,
+            ]}
+            onPress={() => setViewMode('summary')}
+          >
+            <BarChart3
+              size={20}
+              color={viewMode === 'summary' ? '#2196F3' : '#666'}
+            />
+            <Text
+              style={[
+                styles.viewModeText,
+                viewMode === 'summary' && styles.activeViewModeText,
+              ]}
+            >
+              Résumé
+            </Text>
           </Pressable>
           {viewMode === 'summary' && (
-            <Pressable 
-              style={[styles.viewModeButton, styles.groupByButton]} 
-              onPress={toggleGroupByMode}>
+            <Pressable
+              style={[styles.viewModeButton, styles.groupByButton]}
+              onPress={toggleGroupByMode}
+            >
               <Grid size={20} color="#666" />
               <Text style={styles.groupByText}>
-                Grouper par: {groupByMode === 'article' ? 'Article' : 'Transaction'}
+                Grouper par:{' '}
+                {groupByMode === 'article' ? 'Article' : 'Transaction'}
               </Text>
             </Pressable>
           )}
-          <Pressable
-            style={styles.exportButton}
-            onPress={exportToCSV}>
+          <Pressable style={styles.exportButton} onPress={exportToCSV}>
             <FileDown size={20} color="#4CAF50" />
             <Text style={styles.exportButtonText}>Exporter CSV</Text>
           </Pressable>
@@ -486,16 +676,28 @@ export default function JournalScreen() {
 
         <View style={styles.filterActions}>
           <Pressable
-            style={[styles.filterButton, dateFilterActive && styles.activeFilterButton]}
-            onPress={() => setShowDatePicker(true)}>
+            style={[
+              styles.filterButton,
+              dateFilterActive && styles.activeFilterButton,
+            ]}
+            onPress={() => setShowDatePicker(true)}
+          >
             <Calendar size={20} color={dateFilterActive ? '#fff' : '#2196F3'} />
-            <Text style={[styles.filterButtonText, dateFilterActive && styles.activeFilterButtonText]}>
-              {dateFilterActive && selectedDate 
-                ? selectedDate.toLocaleDateString('fr-FR') 
+            <Text
+              style={[
+                styles.filterButtonText,
+                dateFilterActive && styles.activeFilterButtonText,
+              ]}
+            >
+              {dateFilterActive && selectedDate
+                ? selectedDate.toLocaleDateString('fr-FR')
                 : 'Filtrer par date'}
             </Text>
             {dateFilterActive && (
-              <Pressable onPress={clearDateFilter} style={styles.clearFilterButton}>
+              <Pressable
+                onPress={clearDateFilter}
+                style={styles.clearFilterButton}
+              >
                 <X size={16} color={dateFilterActive ? '#fff' : '#666'} />
               </Pressable>
             )}
@@ -504,34 +706,33 @@ export default function JournalScreen() {
           <View style={styles.paymentFilterContainer}>
             <Text style={styles.paymentFilterLabel}>Paiement:</Text>
             <View style={styles.paymentFilterButtons}>
-              <Pressable 
-                style={[styles.paymentFilterButton, selectedPaymentMethod === 'all' && styles.activePaymentFilterButton]}
-                onPress={() => setSelectedPaymentMethod('all')}>
-                <Text style={[styles.paymentFilterButtonText, selectedPaymentMethod === 'all' && styles.activePaymentFilterButtonText]}>
-                  Tous
-                </Text>
-              </Pressable>
-              <Pressable 
-                style={[styles.paymentFilterButton, selectedPaymentMethod === 'card' && styles.activePaymentFilterButton]}
-                onPress={() => setSelectedPaymentMethod('card')}>
-                <Text style={[styles.paymentFilterButtonText, selectedPaymentMethod === 'card' && styles.activePaymentFilterButtonText]}>
-                  Carte
-                </Text>
-              </Pressable>
-              <Pressable 
-                style={[styles.paymentFilterButton, selectedPaymentMethod === 'cash' && styles.activePaymentFilterButton]}
-                onPress={() => setSelectedPaymentMethod('cash')}>
-                <Text style={[styles.paymentFilterButtonText, selectedPaymentMethod === 'cash' && styles.activePaymentFilterButtonText]}>
-                  Espèces
-                </Text>
-              </Pressable>
-              <Pressable 
-                style={[styles.paymentFilterButton, selectedPaymentMethod === 'check' && styles.activePaymentFilterButton]}
-                onPress={() => setSelectedPaymentMethod('check')}>
-                <Text style={[styles.paymentFilterButtonText, selectedPaymentMethod === 'check' && styles.activePaymentFilterButtonText]}>
-                  Chèque
-                </Text>
-              </Pressable>
+              {(['all', 'card', 'cash', 'check'] as const).map((method) => (
+                <Pressable
+                  key={method}
+                  style={[
+                    styles.paymentFilterButton,
+                    selectedPaymentMethod === method &&
+                      styles.activePaymentFilterButton,
+                  ]}
+                  onPress={() => setSelectedPaymentMethod(method)}
+                >
+                  <Text
+                    style={[
+                      styles.paymentFilterButtonText,
+                      selectedPaymentMethod === method &&
+                        styles.activePaymentFilterButtonText,
+                    ]}
+                  >
+                    {method === 'all'
+                      ? 'Tous'
+                      : method === 'card'
+                      ? 'Carte'
+                      : method === 'cash'
+                      ? 'Espèces'
+                      : 'Chèque'}
+                  </Text>
+                </Pressable>
+              ))}
             </View>
           </View>
         </View>
@@ -561,135 +762,21 @@ export default function JournalScreen() {
         </View>
         <View style={styles.statCard}>
           <View style={styles.paymentMethodIcons}>
-            <Text style={styles.paymentMethodIcon}>💳 {paymentMethodStats.card}</Text>
-            <Text style={styles.paymentMethodIcon}>💶 {paymentMethodStats.cash}</Text>
-            <Text style={styles.paymentMethodIcon}>📝 {paymentMethodStats.check}</Text>
+            <Text style={styles.paymentMethodIcon}>
+              💳 {paymentMethodStats.card}
+            </Text>
+            <Text style={styles.paymentMethodIcon}>
+              💶 {paymentMethodStats.cash}
+            </Text>
+            <Text style={styles.paymentMethodIcon}>
+              📝 {paymentMethodStats.check}
+            </Text>
           </View>
           <Text style={styles.statLabel}>Méthodes de paiement</Text>
         </View>
       </View>
 
-      {viewMode === 'detailed' ? (
-        <ScrollView style={styles.scrollContainer}>
-          {filteredItems.length === 0 ? (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>Aucun article vendu trouvé</Text>
-              <Text style={styles.emptySubtext}>Ajustez vos filtres ou effectuez des ventes pour voir les données ici</Text>
-            </View>
-          ) : (
-            filteredItems.map((item, index) => (
-              <View key={`${item.id}-${index}`} style={styles.itemCard}>
-                <View style={styles.itemHeader}>
-                  <Text style={styles.itemName}>{item.name}</Text>
-                  <Text style={styles.itemPrice}>{item.totalAmount.toFixed(2)} €</Text>
-                </View>
-                <View style={styles.itemDetails}>
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Quantité:</Text>
-                    <Text style={styles.detailValue}>{item.quantity} x {item.price.toFixed(2)} €</Text>
-                  </View>
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Date:</Text>
-                    <Text style={styles.detailValue}>{formatDate(item.date)}</Text>
-                  </View>
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Table:</Text>
-                    <Text style={styles.detailValue}>{item.tableName || `Table ${item.tableNumber}`}</Text>
-                  </View>
-                  {item.section && (
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Section:</Text>
-                      <Text style={styles.detailValue}>{item.section}</Text>
-                    </View>
-                  )}
-                  {item.paymentMethod && (
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Paiement:</Text>
-                      <Text style={styles.detailValue}>
-                        {item.paymentMethod === 'card' ? 'Carte bancaire' :
-                         item.paymentMethod === 'cash' ? 'Espèces' : 'Chèque'}
-                      </Text>
-                    </View>
-                  )}
-                  {item.paymentType && (
-                    <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Type:</Text>
-                      <Text style={styles.detailValue}>
-                        {item.paymentType === 'full' ? 'Paiement complet' :
-                         item.paymentType === 'split' ? 'Paiement partagé' : 
-                         item.paymentType === 'custom' ? 'Paiement personnalisé' : 
-                         'Paiement par article'}
-                      </Text>
-                    </View>
-                  )}
-                </View>
-                <View style={styles.categoryTag}>
-                  <Tag size={14} color="#666" />
-                  <Text style={styles.categoryTagText}>{getArticleCategory(item.name)}</Text>
-                </View>
-              </View>
-            ))
-          )}
-        </ScrollView>
-      ) : (
-        <ScrollView style={styles.scrollContainer}>
-          <View style={styles.summarySection}>
-            <Text style={styles.sectionTitle}>Top 5 des Articles Vendus</Text>
-            {topSellingItems.map((item, index) => (
-              <View key={`top-${index}`} style={styles.summaryItemRow}>
-                <View style={styles.summaryItemInfo}>
-                  <Text style={styles.summaryItemRank}>#{index + 1}</Text>
-                  <Text style={styles.summaryItemName}>{item.name}</Text>
-                </View>
-                <View style={styles.summaryItemStats}>
-                  <Text style={styles.summaryItemQuantity}>{item.totalQuantity} vendus</Text>
-                  <Text style={styles.summaryItemAmount}>{item.totalAmount.toFixed(2)} €</Text>
-                </View>
-              </View>
-            ))}
-          </View>
-          
-          {/* Ventes par catégorie */}
-          <View style={styles.summarySection}>
-            <Text style={styles.sectionTitle}>Ventes par Catégorie</Text>
-            {salesByCategory.map((category, index) => (
-              <Pressable 
-                key={`cat-${index}`} 
-                style={styles.categoryRow}
-                onPress={() => {
-                  // Filtrer les résultats par cette catégorie
-                  setSearchText(category.category);
-                }}
-              >
-                <Text style={styles.categoryName}>
-                  {category.category.charAt(0).toUpperCase() + category.category.slice(1)}
-                </Text>
-                <View style={styles.categoryStats}>
-                  <Text style={styles.categoryCount}>{category.itemCount} articles</Text>
-                  <Text style={styles.categoryAmount}>{category.totalAmount.toFixed(2)} €</Text>
-                </View>
-              </Pressable>
-            ))}
-          </View>
-          
-          {/* Tous les articles (résumé) */}
-          <View style={styles.summarySection}>
-            <Text style={styles.sectionTitle}>
-              Tous les Articles ({summaryItems.length})
-            </Text>
-            
-            {summaryItems.map((item, index) => (
-              <View key={`summary-${index}`} style={styles.summaryItemRow}>
-                <Text style={styles.summaryItemName}>{item.name}</Text>
-                <View style={styles.summaryItemStats}>
-                  <Text style={styles.summaryItemQuantity}>{item.totalQuantity} vendus</Text>
-                  <Text style={styles.summaryItemAmount}>{item.totalAmount.toFixed(2)} €</Text>
-                </View>
-              </View>
-            ))}
-          </View>
-        </ScrollView>
-      )}
+      {viewMode === 'detailed' ? renderDetailedView() : renderSummaryView()}
     </View>
   );
 }

@@ -1,19 +1,37 @@
-import { View, Text, StyleSheet, ScrollView, Pressable, TextInput, Alert, Modal } from 'react-native';
-import { useState, useEffect, useMemo, useCallback } from 'react';
-import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
-  Users, Plus, Minus, Receipt, Split, CreditCard, ArrowLeft, X, Printer, History, ShoppingCart
+  ArrowLeft,
+  CreditCard,
+  Minus,
+  Plus,
+  Receipt,
+  ShoppingCart,
+  Split,
+  Users,
+  X,
 } from 'lucide-react-native';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  getTable, updateTable, OrderItem, Table, resetTable,
-  getMenuAvailability, getCustomMenuItems,
-  CustomMenuItem, BillManager, Bill
-} from '../../utils/storage';
-import { events, EVENT_TYPES } from '../../utils/events';
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import priceData from '../../helpers/ManjosPrice';
+import {
+  Bill,
+  CustomMenuItem,
+  OrderItem,
+  Table,
+  getCustomMenuItems,
+  getMenuAvailability,
+  getTable,
+  resetTable,
+  updateTable,
+} from '../../utils/storage';
 import SplitSelectionModal from '../components/SplitSelectionModal';
-import PaymentHistoryModal from '../components/PaymentHistoryModal';
-
 
 interface MenuItem {
   id: number;
@@ -29,79 +47,93 @@ const CATEGORY_COLORS: { [key: string]: string } = {
   // Resto
   'Plats Principaux': '#FF9800',
   'Plats Maxi': '#F44336',
-  'Salades': '#4CAF50',
-  'Accompagnements': '#CDDC39',
-  'Desserts': '#E91E63',
+  Salades: '#4CAF50',
+  Accompagnements: '#CDDC39',
+  Desserts: '#E91E63',
   'Menu Enfant': '#8BC34A',
   // Boissons
-  'Softs': '#03A9F4',
+  Softs: '#03A9F4',
   'Boissons Chaudes': '#795548',
-  'Bières': '#FFC107',
-  'Vins': '#9C27B0',
-  'Alcools': '#673AB7',
-  'Glaces': '#00BCD4',
+  Bières: '#FFC107',
+  Vins: '#9C27B0',
+  Alcools: '#673AB7',
+  Glaces: '#00BCD4',
 };
 
-// Fonction pour fermer la table
-const handleCloseTable = async (tableId: number, table: Table | null, router: any, setSaveInProgress: (value: boolean) => void) => {
-  if (!table) return;
+// Fonction de catégorisation mémoïzée
+const getCategoryFromName = (
+  name: string,
+  type: 'resto' | 'boisson'
+): string => {
+  const lowerName = name.toLowerCase();
 
-  Alert.alert(
-    'Fermer la table',
-    `Êtes-vous sûr de vouloir fermer la table "${table.name}" ? Toutes les commandes non payées seront perdues.`,
-    [
-      {
-        text: 'Annuler',
-        style: 'cancel'
-      },
-      {
-        text: 'Fermer',
-        style: 'destructive',
-        onPress: async () => {
-          setSaveInProgress(true);
-          try {
-            await resetTable(tableId);
-            Alert.alert(
-              'Table fermée',
-              'La table a été réinitialisée avec succès.',
-              [
-                {
-                  text: 'OK',
-                  onPress: () => router.push('/')
-                }
-              ]
-            );
-          } catch (error) {
-            console.error('Erreur lors de la fermeture de la table:', error);
-            Alert.alert('Erreur', 'Impossible de fermer la table. Veuillez réessayer.');
-          } finally {
-            setSaveInProgress(false);
-          }
-        }
-      }
-    ]
-  );
-};
-
-// Fonction pour imprimer la facture
-const handlePrintBill = (table: Table | null, router: any, tableId: number) => {
-  if (!table || !table.order || table.order.items.length === 0) {
-    Alert.alert('Information', 'Il n\'y a aucun article à imprimer.');
-    return;
+  if (type === 'resto') {
+    if (lowerName.includes('salade')) return 'Salades';
+    if (lowerName.includes('dessert')) return 'Desserts';
+    if (lowerName.includes('frites')) return 'Accompagnements';
+    if (lowerName.includes('menu enfant')) return 'Menu Enfant';
+    if (lowerName.includes('maxi')) return 'Plats Maxi';
+    return 'Plats Principaux';
+  } else {
+    if (lowerName.includes('glace')) return 'Glaces';
+    if (lowerName.includes('thé') || lowerName.includes('café'))
+      return 'Boissons Chaudes';
+    if (
+      lowerName.includes('bière') ||
+      lowerName.includes('blonde') ||
+      lowerName.includes('ambree')
+    )
+      return 'Bières';
+    if (
+      lowerName.includes('vin') ||
+      lowerName.includes('pichet') ||
+      lowerName.includes('btl')
+    )
+      return 'Vins';
+    if (
+      lowerName.includes('apero') ||
+      lowerName.includes('digestif') ||
+      lowerName.includes('ricard') ||
+      lowerName.includes('alcool') ||
+      lowerName.includes('punch') ||
+      lowerName.includes('cocktail')
+    )
+      return 'Alcools';
+    return 'Softs';
   }
-
-  // Naviguer vers l'écran de prévisualisation d'impression avec les détails de la table
-  router.push({
-    pathname: '/print-preview',
-    params: {
-      tableId: tableId.toString(),
-      total: (table.order.total || 0).toString(),
-      items: JSON.stringify(table.order.items),
-      isPreview: 'true',  // Ajouter ce paramètre pour indiquer que c'est juste une prévisualisation
-      tableName: table.name
-    }
-  });
 };
+
+// Composant MenuItem mémoïzé
+const MenuItemComponent = memo(
+  ({
+    item,
+    isUnavailable,
+    onPress,
+  }: {
+    item: MenuItem;
+    isUnavailable: boolean;
+    onPress: () => void;
+  }) => (
+    <Pressable
+      style={[
+        styles.menuItem,
+        { borderLeftColor: item.color },
+        isUnavailable && styles.unavailableItem,
+      ]}
+      onPress={onPress}
+    >
+      <Text
+        style={[
+          styles.menuItemName,
+          isUnavailable && styles.unavailableItemText,
+        ]}
+      >
+        {item.name}
+      </Text>
+      <Text style={styles.menuItemPrice}>{item.price.toFixed(2)} €</Text>
+    </Pressable>
+  )
+);
 
 export default function TableScreen() {
   const { id } = useLocalSearchParams();
@@ -113,7 +145,9 @@ export default function TableScreen() {
   const [table, setTable] = useState<Table | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
-  const [activeType, setActiveType] = useState<'resto' | 'boisson' | null>('resto');
+  const [activeType, setActiveType] = useState<'resto' | 'boisson' | null>(
+    'resto'
+  );
   const [saveInProgress, setSaveInProgress] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [customMenuItems, setCustomMenuItems] = useState<CustomMenuItem[]>([]);
@@ -139,65 +173,74 @@ export default function TableScreen() {
     loadData();
   }, []);
 
-  // Convertir les données de ManjosPrice en items de menu avec couleurs
+  // Convertir les données de ManjosPrice en items de menu avec couleurs (mémoïzé)
   const menuItems: MenuItem[] = useMemo(() => {
-    // Commencer avec les articles standard de priceData
-    const standardItems = priceData.map(item => {
-      // Déterminer la catégorie en fonction du type et du nom
-      let category = item.type === 'resto' ? 'Plats Principaux' : 'Softs';
-
-      // Pour les plats (resto)
-      if (item.type === 'resto') {
-        if (item.name.toLowerCase().includes('salade')) {
-          category = 'Salades';
-        } else if (item.name.toLowerCase().includes('dessert')) {
-          category = 'Desserts';
-        } else if (item.name.toLowerCase().includes('frites')) {
-          category = 'Accompagnements';
-        } else if (item.name.toLowerCase().includes('menu enfant')) {
-          category = 'Menu Enfant';
-        } else if (item.name.toLowerCase().includes('maxi')) {
-          category = 'Plats Maxi';
-        }
-      }
-      // Pour les boissons
-      else {
-        if (item.name.toLowerCase().includes('glace')) {
-          category = 'Glaces';
-        } else if (item.name.toLowerCase().includes('thé') || item.name.toLowerCase().includes('café')) {
-          category = 'Boissons Chaudes';
-        } else if (item.name.toLowerCase().includes('bière') || item.name.toLowerCase().includes('blonde') || item.name.toLowerCase().includes('ambree')) {
-          category = 'Bières';
-        } else if (item.name.toLowerCase().includes('vin') || item.name.toLowerCase().includes('pichet') || item.name.toLowerCase().includes('btl')) {
-          category = 'Vins';
-        } else if (item.name.toLowerCase().includes('apero') || item.name.toLowerCase().includes('digestif') || item.name.toLowerCase().includes('ricard') || item.name.toLowerCase().includes('alcool') || item.name.toLowerCase().includes('punch') || item.name.toLowerCase().includes('cocktail')) {
-          category = 'Alcools';
-        }
-      }
-
+    const standardItems = priceData.map((item) => {
+      const category = getCategoryFromName(
+        item.name,
+        item.type as 'resto' | 'boisson'
+      );
       return {
         id: item.id,
         name: item.name,
         price: item.price,
         category,
         type: item.type as 'resto' | 'boisson',
-        color: CATEGORY_COLORS[category as keyof typeof CATEGORY_COLORS] || '#757575'
+        color: CATEGORY_COLORS[category] || '#757575',
       };
     });
 
-    // Ajouter les articles personnalisés
-    const customItems = customMenuItems.map(item => ({
+    const customItems = customMenuItems.map((item) => ({
       id: item.id,
       name: item.name,
       price: item.price,
       category: item.category,
       type: item.type,
-      color: CATEGORY_COLORS[item.category as keyof typeof CATEGORY_COLORS] || '#757575'
+      color:
+        CATEGORY_COLORS[item.category as keyof typeof CATEGORY_COLORS] ||
+        '#757575',
     }));
 
-    // Combiner les deux listes d'articles
     return [...standardItems, ...customItems];
   }, [customMenuItems]);
+
+  // Mémoïser les catégories
+  const categories = useMemo(() => {
+    return [...new Set(menuItems.map((item) => item.category))].sort();
+  }, [menuItems]);
+
+  const categoriesByType = useMemo(() => {
+    return {
+      resto: categories.filter((cat) =>
+        menuItems.some((item) => item.category === cat && item.type === 'resto')
+      ),
+      boisson: categories.filter((cat) =>
+        menuItems.some(
+          (item) => item.category === cat && item.type === 'boisson'
+        )
+      ),
+    };
+  }, [categories, menuItems]);
+
+  // Mémoïser les items filtrés
+  const filteredMenuItems = useMemo(() => {
+    let items = menuItems;
+
+    if (activeType) {
+      items = items.filter((item) => item.type === activeType);
+    }
+
+    if (activeCategory) {
+      items = items.filter((item) => item.category === activeCategory);
+    }
+
+    return items;
+  }, [menuItems, activeType, activeCategory]);
+
+  // Utiliser directement filteredMenuItems
+  const displayAllFilteredItems = useMemo(() => {
+    return filteredMenuItems;
+  }, [filteredMenuItems]);
 
   useEffect(() => {
     loadTable();
@@ -213,255 +256,317 @@ export default function TableScreen() {
     setLoading(false);
   };
 
-  // Fonction pour charger l'historique des paiements
-  const loadTableHistory = async () => {
-    try {
-      setRefreshingHistory(true);
-      if (tableId && table && table.order) {
-        // Récupérer tous les paiements pour cette table
-        const allHistory = await BillManager.getBillsForTable(tableId);
-
-        // Filtrer uniquement les paiements effectués après l'ouverture de cette table
-        // en utilisant le timestamp de l'ordre actuel comme référence
-        const currentSessionTimestamp = new Date(table.order.timestamp).getTime();
-
-        const currentHistory = allHistory.filter(bill => {
-          const billTimestamp = new Date(bill.timestamp).getTime();
-          return billTimestamp >= currentSessionTimestamp;
-        });
-
-        setTableHistory(currentHistory);
-      } else {
-        setTableHistory([]);
-      }
-    } catch (error) {
-      console.error('Error loading table history:', error);
-      setTableHistory([]);
-    } finally {
-      setRefreshingHistory(false);
-    }
-  };
-
-  // Fonction pour forcer le rafraîchissement de l'historique
-  const refreshTableHistory = async () => {
-    await loadTableHistory();
-  };
-
-  // Forcer le rafraîchissement de l'historique
-  const forceHistoryRefresh = () => {
-    setRefreshCounter(prev => prev + 1);
-  };
-
-  // Écouter les événements de paiement
-  useEffect(() => {
-    // S'abonner à l'événement de paiement ajouté
-    const unsubscribe = events.on(EVENT_TYPES.PAYMENT_ADDED, (tableNumber, bill) => {
-      // Vérifier si l'événement concerne notre table
-      if (tableNumber === tableId) {
-        console.log(`Payment event received for table ${tableId}, refreshing history`);
-        refreshTableHistory();
-      }
-    });
-
-    const unsubscribe2 = events.on(EVENT_TYPES.TABLE_UPDATED, (updatedTableId) => {
-      // Vérifier si l'événement concerne cette table
-      if (updatedTableId === tableId) {
-        console.log(`Table ${tableId} a été mise à jour, rechargement des données...`);
-        loadTable();
-      }
-    });
-
-    // Se désabonner quand le composant est démonté
-    return () => {
-      unsubscribe();
-      unsubscribe2();
-    };
-  }, [tableId]);
-
-  // Rafraîchir l'historique quand l'écran est revisité
-  useFocusEffect(
-    useCallback(() => {
-      if (tableId && table) {
-        refreshTableHistory();
-      }
-      return () => {
-        // Fonction de nettoyage si nécessaire
-      };
-    }, [tableId, table])
+  // Fonction pour séparer les items en plats et boissons :
+  const categorizeOrderItems = useCallback(
+    (items: OrderItem[]) => {
+      return items.reduce(
+        (acc, item) => {
+          const menuItem = menuItems.find(
+            (mi) => mi.name === item.name && mi.price === item.price
+          );
+          if (menuItem?.type === 'boisson') {
+            acc.boissons.push(item);
+          } else {
+            acc.plats.push(item);
+          }
+          return acc;
+        },
+        { plats: [] as OrderItem[], boissons: [] as OrderItem[] }
+      );
+    },
+    [menuItems]
   );
 
-  // Rafraîchir l'historique lorsque le compteur change
-  useEffect(() => {
-    if (refreshCounter > 0) { // Ignorer l'initialisation
-      refreshTableHistory();
-    }
-  }, [refreshCounter]);
+  const handleClearOrder = () => {
+    if (!table || !table.order || table.order.items.length === 0) return;
 
-  // Rafraîchir l'historique lorsque les données de la table changent
-  useEffect(() => {
-    if (table && table.order) {
-      loadTableHistory();
-    } else {
-      setTableHistory([]);
-    }
-  }, [table]);
+    Alert.alert(
+      'Supprimer la commande',
+      'Êtes-vous sûr de vouloir supprimer tous les articles de la commande en cours ?',
+      [
+        {
+          text: 'Annuler',
+          style: 'cancel',
+        },
+        {
+          text: 'Supprimer',
+          style: 'destructive',
+          onPress: async () => {
+            setSaveInProgress(true);
+            try {
+              // Créer une nouvelle commande vide avec toutes les propriétés requises
+              const updatedTable = {
+                ...table,
+                order: {
+                  id: table.order!.id, // Garder l'id existant
+                  items: [],
+                  total: 0,
+                  guests: table.order!.guests, // Garder le nombre de convives
+                  status: 'active' as 'active', // Garder le statut
+                  timestamp: table.order!.timestamp, // Garder le timestamp
+                },
+              };
+              setTable(updatedTable);
+              await updateTable(updatedTable);
+              setSaveSuccess(true);
+            } catch (error) {
+              console.error(
+                'Erreur lors de la suppression de la commande:',
+                error
+              );
+              Alert.alert(
+                'Erreur',
+                'Impossible de supprimer la commande. Veuillez réessayer.'
+              );
+            } finally {
+              setSaveInProgress(false);
+            }
+          },
+        },
+      ]
+    );
+  };
 
+
+  // Handler pour ajouter un item à la commande (useCallback)
+  const addItemToOrder = useCallback(
+    (item: MenuItem) => {
+      if (!table || !table.order) return;
+
+      if (unavailableItems.includes(item.id)) {
+        Alert.alert(
+          'Article indisponible',
+          `${item.name} n'est pas disponible actuellement.`
+        );
+        return;
+      }
+
+      const updatedTable = { ...table };
+
+      if (!updatedTable.order) {
+        updatedTable.order = {
+          id: Date.now(), // S'assurer que l'id est défini
+          items: [],
+          guests: guestCount,
+          status: 'active',
+          timestamp: new Date().toISOString(),
+          total: 0,
+        };
+      }
+
+      const existingItem = updatedTable.order.items.find(
+        (orderItem) =>
+          orderItem.name === item.name && orderItem.price === item.price
+      );
+
+      if (existingItem) {
+        existingItem.quantity += 1;
+      } else {
+        updatedTable.order.items.push({
+          id: Date.now(),
+          name: item.name,
+          price: item.price,
+          quantity: 1,
+        });
+      }
+
+      updatedTable.order.total = calculateTotal(updatedTable.order.items);
+
+      // Batching: mise à jour de l'état et stockage en une seule fois
+      setTable(updatedTable);
+      requestAnimationFrame(() => {
+        updateTable(updatedTable);
+      });
+    },
+    [table, unavailableItems, guestCount]
+  );
+
+  // Mise à jour de la quantité avec batching
+  const updateItemQuantity = useCallback(
+    (itemId: number, increment: boolean) => {
+      if (!table || !table.order) return;
+
+      setTable((prevTable) => {
+        if (!prevTable || !prevTable.order) return prevTable;
+
+        const updatedTable = { ...prevTable };
+        let updatedItems = [...updatedTable.order!.items];
+
+        const itemIndex = updatedItems.findIndex((item) => item.id === itemId);
+        if (itemIndex === -1) return prevTable;
+
+        const currentItem = updatedItems[itemIndex];
+        const newQuantity = increment
+          ? currentItem.quantity + 1
+          : currentItem.quantity - 1;
+
+        // Si la quantité devient 0, supprimer l'item
+        if (newQuantity <= 0) {
+          updatedItems = updatedItems.filter((item) => item.id !== itemId);
+        } else {
+          // Sinon, mettre à jour la quantité
+          const updatedItem = { ...currentItem, quantity: newQuantity };
+          updatedItems[itemIndex] = updatedItem;
+        }
+
+        updatedTable.order!.items = updatedItems;
+        updatedTable.order!.total = calculateTotal(updatedItems);
+
+        // Sauvegarder dans le stockage
+        updateTable(updatedTable);
+
+        return updatedTable;
+      });
+    },
+    []
+  );
+
+  // Calculer le total de la commande
+  const calculateTotal = useCallback((items: OrderItem[]): number => {
+    return items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  }, []);
+
+  // Reste des handlers (existants)...
+  const handleCloseTable = async () => {
+    if (!table) return;
+
+    Alert.alert(
+      'Fermer la table',
+      `Êtes-vous sûr de vouloir fermer la table "${table.name}" ? Toutes les commandes non payées seront perdues.`,
+      [
+        {
+          text: 'Annuler',
+          style: 'cancel',
+        },
+        {
+          text: 'Fermer',
+          style: 'destructive',
+          onPress: async () => {
+            setSaveInProgress(true);
+            try {
+              await resetTable(tableId);
+              Alert.alert(
+                'Table fermée',
+                'La table a été réinitialisée avec succès.',
+                [
+                  {
+                    text: 'OK',
+                    onPress: () => router.push('/'),
+                  },
+                ]
+              );
+            } catch (error) {
+              console.error('Erreur lors de la fermeture de la table:', error);
+              Alert.alert(
+                'Erreur',
+                'Impossible de fermer la table. Veuillez réessayer.'
+              );
+            } finally {
+              setSaveInProgress(false);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // Rendu optimisé du menu grid
+  const renderMenuGrid = () => {
+    const categories = activeCategory
+      ? [activeCategory]
+      : getVisibleCategories();
+    const categorizedItems = categories.map((category) => ({
+      category,
+      items: displayAllFilteredItems.filter(
+        (item) => item.category === category
+      ),
+    }));
+
+    return (
+      <View style={styles.menuGrid}>
+        {categorizedItems.map(({ category, items }) => {
+          if (items.length === 0) return null;
+
+          return (
+            <View key={category} style={styles.categorySection}>
+              <Text
+                style={[
+                  styles.categoryTitle,
+                  { color: CATEGORY_COLORS[category] || '#757575' },
+                ]}
+              >
+                {category}
+              </Text>
+              <View style={styles.menuItemsGrid}>
+                {items.map((item) => (
+                  <MenuItemComponent
+                    key={item.id}
+                    item={item}
+                    isUnavailable={unavailableItems.includes(item.id)}
+                    onPress={() => addItemToOrder(item)}
+                  />
+                ))}
+              </View>
+            </View>
+          );
+        })}
+      </View>
+    );
+  };
+
+  // Fonction pour tronquer le nom si trop long
+  const truncateName = (name: string, maxLength: number = 18) => {
+    if (name.length <= maxLength) return name;
+    return name.substring(0, maxLength - 3) + '...';
+  };
+
+  // Rendu ultra-compact d'un item de commande
+  const renderUltraCompactItem = (item: OrderItem) => (
+    <View key={item.id} style={styles.ultraCompactItem}>
+      <View style={styles.firstLineCompact}>
+        <Text style={styles.itemNameUltraCompact} numberOfLines={1}>
+          {truncateName(item.name)}
+        </Text>
+        <View style={styles.quantityControlCompact}>
+          <Pressable
+            style={styles.quantityButton} // Ajouter un style pour les boutons
+            onPress={() => updateItemQuantity(item.id, false)}
+          >
+            <Minus size={16} color="#666" />
+          </Pressable>
+          <Text style={styles.quantityUltraCompact}>{item.quantity}</Text>
+          <Pressable
+            style={styles.quantityButton} // Ajouter un style pour les boutons
+            onPress={() => updateItemQuantity(item.id, true)}
+          >
+            <Plus size={16} color="#666" />
+          </Pressable>
+        </View>
+      </View>
+      <Text style={styles.priceUltraCompact}>
+        {(item.price * item.quantity).toFixed(2)} €
+      </Text>
+    </View>
+  );
+
+  // Reste des useEffects et autres fonctions...
   useEffect(() => {
-    // Charger les articles indisponibles
     const loadUnavailableItems = async () => {
       const menuAvailability = await getMenuAvailability();
       const unavailable = menuAvailability
-        .filter(item => !item.available)
-        .map(item => item.id);
+        .filter((item) => !item.available)
+        .map((item) => item.id);
       setUnavailableItems(unavailable);
     };
 
     loadUnavailableItems();
   }, []);
 
-  // Obtenir toutes les catégories uniques
-  const categories = useMemo(() => {
-    return [...new Set(menuItems.map(item => item.category))].sort();
-  }, [menuItems]);
-
-  // Obtenir les catégories par type
-  const categoriesByType = useMemo(() => {
-    const result = {
-      resto: categories.filter(cat =>
-        menuItems.some(item => item.category === cat && item.type === 'resto')
-      ),
-      boisson: categories.filter(cat =>
-        menuItems.some(item => item.category === cat && item.type === 'boisson')
-      )
-    };
-    return result;
-  }, [categories, menuItems]);
-
-  // Fonction pour filtrer les éléments du menu par catégorie
-  const getMenuItemsByCategory = (category: string) => {
-    return menuItems.filter(item => item.category === category);
-  };
-
-  // Fonction pour filtrer les catégories par type
   const getVisibleCategories = () => {
     if (!activeType) return categories;
     return categoriesByType[activeType];
   };
 
-  // Fonction pour ajouter un item à la commande
-  const addItemToOrder = (item: MenuItem) => {
-    if (!table || !table.order) return;
-
-    if (unavailableItems.includes(item.id)) {
-      Alert.alert(
-        "Article indisponible",
-        `${item.name} n'est pas disponible actuellement.`
-      );
-      return;
-    }
-
-    const updatedTable = { ...table };
-
-    // Assurer que la commande existe
-    if (!updatedTable.order) {
-      updatedTable.order = {
-        id: Date.now(),
-        items: [],
-        guests: guestCount,
-        status: 'active',
-        timestamp: new Date().toISOString(),
-        total: 0
-      };
-    }
-
-    // Vérifier si l'item existe déjà en comparant à la fois le nom ET le prix
-    const existingItem = updatedTable.order.items.find(
-      orderItem => orderItem.name === item.name && orderItem.price === item.price
-    );
-
-    if (existingItem) {
-      // Incrémenter la quantité si l'item existe déjà
-      existingItem.quantity += 1;
-    } else {
-      // Ajouter un nouvel item
-      updatedTable.order.items.push({
-        id: Date.now(),
-        name: item.name,
-        price: item.price,
-        quantity: 1,
-      });
-    }
-
-    // Recalculer le total
-    updatedTable.order.total = calculateTotal(updatedTable.order.items);
-
-    setTable(updatedTable);
-    updateTable(updatedTable);
-  };
-
-  // Mettre à jour la quantité d'un item
-  const updateItemQuantity = (itemId: number, increment: boolean) => {
-    if (!table || !table.order) return;
-
-    const updatedTable = { ...table };
-
-    // Vérification TypeScript
-    if (!updatedTable.order) return;
-
-    const updatedItems = updatedTable.order.items.map(item =>
-      item.id === itemId
-        ? { ...item, quantity: increment ? item.quantity + 1 : Math.max(0, item.quantity - 1) }
-        : item
-    ).filter(item => item.quantity > 0);
-
-    updatedTable.order.items = updatedItems;
-    updatedTable.order.total = calculateTotal(updatedItems);
-
-    setTable(updatedTable);
-    updateTable(updatedTable);
-  };
-
-  // Mettre à jour les notes d'un item
-  const updateItemNotes = (itemId: number, notes: string) => {
-    if (!table || !table.order) return;
-
-    const updatedTable = { ...table };
-
-    // Vérification TypeScript
-    if (!updatedTable.order) return;
-
-    updatedTable.order.items = updatedTable.order.items.map(item =>
-      item.id === itemId ? { ...item, notes } : item
-    );
-
-    setTable(updatedTable);
-    updateTable(updatedTable);
-  };
-
-  // Calculer le total de la commande
-  const calculateTotal = (items: OrderItem[]): number => {
-    return items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  };
-
-  // Mettre à jour le nombre de convives
-  const updateGuestCount = (newCount: number) => {
-    if (!table) return;
-
-    const updatedCount = Math.max(1, newCount);
-    setGuestCount(updatedCount);
-
-    const updatedTable = { ...table, guests: updatedCount };
-
-    // Vérification TypeScript
-    if (updatedTable.order) {
-      updatedTable.order.guests = updatedCount;
-    }
-
-    setTable(updatedTable);
-    updateTable(updatedTable);
-  };
-
-  // Gérer le paiement
   const handlePayment = (type: 'full' | 'split' | 'custom' | 'items') => {
     if (!table || !table.order) return;
 
@@ -478,17 +583,17 @@ export default function TableScreen() {
         params: {
           tableId: tableId.toString(),
           total: total.toString(),
-          items: JSON.stringify(table.order.items)
+          items: JSON.stringify(table.order.items),
         },
       });
     } else if (type === 'split') {
-      // Vérifier s'il y a suffisamment de couverts avant d'ouvrir le modal
       if (guestCount <= 1) {
-        Alert.alert('Impossible de partager', 'Il faut au moins 2 convives pour partager l\'addition.');
+        Alert.alert(
+          'Impossible de partager',
+          "Il faut au moins 2 convives pour partager l'addition."
+        );
         return;
       }
-
-      // Afficher le modal de sélection de parts plutôt que de naviguer directement
       setSplitModalVisible(true);
     } else if (type === 'custom') {
       router.push({
@@ -496,33 +601,17 @@ export default function TableScreen() {
         params: {
           tableId: tableId.toString(),
           total: total.toString(),
-          items: JSON.stringify(table.order.items)
+          items: JSON.stringify(table.order.items),
         },
       });
     } else if (type === 'items') {
       router.push({
         pathname: '/payment/items',
         params: {
-          tableId: tableId.toString()
+          tableId: tableId.toString(),
         },
       });
     }
-  };
-
-  const handleSplitConfirm = (partsCount: number) => {
-    if (!table || !table.order) return;
-
-    const total = table.order.total;
-
-    router.push({
-      pathname: '/payment/split',
-      params: {
-        tableId: tableId.toString(),
-        total: total.toString(),
-        guests: partsCount.toString(),  // Utiliser le nombre de parts choisi ici
-        items: JSON.stringify(table.order.items)
-      },
-    });
   };
 
   if (loading) {
@@ -537,9 +626,7 @@ export default function TableScreen() {
     return (
       <View style={styles.loadingContainer}>
         <Text>Table not found</Text>
-        <Pressable
-          style={styles.backButton}
-          onPress={() => router.back()}>
+        <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Text style={styles.backButtonText}>Go Back</Text>
         </Pressable>
       </View>
@@ -563,33 +650,40 @@ export default function TableScreen() {
         </View>
         <View style={styles.guestCounter}>
           <Users size={24} color="#666" />
-          <Pressable onPress={() => updateGuestCount(guestCount - 1)}>
+          <Pressable onPress={() => setGuestCount(Math.max(1, guestCount - 1))}>
             <Minus size={24} color="#666" />
           </Pressable>
           <Text style={styles.guestCount}>{guestCount}</Text>
-          <Pressable onPress={() => updateGuestCount(guestCount + 1)}>
+          <Pressable onPress={() => setGuestCount(guestCount + 1)}>
             <Plus size={24} color="#666" />
           </Pressable>
         </View>
 
-        {/* Badge d'historique des paiements */}
-        {tableHistory.length > 0 && (
-          <View style={styles.historyBadgeContainer}>
-            <Pressable
-              style={styles.historyBadge}
-              onPress={() => setHistoryModalVisible(true)}
-            >
-              <History size={20} color="white" />
-              <Text style={styles.historyBadgeText}>
-                {tableHistory.length} paiement{tableHistory.length > 1 ? 's' : ''} partiel{tableHistory.length > 1 ? 's' : ''}
-              </Text>
-            </Pressable>
-          </View>
-        )}
+        {/* Nouveau bouton pour supprimer la commande */}
+        <Pressable
+          style={[
+            styles.paymentButton,
+            {
+              backgroundColor:
+                (table?.order?.items?.length ?? 0) > 0 ? '#FF6600' : '#BDBDBD',
+              marginLeft: 8,
+              marginRight: 8,
+            },
+          ]}
+          onPress={handleClearOrder}
+          disabled={!table?.order?.items?.length}
+        >
+          <ShoppingCart size={20} color="white" />
+          <Text style={styles.paymentButtonText}>Vider</Text>
+        </Pressable>
 
         <Pressable
-          style={[styles.paymentButton, { backgroundColor: '#F44336', marginLeft: 40 }]}
-          onPress={() => handleCloseTable(tableId, table, router, setSaveInProgress)}>
+          style={[
+            styles.paymentButton,
+            { backgroundColor: '#F44336', marginLeft: 8 },
+          ]}
+          onPress={handleCloseTable}
+        >
           <X size={24} color="white" />
           <Text style={styles.paymentButtonText}>Fermer table</Text>
         </Pressable>
@@ -599,37 +693,33 @@ export default function TableScreen() {
         {/* Section Commande Actuelle */}
         <View style={styles.orderSection}>
           <Text style={styles.sectionTitle}>Commande actuelle</Text>
-          <ScrollView style={styles.orderList}>
-            {orderItems.length === 0 ? (
-              <Text style={styles.emptyOrder}>Aucun article dans la commande. Ajoutez-en depuis le menu.</Text>
-            ) : (
-              orderItems.map(item => (
-                <View key={item.id} style={styles.orderItem}>
-                  <View style={styles.itemHeader}>
-                    <Text style={styles.itemName}>{item.name}</Text>
-                    <Text style={styles.itemPrice}>{(item.price * item.quantity).toFixed(2)} €</Text>
-                  </View>
-                  <View style={styles.itemActions}>
-                    <View style={styles.quantityControl}>
-                      <Pressable onPress={() => updateItemQuantity(item.id, false)}>
-                        <Minus size={20} color="#666" />
-                      </Pressable>
-                      <Text style={styles.quantity}>{item.quantity}</Text>
-                      <Pressable onPress={() => updateItemQuantity(item.id, true)}>
-                        <Plus size={20} color="#666" />
-                      </Pressable>
+          {orderItems.length === 0 ? (
+            <Text style={styles.emptyOrder}>
+              Aucun article dans la commande. Ajoutez-en depuis le menu.
+            </Text>
+          ) : (
+            <View style={styles.orderColumns}>
+              {(() => {
+                const { plats, boissons } = categorizeOrderItems(orderItems);
+                return (
+                  <>
+                    <View style={styles.orderColumn}>
+                      <Text style={styles.columnTitle}>Plats</Text>
+                      <ScrollView style={styles.orderColumnScroll}>
+                        {plats.map(renderUltraCompactItem)}
+                      </ScrollView>
                     </View>
-                    <TextInput
-                      style={styles.notesInput}
-                      placeholder="Ajouter des notes..."
-                      value={item.notes}
-                      onChangeText={(text) => updateItemNotes(item.id, text)}
-                    />
-                  </View>
-                </View>
-              ))
-            )}
-          </ScrollView>
+                    <View style={styles.orderColumn}>
+                      <Text style={styles.columnTitle}>Boissons</Text>
+                      <ScrollView style={styles.orderColumnScroll}>
+                        {boissons.map(renderUltraCompactItem)}
+                      </ScrollView>
+                    </View>
+                  </>
+                );
+              })()}
+            </View>
+          )}
           <View style={styles.totalSection}>
             <View style={styles.finalTotal}>
               <Text style={styles.totalLabel}>Total:</Text>
@@ -640,35 +730,37 @@ export default function TableScreen() {
             <View style={styles.paymentActionsRow}>
               <Pressable
                 style={[styles.paymentButton, { backgroundColor: '#4CAF50' }]}
-                onPress={() => handlePayment('full')}>
+                onPress={() => handlePayment('full')}
+              >
                 <CreditCard size={24} color="white" />
                 <Text style={styles.paymentButtonText}>Paiement total</Text>
               </Pressable>
               <Pressable
                 style={[styles.paymentButton, { backgroundColor: '#673AB7' }]}
-                onPress={() => handlePayment('items')}>
+                onPress={() => handlePayment('items')}
+              >
                 <ShoppingCart size={24} color="white" />
-                <Text style={styles.paymentButtonText}>Paiement par article</Text>
+                <Text style={styles.paymentButtonText}>
+                  Paiement par article
+                </Text>
               </Pressable>
             </View>
             <View style={styles.paymentActionsRow}>
               <Pressable
                 style={[styles.paymentButton, { backgroundColor: '#FF9800' }]}
-                onPress={() => handlePayment('custom')}>
+                onPress={() => handlePayment('custom')}
+              >
                 <Receipt size={24} color="white" />
-                <Text style={styles.paymentButtonText}>Partage personnalisé</Text>
+                <Text style={styles.paymentButtonText}>
+                  Partage personnalisé
+                </Text>
               </Pressable>
               <Pressable
                 style={[styles.paymentButton, { backgroundColor: '#2196F3' }]}
-                onPress={() => handlePayment('split')}>
+                onPress={() => handlePayment('split')}
+              >
                 <Split size={24} color="white" />
                 <Text style={styles.paymentButtonText}>Partager</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.paymentButton, { backgroundColor: '#9C27B0' }]}
-                onPress={() => handlePrintBill(table, router, tableId)}>
-                <Printer size={24} color="white" />
-                <Text style={styles.paymentButtonText}>Imprimer note</Text>
               </Pressable>
             </View>
           </View>
@@ -678,43 +770,52 @@ export default function TableScreen() {
         <View style={styles.menuSection}>
           <View style={styles.menuHeader}>
             <Text style={styles.sectionTitle}>Menu</Text>
-            {/* Boutons de filtre par type */}
             <View style={styles.typeFilters}>
               <Pressable
                 style={[
                   styles.typeFilterButton,
-                  activeType === 'resto' && styles.activeTypeButton
+                  activeType === 'resto' && styles.activeTypeButton,
                 ]}
-                onPress={() => setActiveType('resto')}>
-                <Text style={[
-                  styles.typeFilterText,
-                  activeType === 'resto' && styles.activeTypeText
-                ]}>
+                onPress={() => setActiveType('resto')}
+              >
+                <Text
+                  style={[
+                    styles.typeFilterText,
+                    activeType === 'resto' && styles.activeTypeText,
+                  ]}
+                >
                   Plats
                 </Text>
               </Pressable>
               <Pressable
                 style={[
                   styles.typeFilterButton,
-                  activeType === 'boisson' && styles.activeTypeButton
+                  activeType === 'boisson' && styles.activeTypeButton,
                 ]}
-                onPress={() => setActiveType('boisson')}>
-                <Text style={[
-                  styles.typeFilterText,
-                  activeType === 'boisson' && styles.activeTypeText
-                ]}>
+                onPress={() => setActiveType('boisson')}
+              >
+                <Text
+                  style={[
+                    styles.typeFilterText,
+                    activeType === 'boisson' && styles.activeTypeText,
+                  ]}
+                >
                   Boissons
                 </Text>
               </Pressable>
               <Pressable
                 style={[
                   styles.typeFilterButton,
-                  activeType === null && styles.activeTypeButton
+                  activeType === null && styles.activeTypeButton,
                 ]}
-                onPress={() => setActiveType(null)}>
-                <Text style={[
-                  styles.typeFilterText, activeType === null && styles.activeTypeText
-                ]}>
+                onPress={() => setActiveType(null)}
+              >
+                <Text
+                  style={[
+                    styles.typeFilterText,
+                    activeType === null && styles.activeTypeText,
+                  ]}
+                >
                   Tout
                 </Text>
               </Pressable>
@@ -725,97 +826,72 @@ export default function TableScreen() {
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
-            style={styles.categoryTabs}>
+            style={styles.categoryTabs}
+          >
             <Pressable
               style={[
                 styles.categoryTab,
                 activeCategory === null && styles.activeCategoryTab,
-                activeCategory === null && { borderBottomColor: '#2196F3' }
+                activeCategory === null && { borderBottomColor: '#2196F3' },
               ]}
-              onPress={() => setActiveCategory(null)}>
+              onPress={() => setActiveCategory(null)}
+            >
               <Text
                 style={[
                   styles.categoryTabText,
-                  activeCategory === null && styles.activeCategoryTabText
-                ]}>
+                  activeCategory === null && styles.activeCategoryTabText,
+                ]}
+              >
                 Tout
               </Text>
             </Pressable>
-            {getVisibleCategories().map(category => (
+            {getVisibleCategories().map((category) => (
               <Pressable
                 key={category}
                 style={[
                   styles.categoryTab,
                   activeCategory === category && styles.activeCategoryTab,
-                  activeCategory === category && { borderBottomColor: CATEGORY_COLORS[category] || '#2196F3' }
+                  activeCategory === category && {
+                    borderBottomColor: CATEGORY_COLORS[category] || '#2196F3',
+                  },
                 ]}
-                onPress={() => setActiveCategory(category)}>
+                onPress={() => setActiveCategory(category)}
+              >
                 <Text
                   style={[
                     styles.categoryTabText,
                     activeCategory === category && styles.activeCategoryTabText,
-                    activeCategory === category && { color: CATEGORY_COLORS[category] || '#2196F3' }
-                  ]}>
+                    activeCategory === category && {
+                      color: CATEGORY_COLORS[category] || '#2196F3',
+                    },
+                  ]}
+                >
                   {category}
                 </Text>
               </Pressable>
             ))}
           </ScrollView>
 
-          <ScrollView style={styles.menuItems}>
-            <View style={styles.menuGrid}>
-              {(activeCategory
-                ? [activeCategory]
-                : getVisibleCategories()
-              ).map(category => (
-                <View key={category} style={styles.categorySection}>
-                  <Text style={[
-                    styles.categoryTitle,
-                    { color: CATEGORY_COLORS[category] || '#757575' }
-                  ]}>
-                    {category}
-                  </Text>
-                  <View style={styles.menuItemsGrid}>
-                    {getMenuItemsByCategory(category).map(item => (
-                      <Pressable
-                        key={item.id}
-                        style={[
-                          styles.menuItem,
-                          { borderLeftColor: item.color },
-                          unavailableItems.includes(item.id) && styles.unavailableItem
-                        ]}
-                        onPress={() => addItemToOrder(item)}>
-                        <Text style={[
-                          styles.menuItemName,
-                          unavailableItems.includes(item.id) && styles.unavailableItemText
-                        ]}>
-                          {item.name}
-                        </Text>
-                        <Text style={styles.menuItemPrice}>{item.price.toFixed(2)} €</Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                </View>
-              ))}
-            </View>
-          </ScrollView>
+          <ScrollView style={styles.menuItems}>{renderMenuGrid()}</ScrollView>
         </View>
       </View>
 
-      {/* Modal d'historique des paiements */}
-      <PaymentHistoryModal
-        visible={historyModalVisible}
-        onClose={() => setHistoryModalVisible(false)}
-        tableHistory={tableHistory}
-        tableName={table?.name || `Table ${tableId}`}
-        tableTotal={table?.order?.total}
-        refreshing={refreshingHistory}
-        onRefresh={refreshTableHistory}
-      />
       <SplitSelectionModal
         visible={splitModalVisible}
         onClose={() => setSplitModalVisible(false)}
-        onConfirm={handleSplitConfirm}
+        onConfirm={(partsCount) => {
+          if (!table || !table.order) return;
+
+          router.push({
+            pathname: '/payment/split',
+            params: {
+              tableId: tableId.toString(),
+              total: table.order.total.toString(),
+              guests: partsCount.toString(),
+              items: JSON.stringify(table.order.items),
+            },
+          });
+        }}
         defaultPartsCount={guestCount}
         tableName={table?.name || `Table ${tableId}`}
       />
@@ -839,78 +915,80 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   header: {
-    padding: 16,
+    padding: 12, // Réduit de 16 à 12
     backgroundColor: 'white',
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    minHeight: 60, // Hauteur fixe pour éviter que le header prenne trop de place
   },
   backLink: {
-    marginRight: 12,
+    marginRight: 8,
   },
   headerTitleContainer: {
-    flex: 4,
+    flex: 3, // Réduit de 4 à 3
     flexDirection: 'row',
     alignItems: 'center',
   },
   title: {
-    fontSize: 24,
+    fontSize: 20, // Réduit de 24 à 20
     fontWeight: 'bold',
-    marginRight: 12,
+    marginRight: 8,
   },
   sectionBadge: {
     backgroundColor: '#E1F5FE',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
+    paddingHorizontal: 8, // Réduit de 12 à 8
+    paddingVertical: 2, // Réduit de 4 à 2
     borderRadius: 16,
   },
   sectionText: {
     color: '#0288D1',
     fontWeight: '600',
-    fontSize: 12,
+    fontSize: 11, // Réduit de 12 à 11
   },
   guestCounter: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 8, // Réduit de 12 à 8
     backgroundColor: '#f5f5f5',
-    padding: 8,
+    padding: 6, // Réduit de 8 à 6
     borderRadius: 8,
   },
   guestCount: {
-    fontSize: 18,
+    fontSize: 16, // Réduit de 18 à 16
     fontWeight: '600',
-    minWidth: 24,
+    minWidth: 20, // Réduit de 24 à 20
     textAlign: 'center',
   },
   content: {
     flex: 1,
-    padding: 12,
-    gap: 12,
+    padding: 8, // Réduit de 12 à 8
+    gap: 8, // Réduit de 12 à 8
     flexDirection: 'row',
-    flexWrap: 'wrap', // Permet aux éléments de passer à la ligne sur petits écrans
+    flexWrap: 'wrap',
   },
   orderSection: {
     flex: 2,
-    minWidth: 300, // Définit une largeur minimale
+    minWidth: 300,
     backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: 8, // Réduit de 12 à 8
+    padding: 12, // Réduit de 16 à 12
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 3.84,
     elevation: 5,
+    display: 'flex',
+    flexDirection: 'column',
   },
-
   menuSection: {
     flex: 3,
-    minWidth: 300, // Définit une largeur minimale
+    minWidth: 300,
     backgroundColor: 'white',
-    borderRadius: 12,
-    padding: 16,
+    borderRadius: 8,
+    padding: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -921,15 +999,15 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 8, // Réduit de 12 à 8
   },
   typeFilters: {
     flexDirection: 'row',
-    gap: 8,
+    gap: 6, // Réduit de 8 à 6
   },
   typeFilterButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
+    paddingVertical: 4, // Réduit de 6 à 4
+    paddingHorizontal: 10, // Réduit de 12 à 10
     borderRadius: 16,
     backgroundColor: '#f0f0f0',
   },
@@ -937,7 +1015,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#2196F3',
   },
   typeFilterText: {
-    fontSize: 14,
+    fontSize: 13, // Réduit de 14 à 13
     fontWeight: '500',
     color: '#666',
   },
@@ -946,63 +1024,67 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   sectionTitle: {
-    fontSize: 20,
+    fontSize: 18, // Réduit de 20 à 18
     fontWeight: '600',
-    marginBottom: 12,
+    marginBottom: 8, // Réduit de 12 à 8
   },
   orderList: {
-    height: '40%',
+    maxHeight: '55%', // Réduit de 60% à 55%
   },
   emptyOrder: {
+    flex: 1,
     textAlign: 'center',
     color: '#666',
-    marginTop: 20,
+    paddingTop: 40, // Réduit de 20 à 10
   },
-  orderItem: {
+  orderColumns: {
+    flexDirection: 'row',
+    gap: 12, // Réduit de 16 à 12
+    flex: 1, 
+    minHeight: 0, // Important pour le scroll
+  },
+  orderColumn: {
+    flex: 1,
+    minHeight: 0, // Important pour le scroll
+  },
+  columnTitle: {
+    fontSize: 14, // Réduit de 16 à 14
+    fontWeight: '600',
+    marginBottom: 6, // Réduit de 8 à 6
+    paddingBottom: 3, // Réduit de 4 à 3
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
-    paddingVertical: 12,
   },
-  itemHeader: {
+  ultraCompactItem: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    paddingVertical: 2, // Réduit de 3 à 2
+  },
+  firstLineCompact: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 8,
   },
-  itemName: {
-    fontSize: 16,
+  itemNameUltraCompact: {
+    fontSize: 12, // Réduit de 13 à 12
     fontWeight: '500',
+    flex: 1,
+    marginRight: 6, // Réduit de 8 à 6
   },
-  itemPrice: {
-    fontSize: 16,
+  quantityControlCompact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8, // Augmenté de 5 à 8
+    backgroundColor: '#f5f5f5',
+    padding: 4, // Augmenté de 2 à 4
+    borderRadius: 6, // Augmenté de 4 à 6
+  },
+  priceUltraCompact: {
+    fontSize: 13, // Réduit de 14 à 13
     fontWeight: '600',
     color: '#4CAF50',
-  },
-  itemActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  quantityControl: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: '#f5f5f5',
-    padding: 8,
-    borderRadius: 8,
-  },
-  quantity: {
-    fontSize: 16,
-    fontWeight: '500',
-    minWidth: 24,
-    textAlign: 'center',
-  },
-  notesInput: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-    padding: 8,
-    borderRadius: 8,
-    fontSize: 14,
+    textAlign: 'right',
+    marginTop: 1, // Réduit de 2 à 1
   },
   totalSection: {
     flexDirection: 'row',
@@ -1010,56 +1092,57 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderTopWidth: 2,
     borderTopColor: '#e0e0e0',
+    marginTop: 8, // Ajouté
   },
-
   finalTotal: {
-    width: '100%', // Assure que le total prend toute la largeur
+    width: '100%',
     flexDirection: 'row',
-    justifyContent: 'space-between', // Change à space-between au lieu de space-evenly
+    justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 10,
+    marginTop: 8, // Réduit de 10 à 8
   },
   totalLabel: {
-    fontSize: 18,
+    fontSize: 16, // Réduit de 18 à 16
     fontWeight: '600',
     alignItems: 'center',
   },
   totalAmount: {
-    fontSize: 24,
+    fontSize: 20, // Réduit de 24 à 20
     fontWeight: 'bold',
     color: '#4CAF50',
   },
   paymentActions: {
     flexDirection: 'column',
     gap: 1,
-    marginTop: 6,
-    flex: 2,
+    marginTop: 4, // Réduit de 6 à 4
+    flex: 0.4, // Réduit de 2 à 0.7
+    flexShrink: 0, // Empêche le rétrécissement
   },
   paymentButtonText: {
     color: 'white',
-    fontSize: 14,
+    fontSize: 13, // Réduit de 14 à 13
     fontWeight: '600',
+    paddingLeft: 6, 
   },
-  // Styles pour les onglets de catégorie
   categoryTabs: {
-    marginBottom: 12,
-    flexGrow: 0
+    marginBottom: 8, // Réduit de 12 à 8
+    flexGrow: 0,
   },
   categoryTab: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    marginRight: 6,
+    paddingHorizontal: 8, // Réduit de 10 à 8
+    paddingVertical: 5, // Réduit de 6 à 5
+    marginRight: 5, // Réduit de 6 à 5
     borderBottomWidth: 2,
     borderBottomColor: 'transparent',
     textAlign: 'center',
-    minWidth: 80, // Largeur minimale pour éviter l'étirement
-    alignSelf: 'flex-start', // Empêche l'expansion verticale
+    minWidth: 70, // Réduit de 80 à 70
+    alignSelf: 'flex-start',
   },
   activeCategoryTab: {
     borderBottomWidth: 2,
   },
   categoryTabText: {
-    fontSize: 14,
+    fontSize: 13, // Réduit de 14 à 13
     fontWeight: '500',
     color: '#666',
   },
@@ -1068,46 +1151,44 @@ const styles = StyleSheet.create({
   },
   menuItems: {
     flex: 1,
-    maxHeight: 500,
   },
   menuGrid: {
-    paddingBottom: 16,
+    paddingBottom: 12, // Réduit de 16 à 12
   },
   categorySection: {
     marginBottom: 4,
   },
   categoryTitle: {
-    fontSize: 14,
+    fontSize: 13, // Réduit de 14 à 13
     fontWeight: '600',
-    marginBottom: 4,
+    marginBottom: 3, // Réduit de 4 à 3
     paddingLeft: 8,
   },
   menuItemsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
-    justifyContent: 'space-between', // Mieux répartir les éléments
+    gap: 5, // Réduit de 6 à 5
+    justifyContent: 'space-between',
   },
-
   menuItem: {
-    width: '31%', // Ajusté pour tenir compte du gap
-    minWidth: 90, // Largeur minimale
-    height: 50,
+    width: '31%',
+    minWidth: 90,
+    height: 45, // Réduit de 50 à 45
     backgroundColor: '#f9f9f9',
-    borderRadius: 6,
-    padding: 8,
+    borderRadius: 5, // Réduit de 6 à 5
+    padding: 6, // Réduit de 8 à 6
     borderLeftWidth: 4,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 6, // Ajoute de l'espace sous chaque élément
+    marginBottom: 5, // Réduit de 6 à 5
   },
   menuItemName: {
-    fontSize: 12,
+    fontSize: 11, // Réduit de 12 à 11
     fontWeight: '500',
     marginBottom: 2,
   },
   menuItemPrice: {
-    fontSize: 12,
+    fontSize: 11, // Réduit de 12 à 11
     fontWeight: '600',
     color: '#4CAF50',
   },
@@ -1121,28 +1202,24 @@ const styles = StyleSheet.create({
   },
   generalButton: {
     flex: 1,
-    gap: 30
+    gap: 30,
   },
   paymentActionsRow: {
     flexDirection: 'row',
-    gap: 12,
-    marginBottom: 12,
-    flexWrap: 'wrap', // Permet aux boutons de passer à la ligne sur petits écrans
+    gap: 8, // Réduit de 12 à 8
+    marginBottom: 8, // Réduit de 12 à 8
+    flexWrap: 'wrap',
   },
-
   paymentButton: {
     flex: 1,
-    minWidth: 130, // Largeur minimale pour les boutons
+    minWidth: 120, // Réduit de 130 à 120
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
-    padding: 12,
+    padding: 10, // Réduit de 12 à 10
     borderRadius: 8,
-    marginBottom: 8, // Ajoute une marge en bas pour l'espacement
+    marginBottom: 6, // Réduit de 8 à 6
   },
-
-  // Styles pour l'historique des paiements
   historyBadgeContainer: {
     marginLeft: 16,
   },
@@ -1365,5 +1442,25 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#999',
     textAlign: 'right',
+  },
+  orderColumnScroll: {
+    maxHeight: '93%', // Réduit de 60% à 50%
+    marginTop: 8,
+  },
+  quantityButton: {
+    padding: 4,
+    borderRadius: 4,
+    backgroundColor: '#e0e0e0',
+    width: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  quantityUltraCompact: {
+    fontSize: 14, // Augmenté de 12 à 14
+    fontWeight: '500',
+    minWidth: 20, // Augmenté de 14 à 20
+    textAlign: 'center',
   },
 });

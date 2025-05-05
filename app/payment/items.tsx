@@ -1,871 +1,1115 @@
-// app/payment/items.tsx - Écran de paiement par article (version améliorée avec deux colonnes)
-import { View, Text, StyleSheet, ScrollView, Pressable, Alert } from 'react-native';
-import { useState, useEffect } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { CreditCard, Wallet, ArrowLeft, Edit3, Check, Plus, Minus, ShoppingCart, ArrowRight } from 'lucide-react-native';
-import { getTable, updateTable, addBill, resetTable, OrderItem } from '../../utils/storage';
-import { events, EVENT_TYPES } from '../../utils/events';
+import {
+  ArrowLeft,
+  CreditCard,
+  Edit3,
+  Minus,
+  Plus,
+  ShoppingCart,
+  Wallet,
+} from 'lucide-react-native';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  Alert,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { EVENT_TYPES, events } from '../../utils/events';
+import {
+  addBill,
+  getTable,
+  OrderItem,
+  resetTable,
+  updateTable,
+} from '../../utils/storage';
 
 interface MenuItem {
-    id: number;
-    name: string;
-    quantity: number;
-    price: number;
-    total: number;
-    notes?: string;
+  id: number;
+  name: string;
+  quantity: number;
+  price: number;
+  total: number;
+  notes?: string;
 }
 
 interface SelectedMenuItem extends MenuItem {
-    selectedQuantity: number;
+  selectedQuantity: number;
 }
 
-export default function ItemsPaymentScreen() {
-    const { tableId } = useLocalSearchParams();
-    const router = useRouter();
-    const tableIdNum = parseInt(tableId as string, 10);
+// Fonction pour catégoriser les items
+const getCategoryFromName = (name: string): 'plat' | 'boisson' => {
+  const lowerName = name.toLowerCase();
 
-    const [table, setTable] = useState<any>(null);
-    const [availableItems, setAvailableItems] = useState<MenuItem[]>([]);
-    const [selectedItems, setSelectedItems] = useState<SelectedMenuItem[]>([]);
-    const [tableName, setTableName] = useState("");
-    const [tableSection, setTableSection] = useState("");
-    const [processing, setProcessing] = useState(false);
-    const [totalOrder, setTotalOrder] = useState(0);
-    const [totalSelected, setTotalSelected] = useState(0);
-    // Nouvel état pour stocker tous les articles originaux, y compris ceux à quantité zéro
-    const [allOriginalItems, setAllOriginalItems] = useState<MenuItem[]>([]);
+  if (lowerName.includes('glace')) return 'boisson';
+  if (lowerName.includes('thé') || lowerName.includes('café')) return 'boisson';
+  if (
+    lowerName.includes('bière') ||
+    lowerName.includes('blonde') ||
+    lowerName.includes('ambree')
+  )
+    return 'boisson';
+  if (
+    lowerName.includes('vin') ||
+    lowerName.includes('pichet') ||
+    lowerName.includes('btl')
+  )
+    return 'boisson';
+  if (
+    lowerName.includes('apero') ||
+    lowerName.includes('digestif') ||
+    lowerName.includes('ricard') ||
+    lowerName.includes('alcool') ||
+    lowerName.includes('punch') ||
+    lowerName.includes('cocktail')
+  )
+    return 'boisson';
+  if (
+    lowerName.includes('boisson') ||
+    lowerName.includes('soft') ||
+    lowerName.includes('soda')
+  )
+    return 'boisson';
 
-    // Définir loadTable en dehors de useEffect pour pouvoir l'utiliser ailleurs
-    const loadTable = async () => {
-        const tableData = await getTable(tableIdNum);
-        if (tableData) {
-            setTable(tableData);
-            setTableName(tableData.name);
-            setTableSection(tableData.section);
+  return 'plat';
+};
 
-            // Convertir les articles en format pour l'affichage
-            if (tableData.order && tableData.order.items) {
-                const items = tableData.order.items.map((item: OrderItem) => ({
-                    id: item.id,
-                    name: item.name,
-                    quantity: item.quantity,
-                    price: item.price,
-                    total: item.price * item.quantity,
-                    notes: item.notes
-                }));
-                setAvailableItems(items);
+// Fonction utilitaire pour catégoriser les items
+const categorizeItems = (items: (MenuItem | SelectedMenuItem)[]) => {
+  return items.reduce(
+    (acc, item) => {
+      const category = getCategoryFromName(item.name);
+      acc[category].push(item);
+      return acc;
+    },
+    { plat: [] as any[], boisson: [] as any[] }
+  );
+};
 
-                // Stocker TOUS les articles originaux dans l'état séparé
-                setAllOriginalItems(items);
-
-                // Calculer le total de la commande
-                const orderTotal = items.reduce((sum, item) => sum + item.total, 0);
-                setTotalOrder(orderTotal);
-            }
-        }
-    };
-
-    // Charger les données de la table
-    useEffect(() => {
-        loadTable();
-    }, [tableIdNum]);
-
-    // Calculer le total sélectionné quand la sélection change
-    useEffect(() => {
-        const newTotal = selectedItems.reduce(
-            (sum, item) => sum + (item.price * item.selectedQuantity),
-            0
-        );
-        setTotalSelected(newTotal);
-    }, [selectedItems]);
-
-    // Ajouter un article à la sélection
-    const addItemToSelection = (item: MenuItem) => {
-        // Vérifier si la quantité disponible > 0
-        if (item.quantity <= 0) {
-            return;
-        }
-
-        // Vérifier si l'article est déjà dans la sélection
-        const existingIndex = selectedItems.findIndex(selected => selected.id === item.id);
-
-        if (existingIndex >= 0) {
-            // Si l'article existe déjà, augmenter la quantité sélectionnée
-            const updatedSelectedItems = [...selectedItems];
-            const currentItem = updatedSelectedItems[existingIndex];
-
-            updatedSelectedItems[existingIndex] = {
-                ...currentItem,
-                selectedQuantity: currentItem.selectedQuantity + 1
-            };
-            setSelectedItems(updatedSelectedItems);
-        } else {
-            // Si l'article n'existe pas encore dans la sélection, l'ajouter
-            const newSelectedItem: SelectedMenuItem = {
-                ...item,
-                selectedQuantity: 1
-            };
-            setSelectedItems([...selectedItems, newSelectedItem]);
-        }
-
-        // Mettre à jour les articles disponibles en réduisant la quantité
-        const updatedAvailableItems = [...availableItems];
-        const availableItemIndex = updatedAvailableItems.findIndex(availItem => availItem.id === item.id);
-
-        if (availableItemIndex >= 0) {
-            const availItem = updatedAvailableItems[availableItemIndex];
-            const newQuantity = availItem.quantity - 1;
-
-            if (newQuantity <= 0) {
-                // On retire l'item de la liste des disponibles mais on conserve une référence
-                // pour pouvoir le restaurer plus tard si nécessaire
-                updatedAvailableItems.splice(availableItemIndex, 1);
-            } else {
-                // Mettre à jour la quantité
-                updatedAvailableItems[availableItemIndex] = {
-                    ...availItem,
-                    quantity: newQuantity,
-                    total: availItem.price * newQuantity
-                };
-            }
-        }
-
-        setAvailableItems(updatedAvailableItems);
-    };
-
-    // Retirer un article de la sélection
-    const removeItemFromSelection = (itemId: number) => {
-        const itemToRemove = selectedItems.find(item => item.id === itemId);
-
-        if (!itemToRemove) return;
-
-        if (itemToRemove.selectedQuantity > 1) {
-            // Si la quantité > 1, diminuer la quantité
-            const updatedItems = selectedItems.map(item =>
-                item.id === itemId
-                    ? { ...item, selectedQuantity: item.selectedQuantity - 1 }
-                    : item
-            );
-            setSelectedItems(updatedItems);
-        } else {
-            // Si la quantité = 1, retirer l'article
-            setSelectedItems(selectedItems.filter(item => item.id !== itemId));
-        }
-
-        // Mettre à jour les articles disponibles
-        updateAvailableItemsQuantity(itemId, 1);
-    };
-
-    // Supprimer complètement un article de la sélection
-    const removeItemCompletely = (itemId: number) => {
-        const itemToRemove = selectedItems.find(item => item.id === itemId);
-
-        if (!itemToRemove) return;
-
-        // Retirer l'article de la sélection
-        setSelectedItems(selectedItems.filter(item => item.id !== itemId));
-
-        // Vérifier si l'article existe dans les articles disponibles
-        const existingItemIndex = availableItems.findIndex(item => item.id === itemId);
-
-        if (existingItemIndex >= 0) {
-            // Si l'article existe, augmenter sa quantité
-            const updatedAvailableItems = [...availableItems];
-            const availableItem = updatedAvailableItems[existingItemIndex];
-            updatedAvailableItems[existingItemIndex] = {
-                ...availableItem,
-                quantity: availableItem.quantity + itemToRemove.selectedQuantity,
-                total: availableItem.price * (availableItem.quantity + itemToRemove.selectedQuantity)
-            };
-            setAvailableItems(updatedAvailableItems);
-        } else {
-            // Si l'article n'existe pas, chercher dans les articles originaux
-            const originalItem = allOriginalItems.find(item => item.id === itemId);
-
-            if (originalItem) {
-                // Ajouter l'article à la liste des disponibles
-                setAvailableItems([
-                    ...availableItems,
-                    {
-                        id: originalItem.id,
-                        name: originalItem.name,
-                        quantity: itemToRemove.selectedQuantity,
-                        price: originalItem.price,
-                        total: originalItem.price * itemToRemove.selectedQuantity,
-                        notes: originalItem.notes
-                    }
-                ]);
-            }
-        }
-    };
-
-    // Mettre à jour la quantité d'un article disponible
-    const updateAvailableItemsQuantity = (itemId: number, change: number) => {
-        setAvailableItems(prevItems => {
-            const existingItemIndex = prevItems.findIndex(item => item.id === itemId);
-
-            if (existingItemIndex >= 0) {
-                // Si l'article existe déjà, mettre à jour sa quantité
-                const updatedItems = [...prevItems];
-                const item = updatedItems[existingItemIndex];
-                const newQuantity = item.quantity + change;
-
-                updatedItems[existingItemIndex] = {
-                    ...item,
-                    quantity: newQuantity,
-                    total: item.price * newQuantity
-                };
-
-                return updatedItems;
-            } else {
-                // Si l'article n'existe pas, l'ajouter aux articles disponibles
-                const itemToAdd = selectedItems.find(item => item.id === itemId);
-                if (itemToAdd) {
-                    return [
-                        ...prevItems,
-                        {
-                            id: itemToAdd.id,
-                            name: itemToAdd.name,
-                            quantity: change,
-                            price: itemToAdd.price,
-                            total: itemToAdd.price * change,
-                            notes: itemToAdd.notes
-                        }
-                    ];
-                }
-            }
-
-            return prevItems;
-        });
-    };
-
-    // Traiter le paiement des articles sélectionnés
-    const handlePayment = async (method: 'card' | 'cash' | 'check') => {
-        // Vérifier qu'au moins un article est sélectionné
-        if (selectedItems.length === 0) {
-            Alert.alert('Aucun article sélectionné', 'Veuillez sélectionner au moins un article à payer.');
-            return;
-        }
-
-        setProcessing(true);
-
-        try {
-            // Récupérer les données actuelles de la table
-            const currentTable = await getTable(tableIdNum);
-            if (!currentTable || !currentTable.order) {
-                Alert.alert('Erreur', 'Impossible de récupérer les informations de la table.');
-                setProcessing(false);
-                return;
-            }
-
-            // Préparer la liste des articles payés pour la facture
-            const paidItems = selectedItems.map(item => ({
-                id: item.id,
-                name: item.name,
-                quantity: item.selectedQuantity,
-                price: item.price
-            }));
-
-            // Créer une facture pour les articles payés
-            const bill = {
-                id: Date.now(),
-                tableNumber: tableIdNum,
-                tableName: tableName,
-                section: tableSection,
-                amount: totalSelected,
-                items: paidItems.length,
-                status: 'paid' as 'paid',
-                timestamp: new Date().toISOString(),
-                paymentMethod: method,
-                paymentType: 'items' as any,
-                paidItems: paidItems
-            };
-
-            // Ajouter la facture à l'historique
-            await addBill(bill);
-
-            // Mettre à jour la commande de la table en retirant les articles payés
-            let updatedOrderItems = [...currentTable.order.items]; // Copie des articles actuels
-
-            // Pour chaque article payé, réduire sa quantité ou le supprimer
-            for (const selectedItem of selectedItems) {
-                const orderItemIndex = updatedOrderItems.findIndex(
-                    item => item.id === selectedItem.id
-                );
-
-                if (orderItemIndex >= 0) {
-                    const orderItem = updatedOrderItems[orderItemIndex];
-                    const remainingQuantity = orderItem.quantity - selectedItem.selectedQuantity;
-
-                    if (remainingQuantity <= 0) {
-                        // Si plus aucune quantité, retirer l'article
-                        updatedOrderItems.splice(orderItemIndex, 1);
-                    } else {
-                        // Sinon, mettre à jour la quantité
-                        updatedOrderItems[orderItemIndex] = {
-                            ...orderItem,
-                            quantity: remainingQuantity
-                        };
-                    }
-                }
-            }
-
-            // Calculer le nouveau total
-            const newTotal = updatedOrderItems.reduce(
-                (sum, item) => sum + (item.price * item.quantity),
-                0
-            );
-
-            // Si tous les articles ont été payés
-            if (updatedOrderItems.length === 0 || newTotal <= 0) {
-                // Réinitialiser la table
-                await resetTable(tableIdNum);
-
-                // Émettre un événement de mise à jour
-                events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
-
-                Alert.alert(
-                    'Paiement réussi',
-                    'Tous les articles ont été payés.',
-                    [
-                        {
-                            text: 'OK',
-                            onPress: () => router.push('/')
-                        }
-                    ]
-                );
-            } else {
-                // Mettre à jour la table avec les articles restants
-                const updatedTable = {
-                    ...currentTable,
-                    order: {
-                        ...currentTable.order,
-                        items: updatedOrderItems,
-                        total: newTotal
-                    }
-                };
-
-                await updateTable(updatedTable);
-
-                // Émettre un événement pour que la table soit actualisée si l'utilisateur revient à cet écran
-                events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
-
-                Alert.alert(
-                    'Paiement partiel réussi',
-                    `Articles payés: ${totalSelected.toFixed(2)}€\nRestant à payer: ${newTotal.toFixed(2)}€`,
-                    [
-                        {
-                            text: 'OK',
-                            onPress: () => {
-                                // Recharger la page avec les articles restants au lieu de revenir à la page de table
-                                setSelectedItems([]);
-                                loadTable();
-                            }
-                        }
-                    ]
-                );
-            }
-        } catch (error) {
-            console.error('Erreur lors du paiement:', error);
-            Alert.alert('Erreur', 'Une erreur est survenue lors du traitement du paiement.');
-        } finally {
-            setProcessing(false);
-        }
-    };
-
-    if (!table) {
-        return (
-            <View style={styles.loadingContainer}>
-                <Text>Chargement des informations de la table...</Text>
+// Composant ItemCard optimisé avec React.memo
+const ItemCard = memo(
+  ({
+    item,
+    isSelected,
+    onAdd,
+    onQuantityChange,
+    onRemoveCompletely,
+  }: {
+    item: MenuItem | SelectedMenuItem;
+    isSelected: boolean;
+    onAdd?: (addAll?: boolean) => void;
+    onQuantityChange?: (increment: boolean) => void;
+    onRemoveCompletely?: () => void;
+  }) => {
+    if (isSelected) {
+      const selectedItem = item as SelectedMenuItem;
+      return (
+        <View style={[styles.itemCard, styles.selectedItemCard]}>
+          <View style={styles.selectedItemRow}>
+            <View style={styles.leftContent}>
+              <Text style={styles.itemName}>{selectedItem.name}</Text>
+              <View style={styles.quantityControl}>
+                <Pressable
+                  style={styles.quantityButton}
+                  onPress={() => onQuantityChange?.(false)}
+                >
+                  <Minus size={14} color="#666" />
+                </Pressable>
+                <Text style={styles.quantityValue}>
+                  {selectedItem.selectedQuantity}
+                </Text>
+                <Pressable
+                  style={styles.quantityButton}
+                  onPress={() => onQuantityChange?.(true)}
+                >
+                  <Plus size={14} color="#666" />
+                </Pressable>
+              </View>
             </View>
-        );
+
+            <View style={styles.rightContent}>
+              <Text style={styles.subtotalText}>
+                {(selectedItem.price * selectedItem.selectedQuantity).toFixed(
+                  2
+                )}{' '}
+                €
+              </Text>
+              <Pressable
+                style={styles.removeButton}
+                onPress={onRemoveCompletely}
+              >
+                <Text style={styles.removeButtonText}>Retirer</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      );
     }
 
     return (
-        <View style={styles.container}>
-            <View style={styles.header}>
-                <Pressable
-                    style={styles.backButton}
-                    onPress={() => {
-                        // Vérifier s'il reste des articles sélectionnés avant de quitter
-                        if (selectedItems.length > 0) {
-                            Alert.alert(
-                                "Articles en attente de paiement",
-                                "Attention, vous avez des articles sélectionnés qui n'ont pas été payés. Voulez-vous vraiment quitter cette page?",
-                                [
-                                    {
-                                        text: "Annuler",
-                                        style: "cancel"
-                                    },
-                                    {
-                                        text: "Quitter quand même",
-                                        onPress: () => router.back()
-                                    }
-                                ]
-                            );
-                        } else {
-                            router.back();
-                        }
-                    }}
-                >
-                    <ArrowLeft size={24} color="#333" />
-                </Pressable>
-                <View>
-                    <Text style={styles.title}>Paiement par article - {tableName}</Text>
-                    {tableSection && (
-                        <View style={styles.sectionBadge}>
-                            <Text style={styles.sectionText}>{tableSection}</Text>
-                        </View>
-                    )}
-                </View>
-                {selectedItems.length > 0 && (
-                    <View style={styles.warningBadge}>
-                        <Text style={styles.warningText}>{selectedItems.length} article(s) en attente</Text>
-                    </View>
-                )}
-            </View>
-
-            <View style={styles.summaryCard}>
-                <View style={styles.totalRow}>
-                    <Text style={styles.totalLabel}>Total de la commande:</Text>
-                    <Text style={styles.totalAmount}>{totalOrder.toFixed(2)} €</Text>
-                </View>
-                <View style={styles.totalRow}>
-                    <Text style={styles.totalLabel}>Articles sélectionnés:</Text>
-                    <Text style={styles.selectedAmount}>{totalSelected.toFixed(2)} €</Text>
-                </View>
-            </View>
-
-            <View style={styles.columnsContainer}>
-                {/* Colonne de gauche - Articles disponibles */}
-                <View style={styles.column}>
-                    <View style={styles.columnHeader}>
-                        <Text style={styles.columnTitle}>Articles disponibles</Text>
-                        <ShoppingCart size={20} color="#666" />
-                    </View>
-
-                    <ScrollView style={styles.itemsList}>
-                        {availableItems.length === 0 ? (
-                            <Text style={styles.emptyText}>Tous les articles ont été sélectionnés</Text>
-                        ) : (
-                            availableItems.map(item => (
-                                <View key={item.id} style={styles.itemCard}>
-                                    <View style={styles.itemHeader}>
-                                        <Text style={styles.itemName}>{item.name}</Text>
-                                        <Text style={styles.itemPrice}>{item.price.toFixed(2)} €</Text>
-                                    </View>
-
-                                    <View style={styles.itemActions}>
-                                        <Text style={styles.quantityText}>Quantité: {item.quantity}</Text>
-
-                                        <View style={styles.actionButtons}>
-                                            <Pressable
-                                                style={styles.addButton}
-                                                onPress={() => addItemToSelection(item)}
-                                            >
-                                                <Plus size={16} color="white" />
-                                                <Text style={styles.addButtonText}>Ajouter</Text>
-                                            </Pressable>
-
-                                            {item.quantity > 1 && (
-                                                <Pressable
-                                                    style={[styles.addButton, styles.addAllButton]}
-                                                    onPress={() => {
-                                                        // Stocker la quantité originale car elle va changer pendant la boucle
-                                                        const originalQuantity = item.quantity;
-                                                        // Créer une copie temporaire de l'item
-                                                        const tempItem = { ...item };
-
-                                                        // Ajouter tous les articles en une fois sans utiliser la boucle
-                                                        // qui causerait des problèmes de mise à jour d'état
-                                                        const existingIndex = selectedItems.findIndex(selected => selected.id === item.id);
-
-                                                        if (existingIndex >= 0) {
-                                                            // Si l'article existe déjà, augmenter sa quantité
-                                                            const updatedSelectedItems = [...selectedItems];
-                                                            const currentSelectedQty = updatedSelectedItems[existingIndex].selectedQuantity;
-                                                            const newSelectedQty = currentSelectedQty + originalQuantity;
-
-                                                            updatedSelectedItems[existingIndex] = {
-                                                                ...updatedSelectedItems[existingIndex],
-                                                                selectedQuantity: newSelectedQty
-                                                            };
-
-                                                            setSelectedItems(updatedSelectedItems);
-                                                        } else {
-                                                            // Sinon ajouter un nouvel article
-                                                            const newSelectedItem: SelectedMenuItem = {
-                                                                ...tempItem,
-                                                                selectedQuantity: originalQuantity
-                                                            };
-
-                                                            setSelectedItems([...selectedItems, newSelectedItem]);
-                                                        }
-
-                                                        // Mettre à jour la quantité disponible
-                                                        setAvailableItems(prevItems =>
-                                                            prevItems.map(availItem => {
-                                                                if (availItem.id === item.id) {
-                                                                    return {
-                                                                        ...availItem,
-                                                                        quantity: 0,
-                                                                        total: 0
-                                                                    };
-                                                                }
-                                                                return availItem;
-                                                            }).filter(availItem => availItem.quantity > 0) // Retirer l'item de la liste si quantité = 0
-                                                        );
-                                                    }}
-                                                >
-                                                    <ShoppingCart size={16} color="white" />
-                                                    <Text style={styles.addButtonText}>Tout</Text>
-                                                </Pressable>
-                                            )}
-                                        </View>
-                                    </View>
-                                </View>
-                            ))
-                        )}
-                    </ScrollView>
-                </View>
-
-                {/* Colonne de droite - Articles sélectionnés */}
-                <View style={styles.column}>
-                    <View style={styles.columnHeader}>
-                        <Text style={styles.columnTitle}>Articles sélectionnés</Text>
-                        <ShoppingCart size={20} color="#4CAF50" />
-                    </View>
-
-                    <ScrollView style={styles.itemsList}>
-                        {selectedItems.length === 0 ? (
-                            <Text style={styles.emptyText}>Aucun article sélectionné</Text>
-                        ) : (
-                            selectedItems.map(item => (
-                                <View key={item.id} style={[styles.itemCard, styles.selectedItemCard]}>
-                                    <View style={styles.itemHeader}>
-                                        <Text style={styles.itemName}>{item.name}</Text>
-                                        <Text style={styles.selectedItemPrice}>{item.price.toFixed(2)} €</Text>
-                                    </View>
-
-                                    <View style={styles.selectedItemDetails}>
-                                        <View style={styles.quantityControl}>
-                                            <Pressable
-                                                style={styles.quantityButton}
-                                                onPress={() => removeItemFromSelection(item.id)}
-                                            >
-                                                <Minus size={16} color="#666" />
-                                            </Pressable>
-
-                                            <Text style={styles.quantityValue}>{item.selectedQuantity}</Text>
-
-                                            <Pressable
-                                                style={styles.quantityButton}
-                                                onPress={() => {
-                                                    const availableItem = availableItems.find(avail => avail.id === item.id);
-                                                    if (availableItem && availableItem.quantity > 0) {
-                                                        addItemToSelection(availableItem);
-                                                    }
-                                                }}
-                                            >
-                                                <Plus size={16} color="#666" />
-                                            </Pressable>
-                                        </View>
-
-                                        <View style={styles.selectedItemActions}>
-                                            <Text style={styles.subtotalText}>
-                                                {(item.price * item.selectedQuantity).toFixed(2)} €
-                                            </Text>
-
-                                            <Pressable
-                                                style={styles.removeButton}
-                                                onPress={() => removeItemCompletely(item.id)}
-                                            >
-                                                <Text style={styles.removeButtonText}>Retirer</Text>
-                                            </Pressable>
-                                        </View>
-                                    </View>
-                                </View>
-                            ))
-                        )}
-                    </ScrollView>
-                </View>
-            </View>
-
-            <View style={styles.paymentMethods}>
-                <Text style={styles.paymentTitle}>Méthode de paiement</Text>
-
-                <View style={styles.paymentButtons}>
-                    <Pressable
-                        style={[styles.paymentButton, { backgroundColor: '#4CAF50' }]}
-                        onPress={() => handlePayment('card')}
-                        disabled={processing || selectedItems.length === 0}
-                    >
-                        <CreditCard size={24} color="white" />
-                        <Text style={styles.paymentButtonText}>Carte</Text>
-                    </Pressable>
-
-                    <Pressable
-                        style={[styles.paymentButton, { backgroundColor: '#2196F3' }]}
-                        onPress={() => handlePayment('cash')}
-                        disabled={processing || selectedItems.length === 0}
-                    >
-                        <Wallet size={24} color="white" />
-                        <Text style={styles.paymentButtonText}>Espèces</Text>
-                    </Pressable>
-
-                    <Pressable
-                        style={[styles.paymentButton, { backgroundColor: '#9C27B0' }]}
-                        onPress={() => handlePayment('check')}
-                        disabled={processing || selectedItems.length === 0}
-                    >
-                        <Edit3 size={24} color="white" />
-                        <Text style={styles.paymentButtonText}>Chèque</Text>
-                    </Pressable>
-                </View>
-            </View>
+      <View style={styles.itemCard}>
+        <View style={styles.itemHeader}>
+          <Text style={styles.itemName}>{item.name}</Text>
+          <Text style={styles.itemPrice}>{item.price.toFixed(2)} €</Text>
         </View>
+
+        <View style={styles.itemActions}>
+          <Text style={styles.quantityText}>Quantité: {item.quantity}</Text>
+
+          <View style={styles.actionButtons}>
+            <Pressable style={styles.addButton} onPress={() => onAdd?.(false)}>
+              <Plus size={16} color="white" />
+              <Text style={styles.addButtonText}>Ajouter</Text>
+            </Pressable>
+
+            {item.quantity > 1 && (
+              <Pressable
+                style={[styles.addButton, styles.addAllButton]}
+                onPress={() => onAdd?.(true)}
+              >
+                <ShoppingCart size={16} color="white" />
+                <Text style={styles.addButtonText}>Tout</Text>
+              </Pressable>
+            )}
+          </View>
+        </View>
+      </View>
     );
+  }
+);
+
+export default function ItemsPaymentScreen() {
+  const { tableId } = useLocalSearchParams();
+  const router = useRouter();
+  const tableIdNum = parseInt(tableId as string, 10);
+
+  const [table, setTable] = useState<any>(null);
+  const [availableItems, setAvailableItems] = useState<MenuItem[]>([]);
+  const [selectedItems, setSelectedItems] = useState<SelectedMenuItem[]>([]);
+  const [tableName, setTableName] = useState('');
+  const [tableSection, setTableSection] = useState('');
+  const [processing, setProcessing] = useState(false);
+  const [allOriginalItems, setAllOriginalItems] = useState<MenuItem[]>([]);
+
+  // Mémoïzation des calculs de total
+  const totalOrder = useMemo(() => {
+    return (
+      availableItems.reduce((sum, item) => sum + item.total, 0) +
+      selectedItems.reduce(
+        (sum, item) => sum + item.price * item.selectedQuantity,
+        0
+      )
+    );
+  }, [availableItems, selectedItems]);
+
+  const totalSelected = useMemo(() => {
+    return selectedItems.reduce(
+      (sum, item) => sum + item.price * item.selectedQuantity,
+      0
+    );
+  }, [selectedItems]);
+
+  // loadTable avec useCallback
+  const loadTable = useCallback(async () => {
+    const tableData = await getTable(tableIdNum);
+    if (tableData) {
+      setTable(tableData);
+      setTableName(tableData.name);
+      setTableSection(tableData.section);
+
+      if (tableData.order && tableData.order.items) {
+        const items = tableData.order.items.map((item: OrderItem) => ({
+          id: item.id,
+          name: item.name,
+          quantity: item.quantity,
+          price: item.price,
+          total: item.price * item.quantity,
+          notes: item.notes,
+        }));
+        setAvailableItems(items);
+        setAllOriginalItems(items);
+      }
+    }
+  }, [tableIdNum]);
+
+  useEffect(() => {
+    loadTable();
+  }, [loadTable]);
+
+  // Handlers optimisés avec useCallback
+  const addItemToSelection = useCallback(
+    (item: MenuItem, addAll: boolean = false) => {
+      if (item.quantity <= 0) return;
+
+      setAvailableItems((prevAvailableItems) => {
+        const updatedAvailableItems = prevAvailableItems
+          .map((availItem) => {
+            if (availItem.id === item.id) {
+              const quantityToAdd = addAll ? availItem.quantity : 1;
+              const newQuantity = Math.max(
+                0,
+                availItem.quantity - quantityToAdd
+              );
+              return {
+                ...availItem,
+                quantity: newQuantity,
+                total: availItem.price * newQuantity,
+              };
+            }
+            return availItem;
+          })
+          .filter((availItem) => availItem.quantity > 0);
+
+        return updatedAvailableItems;
+      });
+
+      setSelectedItems((prevSelectedItems) => {
+        const quantityToAdd = addAll ? item.quantity : 1;
+        const existingIndex = prevSelectedItems.findIndex(
+          (selected) => selected.id === item.id
+        );
+
+        if (existingIndex >= 0) {
+          const updatedSelectedItems = [...prevSelectedItems];
+          const currentItem = updatedSelectedItems[existingIndex];
+          updatedSelectedItems[existingIndex] = {
+            ...currentItem,
+            selectedQuantity: currentItem.selectedQuantity + quantityToAdd,
+          };
+          return updatedSelectedItems;
+        } else {
+          const newSelectedItem: SelectedMenuItem = {
+            ...item,
+            selectedQuantity: quantityToAdd,
+          };
+          return [...prevSelectedItems, newSelectedItem];
+        }
+      });
+    },
+    []
+  );
+
+  const removeItemCompletely = useCallback(
+    (itemId: number) => {
+      const itemToRemove = selectedItems.find((item) => item.id === itemId);
+      if (!itemToRemove) return;
+
+      setSelectedItems((prevSelectedItems) => {
+        return prevSelectedItems.filter((item) => item.id !== itemId);
+      });
+
+      // Restaurer l'article dans les disponibles
+      setAvailableItems((prevAvailableItems) => {
+        const existingItemIndex = prevAvailableItems.findIndex(
+          (item) => item.id === itemId
+        );
+
+        if (existingItemIndex >= 0) {
+          const updatedAvailableItems = [...prevAvailableItems];
+          const availableItem = updatedAvailableItems[existingItemIndex];
+          updatedAvailableItems[existingItemIndex] = {
+            ...availableItem,
+            quantity: availableItem.quantity + itemToRemove.selectedQuantity,
+            total:
+              availableItem.price *
+              (availableItem.quantity + itemToRemove.selectedQuantity),
+          };
+          return updatedAvailableItems;
+        } else {
+          const originalItem = allOriginalItems.find(
+            (item) => item.id === itemId
+          );
+          if (originalItem) {
+            return [
+              ...prevAvailableItems,
+              {
+                id: originalItem.id,
+                name: originalItem.name,
+                quantity: itemToRemove.selectedQuantity,
+                price: originalItem.price,
+                total: originalItem.price * itemToRemove.selectedQuantity,
+                notes: originalItem.notes,
+              },
+            ];
+          }
+          return prevAvailableItems;
+        }
+      });
+    },
+    [selectedItems, allOriginalItems]
+  );
+
+  const handleSelectedItemQuantityChange = useCallback(
+    (itemId: number, increment: boolean) => {
+      setSelectedItems((prevSelectedItems) => {
+        return prevSelectedItems
+          .map((item) => {
+            if (item.id === itemId) {
+              const currentQuantity = item.selectedQuantity;
+              const newQuantity = increment
+                ? currentQuantity + 1
+                : Math.max(0, currentQuantity - 1); // Permettre 0 au lieu de blocage à 1
+
+              // Si la quantité devient 0, on va supprimer l'item
+              if (newQuantity === 0) {
+                // On doit restaurer l'item dans les disponibles
+                updateAvailableItemsQuantity(itemId, 1);
+                return null; // Marquer pour suppression
+              }
+
+              return {
+                ...item,
+                selectedQuantity: newQuantity,
+              };
+            }
+            return item;
+          })
+          .filter((item): item is SelectedMenuItem => item !== null); // Supprimer les items null avec type guard
+      });
+
+      // Si on ne décrémente pas à 0, on met à jour les disponibles normalement
+      if (!increment) {
+        const itemToCheck = selectedItems.find((item) => item.id === itemId);
+        if ((itemToCheck?.selectedQuantity ?? 0) > 1) {
+          updateAvailableItemsQuantity(itemId, 1);
+        }
+      } else {
+        updateAvailableItemsQuantity(itemId, -1);
+      }
+    },
+    [selectedItems]
+  );
+  const updateAvailableItemsQuantity = useCallback(
+    (itemId: number, change: number) => {
+      setAvailableItems((prevItems) => {
+        const existingItemIndex = prevItems.findIndex(
+          (item) => item.id === itemId
+        );
+
+        if (existingItemIndex >= 0) {
+          const updatedItems = [...prevItems];
+          const item = updatedItems[existingItemIndex];
+          const newQuantity = item.quantity + change;
+
+          updatedItems[existingItemIndex] = {
+            ...item,
+            quantity: newQuantity,
+            total: item.price * newQuantity,
+          };
+
+          return updatedItems;
+        } else {
+          const originalItem = allOriginalItems.find(
+            (item) => item.id === itemId
+          );
+          if (originalItem) {
+            return [
+              ...prevItems,
+              {
+                id: originalItem.id,
+                name: originalItem.name,
+                quantity: change,
+                price: originalItem.price,
+                total: originalItem.price * change,
+                notes: originalItem.notes,
+              },
+            ];
+          }
+        }
+
+        return prevItems;
+      });
+    },
+    [allOriginalItems]
+  );
+
+  const handlePayment = useCallback(
+    async (method: 'card' | 'cash' | 'check') => {
+      if (selectedItems.length === 0) {
+        Alert.alert(
+          'Aucun article sélectionné',
+          'Veuillez sélectionner au moins un article à payer.'
+        );
+        return;
+      }
+
+      setProcessing(true);
+
+      try {
+        const currentTable = await getTable(tableIdNum);
+        if (!currentTable || !currentTable.order) {
+          Alert.alert(
+            'Erreur',
+            'Impossible de récupérer les informations de la table.'
+          );
+          setProcessing(false);
+          return;
+        }
+
+        const paidItems = selectedItems.map((item) => ({
+          id: item.id,
+          name: item.name,
+          quantity: item.selectedQuantity,
+          price: item.price,
+        }));
+
+        const bill = {
+          id: Date.now(),
+          tableNumber: tableIdNum,
+          tableName: tableName,
+          section: tableSection,
+          amount: totalSelected,
+          items: paidItems.length,
+          status: 'paid' as 'paid',
+          timestamp: new Date().toISOString(),
+          paymentMethod: method,
+          paymentType: 'items' as any,
+          paidItems: paidItems,
+        };
+
+        await addBill(bill);
+
+        let updatedOrderItems = [...currentTable.order.items];
+
+        for (const selectedItem of selectedItems) {
+          const orderItemIndex = updatedOrderItems.findIndex(
+            (item) => item.id === selectedItem.id
+          );
+
+          if (orderItemIndex >= 0) {
+            const orderItem = updatedOrderItems[orderItemIndex];
+            const remainingQuantity =
+              orderItem.quantity - selectedItem.selectedQuantity;
+
+            if (remainingQuantity <= 0) {
+              updatedOrderItems.splice(orderItemIndex, 1);
+            } else {
+              updatedOrderItems[orderItemIndex] = {
+                ...orderItem,
+                quantity: remainingQuantity,
+              };
+            }
+          }
+        }
+
+        const newTotal = updatedOrderItems.reduce(
+          (sum, item) => sum + item.price * item.quantity,
+          0
+        );
+
+        if (updatedOrderItems.length === 0 || newTotal <= 0) {
+          await resetTable(tableIdNum);
+          events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
+
+          Alert.alert('Paiement réussi', 'Tous les articles ont été payés.', [
+            {
+              text: 'OK',
+              onPress: () => router.push('/'),
+            },
+          ]);
+        } else {
+          const updatedTable = {
+            ...currentTable,
+            order: {
+              ...currentTable.order,
+              items: updatedOrderItems,
+              total: newTotal,
+            },
+          };
+
+          await updateTable(updatedTable);
+          events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
+
+          Alert.alert(
+            'Paiement partiel réussi',
+            `Articles payés: ${totalSelected.toFixed(
+              2
+            )}€\nRestant à payer: ${newTotal.toFixed(2)}€`,
+            [
+              {
+                text: 'OK',
+                onPress: () => {
+                  setSelectedItems([]);
+                  loadTable();
+                },
+              },
+            ]
+          );
+        }
+      } catch (error) {
+        console.error('Erreur lors du paiement:', error);
+        Alert.alert(
+          'Erreur',
+          'Une erreur est survenue lors du traitement du paiement.'
+        );
+      } finally {
+        setProcessing(false);
+      }
+    },
+    [
+      selectedItems,
+      totalSelected,
+      tableIdNum,
+      tableName,
+      tableSection,
+      loadTable,
+      router,
+    ]
+  );
+
+  // Handler pour le backButton avec useCallback
+  const handleBack = useCallback(() => {
+    if (selectedItems.length > 0) {
+      Alert.alert(
+        'Articles en attente de paiement',
+        "Attention, vous avez des articles sélectionnés qui n'ont pas été payés. Voulez-vous vraiment quitter cette page?",
+        [
+          {
+            text: 'Annuler',
+            style: 'cancel',
+          },
+          {
+            text: 'Quitter quand même',
+            onPress: () => router.back(),
+          },
+        ]
+      );
+    } else {
+      router.back();
+    }
+  }, [selectedItems, router]);
+
+  // Fonction pour déplacer tous les articles disponibles vers les articles sélectionnés
+  const moveAllToSelected = useCallback(() => {
+    setSelectedItems((prevSelectedItems) => {
+      const newSelectedItems = availableItems.map((item) => ({
+        ...item,
+        selectedQuantity: item.quantity,
+      }));
+      return [...prevSelectedItems, ...newSelectedItems];
+    });
+    setAvailableItems([]);
+  }, [availableItems]);
+
+  // Fonction pour déplacer tous les articles sélectionnés vers les articles disponibles
+  const moveAllToAvailable = useCallback(() => {
+    setAvailableItems((prevAvailableItems) => {
+      const newAvailableItems = selectedItems.map((item) => ({
+        ...item,
+        quantity: item.selectedQuantity,
+        total: item.price * item.selectedQuantity,
+      }));
+      return [...prevAvailableItems, ...newAvailableItems];
+    });
+    setSelectedItems([]);
+  }, [selectedItems]);
+
+  if (!table) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text>Chargement des informations de la table...</Text>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <Pressable style={styles.backButton} onPress={handleBack}>
+          <ArrowLeft size={24} color="#333" />
+        </Pressable>
+        <View>
+          <Text style={styles.title}>Paiement par article - {tableName}</Text>
+          {tableSection && (
+            <View style={styles.sectionBadge}>
+              <Text style={styles.sectionText}>{tableSection}</Text>
+            </View>
+          )}
+        </View>
+        {selectedItems.length > 0 && (
+          <View style={styles.warningBadge}>
+            <Text style={styles.warningText}>
+              {selectedItems.length} article(s) en attente
+            </Text>
+          </View>
+        )}
+      </View>
+
+      <View style={styles.summaryCard}>
+        <View style={styles.totalRow}>
+          <Text style={styles.totalLabel}>Total de la commande:</Text>
+          <Text style={styles.totalAmount}>{totalOrder.toFixed(2)} €</Text>
+        </View>
+        <View style={styles.totalRow}>
+          <Text style={styles.totalLabel}>Articles sélectionnés:</Text>
+          <Text style={styles.selectedAmount}>
+            {totalSelected.toFixed(2)} €
+          </Text>
+        </View>
+      </View>
+
+      <View style={styles.columnsContainer}>
+        {/* Colonne de gauche - Articles disponibles */}
+        <View style={styles.column}>
+          <View style={styles.columnHeader}>
+            <Text style={styles.columnTitle}>Articles disponibles</Text>
+            <ShoppingCart size={20} color="#666" />
+          </View>
+
+          {availableItems.length === 0 ? (
+            <Text style={styles.emptyText}>
+              Tous les articles ont été sélectionnés
+            </Text>
+          ) : (
+            <View style={styles.doubleColumnLayout}>
+              {/* Colonne Plats */}
+              <View style={styles.subColumn}>
+                <Text style={styles.subColumnTitle}>Plats</Text>
+                <ScrollView style={styles.itemsList}>
+                  {categorizeItems(availableItems).plat.map((item) => (
+                    <ItemCard
+                      key={item.id}
+                      item={item}
+                      isSelected={false}
+                      onAdd={(addAll) => addItemToSelection(item, addAll)}
+                    />
+                  ))}
+                </ScrollView>
+              </View>
+
+              {/* Colonne Boissons */}
+              <View style={styles.subColumn}>
+                <Text style={styles.subColumnTitle}>Boissons</Text>
+                <ScrollView style={styles.itemsList}>
+                  {categorizeItems(availableItems).boisson.map((item) => (
+                    <ItemCard
+                      key={item.id}
+                      item={item}
+                      isSelected={false}
+                      onAdd={(addAll) => addItemToSelection(item, addAll)}
+                    />
+                  ))}
+                </ScrollView>
+              </View>
+            </View>
+          )}
+        </View>
+
+        {/* Colonne de droite - Articles sélectionnés */}
+        <View style={styles.column}>
+          <View style={styles.columnHeader}>
+            <Text style={styles.columnTitle}>Articles sélectionnés</Text>
+            <ShoppingCart size={20} color="#4CAF50" />
+          </View>
+
+          {selectedItems.length === 0 ? (
+            <Text style={styles.emptyText}>Aucun article sélectionné</Text>
+          ) : (
+            <View style={styles.doubleColumnLayout}>
+              <View style={styles.subColumn}>
+                <Text style={styles.subColumnTitle}>Plats</Text>
+                <ScrollView style={styles.itemsList}>
+                  {categorizeItems(selectedItems).plat.map((item) => (
+                    <ItemCard
+                      key={item.id}
+                      item={item}
+                      isSelected={true}
+                      onQuantityChange={(increment) =>
+                        handleSelectedItemQuantityChange(item.id, increment)
+                      }
+                      onRemoveCompletely={() => removeItemCompletely(item.id)}
+                    />
+                  ))}
+                </ScrollView>
+              </View>
+              <View style={styles.subColumn}>
+                <Text style={styles.subColumnTitle}>Boissons</Text>
+                <ScrollView style={styles.itemsList}>
+                  {categorizeItems(selectedItems).boisson.map((item) => (
+                    <ItemCard
+                      key={item.id}
+                      item={item}
+                      isSelected={true}
+                      onQuantityChange={(increment) =>
+                        handleSelectedItemQuantityChange(item.id, increment)
+                      }
+                      onRemoveCompletely={() => removeItemCompletely(item.id)}
+                    />
+                  ))}
+                </ScrollView>
+              </View>
+            </View>
+          )}
+        </View>
+      </View>
+
+      {/* Boutons pour déplacer tous les articles */}
+      <View style={styles.moveAllButtonsContainer}>
+        <Pressable
+          style={[styles.moveAllButton, { backgroundColor: '#4CAF50' }]}
+          onPress={moveAllToSelected}
+        >
+          <Text style={styles.moveAllButtonText}>Payer tout</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.moveAllButton, { backgroundColor: '#F44336' }]}
+          onPress={moveAllToAvailable}
+        >
+          <Text style={styles.moveAllButtonText}>Enlever tout</Text>
+        </Pressable>
+      </View>
+
+      <View style={styles.paymentMethods}>
+        <Text style={styles.paymentTitle}>Méthode de paiement</Text>
+
+        <View style={styles.paymentButtons}>
+          <Pressable
+            style={[styles.paymentButton, { backgroundColor: '#4CAF50' }]}
+            onPress={() => handlePayment('card')}
+            disabled={processing || selectedItems.length === 0}
+          >
+            <CreditCard size={24} color="white" />
+            <Text style={styles.paymentButtonText}>Carte</Text>
+          </Pressable>
+
+          <Pressable
+            style={[styles.paymentButton, { backgroundColor: '#2196F3' }]}
+            onPress={() => handlePayment('cash')}
+            disabled={processing || selectedItems.length === 0}
+          >
+            <Wallet size={24} color="white" />
+            <Text style={styles.paymentButtonText}>Espèces</Text>
+          </Pressable>
+
+          <Pressable
+            style={[styles.paymentButton, { backgroundColor: '#9C27B0' }]}
+            onPress={() => handlePayment('check')}
+            disabled={processing || selectedItems.length === 0}
+          >
+            <Edit3 size={24} color="white" />
+            <Text style={styles.paymentButtonText}>Chèque</Text>
+          </Pressable>
+        </View>
+      </View>
+    </View>
+  );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: '#f5f5f5',
-    },
-    loadingContainer: {
-        flex: 1,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    header: {
-        padding: 16,
-        backgroundColor: 'white',
-        borderBottomWidth: 1,
-        borderBottomColor: '#e0e0e0',
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    backButton: {
-        marginRight: 16,
-    },
-    title: {
-        fontSize: 20,
-        fontWeight: 'bold',
-    },
-    sectionBadge: {
-        alignSelf: 'flex-start',
-        backgroundColor: '#E1F5FE',
-        paddingHorizontal: 12,
-        paddingVertical: 4,
-        borderRadius: 16,
-        marginTop: 4,
-    },
-    sectionText: {
-        color: '#0288D1',
-        fontWeight: '600',
-        fontSize: 12,
-    },
-    summaryCard: {
-        backgroundColor: 'white',
-        margin: 12,
-        padding: 12,
-        borderRadius: 8,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.1,
-        shadowRadius: 4,
-        elevation: 3,
-    },
-    totalRow: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 4,
-    },
-    totalLabel: {
-        fontSize: 16,
-        color: '#666',
-    },
-    totalAmount: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: '#666',
-    },
-    selectedAmount: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        color: '#4CAF50',
-    },
-    columnsContainer: {
-        flex: 1,
-        flexDirection: 'row',
-        padding: 8,
-        gap: 8,
-    },
-    column: {
-        flex: 1,
-        backgroundColor: 'white',
-        borderRadius: 8,
-        overflow: 'hidden',
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 1 },
-        shadowOpacity: 0.1,
-        shadowRadius: 2,
-        elevation: 2,
-    },
-    columnHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        padding: 12,
-        backgroundColor: '#f9f9f9',
-        borderBottomWidth: 1,
-        borderBottomColor: '#e0e0e0',
-    },
-    columnTitle: {
-        fontSize: 16,
-        fontWeight: '600',
-    },
-    itemsList: {
-        flex: 1,
-    },
-    itemCard: {
-        padding: 12,
-        borderBottomWidth: 1,
-        borderBottomColor: '#f0f0f0',
-    },
-    selectedItemCard: {
-        backgroundColor: '#f9fff9',
-    },
-    itemHeader: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        marginBottom: 8,
-    },
-    itemName: {
-        fontSize: 14,
-        fontWeight: '500',
-        flex: 1,
-        marginRight: 8,
-    },
-    itemPrice: {
-        fontSize: 14,
-        fontWeight: '600',
-    },
-    selectedItemPrice: {
-        fontSize: 14,
-        fontWeight: '600',
-        color: '#4CAF50',
-    },
-    emptyText: {
-        textAlign: 'center',
-        color: '#999',
-        marginTop: 20,
-        fontStyle: 'italic',
-    },
-    itemActions: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-    },
-    actionButtons: {
-        flexDirection: 'row',
-        gap: 6,
-    },
-    quantityText: {
-        fontSize: 14,
-        color: '#666',
-    },
-    addButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        backgroundColor: '#4CAF50',
-        paddingHorizontal: 10,
-        paddingVertical: 6,
-        borderRadius: 4,
-        gap: 4,
-    },
-    addAllButton: {
-        backgroundColor: '#2196F3',
-    },
-    addButtonText: {
-        color: 'white',
-        fontWeight: '500',
-        fontSize: 12,
-    },
-    selectedItemDetails: {
-        gap: 8,
-    },
-    selectedItemActions: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-    },
-    quantityControl: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        alignSelf: 'flex-start',
-        backgroundColor: '#f0f0f0',
-        borderRadius: 4,
-        overflow: 'hidden',
-    },
-    quantityButton: {
-        width: 32,
-        height: 32,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    quantityValue: {
-        width: 36,
-        textAlign: 'center',
-        fontSize: 14,
-        fontWeight: '600',
-    },
-    subtotalText: {
-        fontSize: 16,
-        fontWeight: '600',
-        color: '#4CAF50',
-    },
-    removeButton: {
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        backgroundColor: '#f8f8f8',
-        borderWidth: 1,
-        borderColor: '#e0e0e0',
-        borderRadius: 4,
-    },
-    removeButtonText: {
-        fontSize: 12,
-        color: '#F44336',
-    },
-    paymentMethods: {
-        backgroundColor: 'white',
-        padding: 16,
-        borderTopWidth: 1,
-        borderTopColor: '#e0e0e0',
-    },
-    paymentTitle: {
-        fontSize: 16,
-        fontWeight: '600',
-        marginBottom: 12,
-    },
-    paymentButtons: {
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-    },
-    paymentButton: {
-        flex: 1,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        padding: 14,
-        borderRadius: 8,
-        marginHorizontal: 6,
-        gap: 8,
-    },
-    paymentButtonText: {
-        color: 'white',
-        fontWeight: '600',
-        fontSize: 16,
-    },
+  container: {
+    flex: 1,
+    backgroundColor: '#f5f5f5',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  header: {
+    padding: 16,
+    backgroundColor: 'white',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  backButton: {
+    marginRight: 16,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  sectionBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#E1F5FE',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 16,
+    marginTop: 4,
+  },
+  sectionText: {
+    color: '#0288D1',
+    fontWeight: '600',
+    fontSize: 12,
+  },
+  warningBadge: {
+    backgroundColor: '#FFF9C4',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 16,
+    marginLeft: 'auto',
+  },
+  warningText: {
+    color: '#F57F17',
+    fontWeight: '600',
+    fontSize: 12,
+  },
+  summaryCard: {
+    backgroundColor: 'white',
+    margin: 12,
+    padding: 12,
+    borderRadius: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  totalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  totalLabel: {
+    fontSize: 16,
+    color: '#666',
+  },
+  totalAmount: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
+  },
+  selectedAmount: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#4CAF50',
+  },
+  columnsContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    padding: 8,
+    gap: 8,
+  },
+  column: {
+    flex: 1,
+    backgroundColor: 'white',
+    borderRadius: 8,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  columnHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 10,
+    backgroundColor: '#f9f9f9',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  columnTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  doubleColumnLayout: {
+    flexDirection: 'row',
+    flex: 1,
+  },
+  subColumn: {
+    flex: 1,
+    borderRightWidth: 1,
+    borderColor: '#e0e0e0',
+  },
+
+  subColumnTitle: {
+    fontSize: 11, // Réduit de 12 à 11
+    fontWeight: '600',
+    color: '#666',
+    padding: 6, // Réduit de 8 à 6
+    backgroundColor: '#f5f5f5',
+    textAlign: 'center',
+  },
+  itemsList: {
+    flex: 1,
+  },
+  emptyText: {
+    textAlign: 'center',
+    color: '#999',
+    marginTop: 20,
+    fontStyle: 'italic',
+  },
+  itemCard: {
+    padding: 6, // Réduit de 8 à 6
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+
+  selectedItemCard: {
+    backgroundColor: '#f9fff9',
+  },
+
+  itemHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 4, // Réduit de 6 à 4
+  },
+
+  itemName: {
+    fontSize: 13,
+    fontWeight: '500',
+    flex: 1,
+  },
+  itemPrice: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  selectedItemPrice: {
+    fontSize: 12, // Réduit de 13 à 12
+    fontWeight: '600',
+    color: '#4CAF50',
+  },
+  itemActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  quantityText: {
+    fontSize: 13,
+    color: '#666',
+  },
+  addButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#4CAF50',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    gap: 4,
+  },
+  addAllButton: {
+    backgroundColor: '#2196F3',
+  },
+  addButtonText: {
+    color: 'white',
+    fontWeight: '500',
+    fontSize: 11,
+  },
+  selectedItemDetails: {
+    gap: 3,
+  },
+  selectedItemActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  quantityControl: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f0f0f0',
+    borderRadius: 4,
+    overflow: 'hidden',
+    alignSelf: 'flex-start', // S'adapter à sa taille
+    marginTop: 4,
+  },
+
+  quantityButton: {
+    width: 24, // Réduit de 26 à 24
+    height: 24, // Réduit de 26 à 24
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+
+  quantityValue: {
+    width: 24, // Réduit de 28 à 24
+    textAlign: 'center',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+
+  subtotalText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#4CAF50',
+    marginBottom: 4,
+  },
+
+  removeButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    backgroundColor: '#f8f8f8',
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    borderRadius: 4,
+  },
+  removeButtonText: {
+    fontSize: 10, // Réduit de 11 à 10
+    color: '#F44336',
+  },
+  paymentMethods: {
+    backgroundColor: 'white',
+    padding: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  paymentTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  paymentButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  paymentButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 10,
+    borderRadius: 8,
+    marginHorizontal: 4,
+    gap: 6,
+  },
+  paymentButtonText: {
+    color: 'white',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  moveAllButtonsContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: 12,
+    backgroundColor: 'white',
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  moveAllButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 10,
+    borderRadius: 8,
+    marginHorizontal: 4,
+  },
+  moveAllButtonText: {
+    color: 'white',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  selectedItemRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+
+  leftContent: {
+    flex: 1,
+    marginRight: 8,
+  },
+
+  rightContent: {
+    alignItems: 'flex-end',
+  },
 });

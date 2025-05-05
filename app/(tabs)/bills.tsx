@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Share,
   TextInput,
+  FlatList,
 } from 'react-native';
 import { useState, useEffect, useCallback, useMemo, memo } from 'react';
 import {
@@ -76,10 +77,15 @@ const PAYMENT_METHOD_LABELS = {
 } as const;
 
 const RESTAURANT_INFO = {
-  name: 'Restaurant Manjo Carn',
+  name: 'Manjo Carn',
   address: 'Route de la Corniche, 82140 Saint Antonin Noble Val',
-  phone: '05 63 68 25 85',
+  siret: 'Siret N° 803 520 998 00011',
+  phone: 'Tel : 0563682585',
+  owner: 'Virginie',
 } as const;
+
+const ITEM_HEIGHT = 80;
+const PAGE_SIZE = 20;
 
 // Modal pour voir le reçu - Mémoïzé
 const ViewReceiptModal = memo<ViewReceiptModalProps>(
@@ -379,6 +385,8 @@ export default function BillsScreen() {
   const [processingAction, setProcessingAction] = useState(false);
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc' | 'none'>('desc');
   const [statsModalVisible, setStatsModalVisible] = useState(false);
+  const [page, setPage] = useState(0);
+  const [hasMorePages, setHasMorePages] = useState(true);
 
   // Chargement des factures
   useEffect(() => {
@@ -426,7 +434,7 @@ export default function BillsScreen() {
     []
   );
 
-  // Recherche dans les factures - Mémoïzé
+  // Recherche dans les factures - Mémoïzé avec debounce
   const handleSearch = useCallback(
     (text: string) => {
       if (!text.trim()) {
@@ -566,47 +574,74 @@ export default function BillsScreen() {
       ? PAYMENT_METHOD_LABELS[bill.paymentMethod]
       : '';
 
+    const taxInfo = 'TVA non applicable - art.293B du CGI';
+    const restaurantInfo = {
+      name: 'Manjo Carn',
+      address: 'Route de la Corniche, 82140 Saint Antonin Noble Val',
+      siret: 'Siret N° 803 520 998 00011',
+      phone: 'Tel : 0563682585',
+      owner: 'Virginie',
+    };
+
     return `
       <html>
         <head>
           <style>
             body { font-family: Arial, sans-serif; padding: 20px; }
-            .header { text-align: center; margin-bottom: 20px; }
-            .info { margin-bottom: 20px; }
-            .items { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-            .totals { text-align: right; }
-            .payment-info { margin-top: 20px; padding: 10px; border: 1px dashed #ccc; text-align: center; }
+            .header, .footer { text-align: center; margin-bottom: 20px; }
+            .info { margin-bottom: 20px; text-align: center; }
+            .totals { text-align: right; font-weight: bold; }
+            .payment-info { text-align: center; margin-top: 20px; padding: 10px; border: 1px dashed #ccc; }
+            .partial { color: #f44336; font-weight: bold; }
           </style>
         </head>
         <body>
           <div class="header">
-            <h1>${RESTAURANT_INFO.name}</h1>
-            <p>${RESTAURANT_INFO.address}</p>
-            <p>${RESTAURANT_INFO.phone}</p>
+            <h1>${restaurantInfo.name}</h1>
+            <p>${restaurantInfo.address}</p>
+            <p>${restaurantInfo.siret}</p>
+            <p>${taxInfo}</p>
           </div>
-          
+
           <div class="info">
-            <p>${bill.tableName || `Table ${bill.tableNumber}`}</p>
+            <p><strong>${
+              bill.tableName || `Table ${bill.tableNumber}`
+            }</strong></p>
             <p>Date: ${new Date(bill.timestamp).toLocaleString()}</p>
             ${bill.section ? `<p>Section: ${bill.section}</p>` : ''}
           </div>
-  
+
           <div class="totals">
             <p>Articles: ${bill.items}</p>
             <h2>Total: ${bill.amount.toFixed(2)} €</h2>
             <p>Statut: ${bill.status}</p>
             ${paymentLabel ? `<p>Paiement: ${paymentLabel}</p>` : ''}
           </div>
-  
+
           <div class="payment-info">
-            <p>Merci de votre visite!<br>
-              A bientôt<br>
-              Virginie<br></p>
+            <p>Méthode de paiement: ${
+              bill.paymentMethod === 'card'
+                ? 'Carte bancaire'
+                : bill.paymentMethod === 'cash'
+                ? 'Espèces'
+                : 'Chèque'
+            }</p>
+            <p>Montant payé: ${bill.amount.toFixed(2)} €</p>
+            <p>Statut: ${bill.status}</p>
+          </div>
+
+          <div class="footer">
+            <p>${taxInfo}</p>
+            <p>Merci de votre visite !</p>
+            <p>À bientôt,<br>${restaurantInfo.owner}<br>${
+      restaurantInfo.phone
+    }</p>
           </div>
         </body>
       </html>
     `;
   }, []);
+
 
   const handlePrint = useCallback(async () => {
     if (!selectedBill) {
@@ -691,28 +726,56 @@ export default function BillsScreen() {
     }
   }, [selectedBill, generateHTML]);
 
-  const billListMemo = useMemo(() => {
-    if (filteredBills.length === 0) {
-      return (
-        <View style={styles.noResultsContainer}>
-          <Text style={styles.noResultsText}>
-            Aucune facture ne correspond à votre recherche
-          </Text>
-        </View>
-      );
-    }
+  // Pagination pour FlatList
+  const paginatedBills = useMemo(() => {
+    const start = 0;
+    const end = (page + 1) * PAGE_SIZE;
+    return filteredBills.slice(start, end);
+  }, [filteredBills, page]);
 
-    return filteredBills.map((bill) => (
+  const handleLoadMore = useCallback(() => {
+    if (
+      hasMorePages &&
+      !loading &&
+      (page + 1) * PAGE_SIZE < filteredBills.length
+    ) {
+      setPage((prevPage) => prevPage + 1);
+    }
+  }, [hasMorePages, loading, page, filteredBills.length]);
+
+  const getItemLayout = useCallback(
+    (data: any, index: number) => ({
+      length: ITEM_HEIGHT,
+      offset: ITEM_HEIGHT * index,
+      index,
+    }),
+    []
+  );
+
+  const keyExtractor = useCallback((item: Bill) => item.id.toString(), []);
+
+  const renderBillItem = useCallback(
+    ({ item }: { item: Bill }) => (
       <BillListItem
-        key={bill.id}
-        bill={bill}
-        isSelected={selectedBill?.id === bill.id}
+        bill={item}
+        isSelected={selectedBill?.id === item.id}
         onSelect={handleSelectBill}
       />
-    ));
-  }, [filteredBills, selectedBill, handleSelectBill]);
+    ),
+    [selectedBill, handleSelectBill]
+  );
 
-  if (loading) {
+  const renderListFooter = useCallback(() => {
+    if (!loading || page === 0) return null;
+    return (
+      <View style={styles.loadingMore}>
+        <ActivityIndicator size="small" color="#2196F3" />
+        <Text style={styles.loadingMoreText}>Chargement...</Text>
+      </View>
+    );
+  }, [loading, page]);
+
+  if (loading && page === 0) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#2196F3" />
@@ -763,7 +826,19 @@ export default function BillsScreen() {
                   ? `(sur ${bills.length} total)`
                   : ''}
               </Text>
-              <ScrollView>{billListMemo}</ScrollView>
+              <FlatList
+                data={paginatedBills}
+                renderItem={renderBillItem}
+                keyExtractor={keyExtractor}
+                getItemLayout={getItemLayout}
+                onEndReached={handleLoadMore}
+                onEndReachedThreshold={0.5}
+                ListFooterComponent={renderListFooter}
+                removeClippedSubviews={true}
+                maxToRenderPerBatch={10}
+                windowSize={10}
+                initialNumToRender={10}
+              />
             </View>
 
             {/* Détails de la facture sélectionnée */}
@@ -879,7 +954,6 @@ export default function BillsScreen() {
           </View>
         </View>
       )}
-
       <ViewReceiptModal
         visible={viewModalVisible}
         bill={selectedBill}
@@ -903,7 +977,6 @@ export default function BillsScreen() {
     </View>
   );
 }
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1017,6 +1090,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#e0e0e0',
     marginBottom: 8,
     borderRadius: 6,
+    height: ITEM_HEIGHT,
   },
   selectedBillItem: {
     backgroundColor: '#e3f2fd',
@@ -1312,5 +1386,14 @@ const styles = StyleSheet.create({
   statsButtonText: {
     color: '#673AB7',
     fontWeight: '600',
+  },
+  loadingMore: {
+    padding: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  loadingMoreText: {
+    marginTop: 5,
+    color: '#666',
   },
 });
