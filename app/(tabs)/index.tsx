@@ -168,7 +168,7 @@ export default function TablesScreen() {
         setSelectedTable(table);
         setCoversSelectionModalVisible(true);
       } else if (table.status === 'occupied') {
-        router.push(`/table/${table.id}`);
+        router.replace(`/table/${table.id}`);
       } else if (table.status === 'reserved') {
         Alert.alert(
           'Table Réservée',

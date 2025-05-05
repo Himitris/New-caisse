@@ -191,9 +191,66 @@ export default function JournalScreen() {
   const [totalItems, setTotalItems] = useState(0);
 
   // Mémoïzation des données calculées
+  const processBillsToSoldItems = useCallback(
+    (billsToProcess: Bill[]): SoldItem[] => {
+      const itemsSold: SoldItem[] = [];
+
+      for (let i = 0; i < billsToProcess.length; i += BATCH_SIZE) {
+        const batch = billsToProcess.slice(i, i + BATCH_SIZE);
+
+        batch.forEach((bill) => {
+          if (bill.paidItems && bill.paidItems.length > 0) {
+            bill.paidItems.forEach((item) => {
+              const soldItem: SoldItem = {
+                id: item.id,
+                name: item.name,
+                quantity: item.quantity || 1,
+                price: item.price,
+                totalAmount: item.price * (item.quantity || 1),
+                date: bill.timestamp,
+                tableNumber: bill.tableNumber,
+                tableName: bill.tableName,
+                section: bill.section,
+                paymentMethod: bill.paymentMethod,
+                paymentType: bill.paymentType,
+              };
+              itemsSold.push(soldItem);
+            });
+          } else if (bill.status === 'paid' || bill.status === 'split') {
+            const paymentTypeName =
+              bill.paymentType === 'full'
+                ? 'complet'
+                : bill.paymentType === 'split'
+                ? 'partagé'
+                : 'personnalisé';
+
+            const soldItem: SoldItem = {
+              id: bill.id,
+              name: `Paiement ${paymentTypeName}`,
+              quantity: 1,
+              price: bill.amount,
+              totalAmount: bill.amount,
+              date: bill.timestamp,
+              tableNumber: bill.tableNumber,
+              tableName: bill.tableName,
+              section: bill.section,
+              paymentMethod: bill.paymentMethod,
+              paymentType: bill.paymentType,
+            };
+            itemsSold.push(soldItem);
+          }
+        });
+      }
+
+      return itemsSold;
+    },
+    []
+  );
+
   const soldItems = useMemo(() => {
-    return processBillsToSoldItems(loadedBills);
-  }, [loadedBills]);
+    const allBills = [...bills, ...loadedBills];
+    return processBillsToSoldItems(allBills);
+  }, [bills, loadedBills, processBillsToSoldItems]);
 
   const filteredItems = useMemo(() => {
     let filtered = [...soldItems];
@@ -290,62 +347,6 @@ export default function JournalScreen() {
       setIsLoadingMore(false);
     }
   }, [bills, offset, hasMore, isLoadingMore]);
-
-  const processBillsToSoldItems = useCallback(
-    (billsToProcess: Bill[]): SoldItem[] => {
-      const itemsSold: SoldItem[] = [];
-
-      for (let i = 0; i < billsToProcess.length; i += BATCH_SIZE) {
-        const batch = billsToProcess.slice(i, i + BATCH_SIZE);
-
-        batch.forEach((bill) => {
-          if (bill.paidItems && bill.paidItems.length > 0) {
-            bill.paidItems.forEach((item) => {
-              const soldItem: SoldItem = {
-                id: item.id,
-                name: item.name,
-                quantity: item.quantity || 1,
-                price: item.price,
-                totalAmount: item.price * (item.quantity || 1),
-                date: bill.timestamp,
-                tableNumber: bill.tableNumber,
-                tableName: bill.tableName,
-                section: bill.section,
-                paymentMethod: bill.paymentMethod,
-                paymentType: bill.paymentType,
-              };
-              itemsSold.push(soldItem);
-            });
-          } else if (bill.status === 'paid' || bill.status === 'split') {
-            const paymentTypeName =
-              bill.paymentType === 'full'
-                ? 'complet'
-                : bill.paymentType === 'split'
-                ? 'partagé'
-                : 'personnalisé';
-
-            const soldItem: SoldItem = {
-              id: bill.id,
-              name: `Paiement ${paymentTypeName}`,
-              quantity: 1,
-              price: bill.amount,
-              totalAmount: bill.amount,
-              date: bill.timestamp,
-              tableNumber: bill.tableNumber,
-              tableName: bill.tableName,
-              section: bill.section,
-              paymentMethod: bill.paymentMethod,
-              paymentType: bill.paymentType,
-            };
-            itemsSold.push(soldItem);
-          }
-        });
-      }
-
-      return itemsSold;
-    },
-    []
-  );
 
   const computeStatistics = useCallback(() => {
     let totalSalesAmount = 0;
@@ -507,7 +508,7 @@ export default function JournalScreen() {
   }
 
   const renderDetailedItem = (item: SoldItem, index: number) => (
-    <View key={`${item.id}-${index}`} style={styles.itemCard}>
+    <View key={`${item.id}-${index}-${item.date}`} style={styles.itemCard}>
       <View style={styles.itemHeader}>
         <Text style={styles.itemName}>{item.name}</Text>
         <Text style={styles.itemPrice}>{item.totalAmount.toFixed(2)} €</Text>

@@ -117,6 +117,7 @@ const MenuItemComponent = memo(
     onPress: () => void;
   }) => (
     <Pressable
+      key={`menu-item-${item.id}-${item.category}`}
       style={[
         styles.menuItem,
         { borderLeftColor: item.color },
@@ -505,7 +506,7 @@ export default function TableScreen() {
     return (
       <FlatList
         data={categoryItems}
-        keyExtractor={(item) => item.id.toString()}
+        keyExtractor={(item) => `menu-${item.id}`}
         renderItem={({ item }) => (
           <MenuItemComponent
             item={item}
@@ -533,7 +534,7 @@ export default function TableScreen() {
 
   // Rendu ultra-compact d'un item de commande
   const renderUltraCompactItem = (item: OrderItem) => (
-    <View key={item.id} style={styles.ultraCompactItem}>
+    <View key={`order-${item.id}`} style={styles.ultraCompactItem}>
       <View style={styles.firstLineCompact}>
         <Text style={styles.itemNameUltraCompact} numberOfLines={1}>
           {truncateName(item.name)}

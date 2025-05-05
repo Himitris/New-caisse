@@ -897,6 +897,7 @@ export default function BillsScreen() {
   const renderBillItem = useCallback(
     ({ item }: { item: Bill }) => (
       <BillListItem
+        key={`bill-${item.id}-${item.timestamp}`}
         bill={item}
         isSelected={selectedBill?.id === item.id}
         onSelect={handleSelectBill}

@@ -93,7 +93,7 @@ const CONFIG = {
   MAX_ARCHIVE_AGE_DAYS: 90,
   CACHE_EXPIRY_MS: 5 * 60 * 1000, // 5 minutes
   MAX_STORAGE_SIZE_MB: 5,
-  COMPRESSION_ENABLED: true,
+  COMPRESSION_ENABLED: false,
   BATCH_SIZE: 100,
 } as const;
 
@@ -760,7 +760,7 @@ class BillManager {
       bills.push(bill);
 
       // Nettoyer les anciennes factures si nécessaire
-      const cleanedBills = await this.cleanOldBills(bills);
+      const cleanedBills = await BillManager.cleanOldBills(bills);
 
       await BillManager.saveBills(cleanedBills);
       log.info(`Added new bill ID ${bill.id} for table ${bill.tableNumber}`);
@@ -785,7 +785,7 @@ class BillManager {
 
     // Archiver les anciens
     const toArchive = sortedBills.slice(CONFIG.MAX_BILLS);
-    await this.archiveOldBills(toArchive);
+    await BillManager.archiveOldBills(toArchive);
 
     // Garder les plus récents
     const cleanedBills = sortedBills.slice(0, CONFIG.MAX_BILLS);
@@ -804,7 +804,7 @@ class BillManager {
       const updatedArchive = [...existingArchive, ...bills];
 
       // Nettoyer l'archive si elle devient trop grande
-      const cleanedArchive = this.pruneArchive(updatedArchive);
+      const cleanedArchive = BillManager.pruneArchive(updatedArchive);
 
       await StorageManager.save(STORAGE_KEYS.BILLS_ARCHIVE, cleanedArchive);
       log.info(`Archived ${bills.length} bills`);

@@ -38,7 +38,6 @@ export default function RootLayout() {
         setInitialized(true);
       }
     };
-    
     setupApp();
     
     // Framework callback
