@@ -5,9 +5,9 @@ import {
   StyleSheet,
   ScrollView,
   Pressable,
-  Alert,
   TextInput,
   Modal,
+  Alert,
 } from 'react-native';
 import { useState, useMemo, useEffect, useCallback, memo } from 'react';
 import {
@@ -31,6 +31,7 @@ import {
   CustomMenuItem,
   saveCustomMenuItems,
 } from '../../utils/storage';
+import { useToast } from '@/utils/ToastContext';
 
 interface MenuItem {
   id: number;
@@ -521,6 +522,7 @@ export default function MenuScreen() {
     activeType: null,
     selectedCategory: null,
   });
+  const toast = useToast();
 
   // État pour les données - immuable
   const [dataState, setDataState] = useState<DataState>({
@@ -728,7 +730,7 @@ export default function MenuScreen() {
       await saveMenuAvailability([...currentAvailability, itemStatus]);
     } catch (error) {
       console.error('Error saving new menu item:', error);
-      Alert.alert('Erreur', 'Impossible de sauvegarder le nouvel article.');
+      toast.showToast('Impossible de sauvegarder le nouvel article.', 'error');
     }
   }, []);
 
@@ -789,9 +791,9 @@ export default function MenuScreen() {
           'Erreur lors de la mise à jour de la disponibilité:',
           error
         );
-        Alert.alert(
-          'Erreur',
-          "Impossible de mettre à jour la disponibilité de l'article."
+        toast.showToast(
+          "Impossible de mettre à jour la disponibilité de l'article.",
+          'error'
         );
       }
     },
@@ -869,7 +871,7 @@ export default function MenuScreen() {
         await saveMenuAvailability(updatedAvailability);
       } catch (error) {
         console.error('Error updating menu item:', error);
-        Alert.alert('Erreur', "Impossible de mettre à jour l'article.");
+        toast.showToast("Impossible de mettre à jour l'article.", 'error');
       }
     },
     [dataState.customItems]
@@ -883,9 +885,9 @@ export default function MenuScreen() {
       );
 
       if (!isCustomItem) {
-        Alert.alert(
-          'Information',
-          'Seuls les articles personnalisés peuvent être supprimés.'
+        toast.showToast(
+          'Seuls les articles personnalisés peuvent être supprimés.',
+          'info'
         );
         return;
       }
@@ -917,15 +919,18 @@ export default function MenuScreen() {
                 );
                 await saveMenuAvailability(updatedAvailability);
 
-                Alert.alert('Succès', "L'article a été supprimé avec succès.");
+                toast.showToast(
+                  "L'article a été supprimé avec succès.",
+                  'success'
+                );
               } catch (error) {
                 console.error(
                   "Erreur lors de la suppression de l'article:",
                   error
                 );
-                Alert.alert(
-                  'Erreur',
-                  "Impossible de supprimer l'article. Veuillez réessayer."
+                toast.showToast(
+                  "Impossible de supprimer l'article. Veuillez réessayer.",
+                  'error'
                 );
               }
             },

@@ -35,6 +35,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import StatsModal from '../components/StatsModal';
+import { useToast } from '../../utils/ToastContext';
 
 interface Bill {
   id: number;
@@ -499,6 +500,7 @@ export default function BillsScreen() {
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<
     Bill['paymentMethod'] | null
   >(null);
+  const toast = useToast();
 
   // Chargement des factures avec nettoyage automatique
   useEffect(() => {
@@ -645,9 +647,9 @@ export default function BillsScreen() {
     if (selectedBill) {
       setViewModalVisible(true);
     } else {
-      Alert.alert(
-        'Information',
-        'Veuillez sélectionner une facture à visualiser.'
+      toast.showToast(
+        'Veuillez sélectionner une facture à visualiser.',
+        'info'
       );
     }
   }, [selectedBill]);
@@ -668,13 +670,13 @@ export default function BillsScreen() {
               setBills([]);
               setFilteredBills([]);
               setSelectedBill(null);
-              Alert.alert(
-                'Succès',
-                'Toutes les factures ont été supprimées avec succès.'
+              toast.showToast(
+                'Toutes les factures ont été supprimées avec succès.',
+                'success'
               );
             } catch (error) {
               console.error('Erreur lors de la suppression:', error);
-              Alert.alert('Erreur', 'Impossible de supprimer les factures.');
+              toast.showToast('Impossible de supprimer les factures.', 'error');
             } finally {
               setProcessingAction(false);
             }
@@ -701,10 +703,10 @@ export default function BillsScreen() {
       }
 
       setViewModalVisible(false);
-      Alert.alert('Succès', 'Facture supprimée avec succès.');
+      toast.showToast('Facture supprimée avec succès.', 'success');
     } catch (error) {
       console.error('Erreur lors de la suppression:', error);
-      Alert.alert('Erreur', 'Impossible de supprimer la facture.');
+      toast.showToast('Impossible de supprimer la facture.', 'error');
     } finally {
       setProcessingAction(false);
     }
@@ -785,10 +787,7 @@ export default function BillsScreen() {
 
   const handlePrint = useCallback(async () => {
     if (!selectedBill) {
-      Alert.alert(
-        'Information',
-        'Veuillez sélectionner une facture à imprimer.'
-      );
+      toast.showToast('Veuillez sélectionner une facture à imprimer.', 'info');
       return;
     }
 
@@ -797,12 +796,12 @@ export default function BillsScreen() {
       await Print.printAsync({
         html: generateHTML(selectedBill),
       });
-      Alert.alert('Succès', "Reçu envoyé à l'imprimante.");
+      toast.showToast("Reçu envoyé à l'imprimante.", 'success');
     } catch (error) {
       console.error("Erreur d'impression:", error);
-      Alert.alert(
-        'Erreur',
-        "Impossible d'imprimer le reçu. Vérifiez que votre imprimante est connectée."
+      toast.showToast(
+        "Impossible d'imprimer le reçu. Vérifiez que votre imprimante est connectée.",
+        'error'
       );
     } finally {
       setProcessingAction(false);
@@ -811,10 +810,7 @@ export default function BillsScreen() {
 
   const handleShare = useCallback(async () => {
     if (!selectedBill) {
-      Alert.alert(
-        'Information',
-        'Veuillez sélectionner une facture à partager.'
-      );
+      toast.showToast('Veuillez sélectionner une facture à partager.', 'info');
       return;
     }
 
@@ -830,7 +826,7 @@ export default function BillsScreen() {
       });
     } catch (error) {
       console.error('Erreur de partage:', error);
-      Alert.alert('Erreur', 'Impossible de partager le reçu.');
+      toast.showToast('Impossible de partager le reçu.', 'error');
     } finally {
       setProcessingAction(false);
     }
@@ -838,10 +834,7 @@ export default function BillsScreen() {
 
   const handleExport = useCallback(async () => {
     if (!selectedBill) {
-      Alert.alert(
-        'Information',
-        'Veuillez sélectionner une facture à exporter.'
-      );
+      toast.showToast('Veuillez sélectionner une facture à exporter.', 'info');
       return;
     }
 
@@ -857,10 +850,10 @@ export default function BillsScreen() {
         dialogTitle: 'Exporter le reçu en PDF',
       });
 
-      Alert.alert('Succès', 'Reçu exporté avec succès.');
+      toast.showToast('Reçu exporté avec succès.', 'success');
     } catch (error) {
       console.error("Erreur d'export:", error);
-      Alert.alert('Erreur', "Impossible d'exporter le reçu.");
+      toast.showToast("Impossible d'exporter le reçu.", 'error');
     } finally {
       setProcessingAction(false);
     }

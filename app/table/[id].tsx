@@ -10,19 +10,18 @@ import {
   Users,
   X,
 } from 'lucide-react-native';
-import { memo, useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  View,
-  FlatList,
+  View
 } from 'react-native';
 import priceData from '../../helpers/ManjosPrice';
+import { EVENT_TYPES, events } from '../../utils/events';
 import {
-  Bill,
   CustomMenuItem,
   OrderItem,
   Table,
@@ -30,10 +29,10 @@ import {
   getMenuAvailability,
   getTable,
   resetTable,
-  updateTable,
+  updateTable
 } from '../../utils/storage';
+import { useToast } from '../../utils/ToastContext';
 import SplitSelectionModal from '../components/SplitSelectionModal';
-import { events, EVENT_TYPES } from '../../utils/events';
 
 interface MenuItem {
   id: number;
@@ -124,6 +123,7 @@ export default function TableScreen() {
   const { id } = useLocalSearchParams();
   const tableId = parseInt(id as string, 10);
   const router = useRouter();
+  const toast = useToast();
 
   const [unavailableItems, setUnavailableItems] = useState<number[]>([]);
   const [guestCount, setGuestCount] = useState(1);
@@ -300,14 +300,15 @@ export default function TableScreen() {
               setTable(updatedTable);
               await updateTable(updatedTable);
               setSaveSuccess(true);
+              toast.showToast('Commande supprimée avec succès', 'success');
             } catch (error) {
               console.error(
                 'Erreur lors de la suppression de la commande:',
                 error
               );
-              Alert.alert(
-                'Erreur',
-                'Impossible de supprimer la commande. Veuillez réessayer.'
+              toast.showToast(
+                'Impossible de supprimer la commande. Veuillez réessayer.',
+                'error'
               );
             } finally {
               setSaveInProgress(false);
@@ -437,22 +438,15 @@ export default function TableScreen() {
             setSaveInProgress(true);
             try {
               await resetTable(tableId);
-              Alert.alert(
-                'Table fermée',
-                'La table a été réinitialisée avec succès.',
-                [
-                  {
-                    text: 'OK',
-                    onPress: () => router.push('/'),
-                  },
-                ]
+              router.push('/');
+              toast.showToast(
+                `Table ${table.name} fermée avec succès`,
+                'success'
               );
             } catch (error) {
               console.error('Erreur lors de la fermeture de la table:', error);
-              Alert.alert(
-                'Erreur',
-                'Impossible de fermer la table. Veuillez réessayer.'
-              );
+
+              toast.showToast('Impossible de fermer la table', 'error');
             } finally {
               setSaveInProgress(false);
             }
@@ -578,7 +572,7 @@ export default function TableScreen() {
     const total = table.order.total;
 
     if (total <= 0) {
-      Alert.alert('No Items', 'There are no items to pay for.');
+      toast.showToast("Il n'y a pas d'articles à payer", 'warning');
       return;
     }
 
@@ -593,9 +587,9 @@ export default function TableScreen() {
       });
     } else if (type === 'split') {
       if (guestCount <= 1) {
-        Alert.alert(
-          'Impossible de partager',
-          "Il faut au moins 2 convives pour partager l'addition."
+        toast.showToast(
+          "Il faut au moins 2 convives pour partager l'addition",
+          'warning'
         );
         return;
       }

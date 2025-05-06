@@ -25,6 +25,7 @@ import {
   resetTable,
   updateTable,
 } from '../../utils/storage';
+import { useToast } from '../../utils/ToastContext';
 
 interface MenuItem {
   id: number;
@@ -184,6 +185,7 @@ export default function ItemsPaymentScreen() {
   const { tableId } = useLocalSearchParams();
   const router = useRouter();
   const tableIdNum = parseInt(tableId as string, 10);
+  const toast = useToast();
 
   const [table, setTable] = useState<any>(null);
   const [availableItems, setAvailableItems] = useState<MenuItem[]>([]);
@@ -428,9 +430,9 @@ export default function ItemsPaymentScreen() {
   const handlePayment = useCallback(
     async (method: 'card' | 'cash' | 'check') => {
       if (selectedItems.length === 0) {
-        Alert.alert(
-          'Aucun article sélectionné',
-          'Veuillez sélectionner au moins un article à payer.'
+        toast.showToast(
+          'Veuillez sélectionner au moins un article à payer.',
+          'warning'
         );
         return;
       }
@@ -440,9 +442,9 @@ export default function ItemsPaymentScreen() {
       try {
         const currentTable = await getTable(tableIdNum);
         if (!currentTable || !currentTable.order) {
-          Alert.alert(
-            'Erreur',
-            'Impossible de récupérer les informations de la table.'
+          toast.showToast(
+            'Impossible de récupérer les informations de la table.',
+            'error'
           );
           setProcessing(false);
           return;
@@ -502,13 +504,9 @@ export default function ItemsPaymentScreen() {
         if (updatedOrderItems.length === 0 || newTotal <= 0) {
           await resetTable(tableIdNum);
           events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
+          router.push('/');
 
-          Alert.alert('Paiement réussi', 'Tous les articles ont été payés.', [
-            {
-              text: 'OK',
-              onPress: () => router.push('/'),
-            },
-          ]);
+          toast.showToast('Tous les articles ont été payés.', 'success');
         } else {
           const updatedTable = {
             ...currentTable,
@@ -521,28 +519,21 @@ export default function ItemsPaymentScreen() {
 
           await updateTable(updatedTable);
           events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
+          setSelectedItems([]);
+          loadTable();
 
-          Alert.alert(
-            'Paiement partiel réussi',
+          toast.showToast(
             `Articles payés: ${totalSelected.toFixed(
               2
             )}€\nRestant à payer: ${newTotal.toFixed(2)}€`,
-            [
-              {
-                text: 'OK',
-                onPress: () => {
-                  setSelectedItems([]);
-                  loadTable();
-                },
-              },
-            ]
+            'success'
           );
         }
       } catch (error) {
         console.error('Erreur lors du paiement:', error);
-        Alert.alert(
-          'Erreur',
-          'Une erreur est survenue lors du traitement du paiement.'
+        toast.showToast(
+          'Une erreur est survenue lors du traitement du paiement.',
+          'error'
         );
       } finally {
         setProcessing(false);

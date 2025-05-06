@@ -1,13 +1,46 @@
 // app/(tabs)/settings.tsx - Paramètres complètement fonctionnels
 
-import { View, Text, StyleSheet, ScrollView, Pressable, Switch, Alert, Modal, TextInput, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Pressable,
+  Switch,
+  Alert,
+  Modal,
+  TextInput,
+  ActivityIndicator,
+} from 'react-native';
 import { useState, useEffect } from 'react';
-import { Store, Clock, DollarSign, Printer, Bell, Shield, CircleHelp as HelpCircle, Users, LayoutGrid, X, Save, Trash2 } from 'lucide-react-native';
+import {
+  Store,
+  Clock,
+  DollarSign,
+  Printer,
+  Bell,
+  Shield,
+  CircleHelp as HelpCircle,
+  Users,
+  LayoutGrid,
+  X,
+  Save,
+  Trash2,
+} from 'lucide-react-native';
 import { StorageManager, BillManager, TableManager } from '../../utils/storage';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useToast } from '../../utils/ToastContext';
 
 const SETTINGS_STORAGE_KEY = 'restaurant_settings';
-const DAYS_OF_WEEK = ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi', 'Dimanche'];
+const DAYS_OF_WEEK = [
+  'Lundi',
+  'Mardi',
+  'Mercredi',
+  'Jeudi',
+  'Vendredi',
+  'Samedi',
+  'Dimanche',
+];
 
 interface Setting {
   id: string;
@@ -78,7 +111,7 @@ const RestaurantInfoModal: React.FC<InfoModalProps> = ({
   visible,
   onClose,
   restaurantInfo,
-  onSave
+  onSave,
 }) => {
   const [name, setName] = useState(restaurantInfo.name);
   const [address, setAddress] = useState(restaurantInfo.address);
@@ -98,7 +131,7 @@ const RestaurantInfoModal: React.FC<InfoModalProps> = ({
       name,
       address,
       phone,
-      email
+      email,
     });
     onClose();
   };
@@ -180,7 +213,7 @@ const OpeningHoursModal: React.FC<HoursModalProps> = ({
   visible,
   onClose,
   openingHours,
-  onSave
+  onSave,
 }) => {
   const [hours, setHours] = useState<OpeningHours>(openingHours);
 
@@ -189,25 +222,29 @@ const OpeningHoursModal: React.FC<HoursModalProps> = ({
   }, [openingHours]);
 
   const handleToggleDay = (day: string) => {
-    setHours(prev => ({
+    setHours((prev) => ({
       ...prev,
       [day]: {
         ...prev[day],
-        isOpen: !prev[day].isOpen
-      }
+        isOpen: !prev[day].isOpen,
+      },
     }));
   };
 
-  const handleChangeHours = (day: string, field: 'open' | 'close', value: string) => {
-    setHours(prev => ({
+  const handleChangeHours = (
+    day: string,
+    field: 'open' | 'close',
+    value: string
+  ) => {
+    setHours((prev) => ({
       ...prev,
       [day]: {
         ...prev[day],
         hours: {
           ...prev[day].hours,
-          [field]: value
-        }
-      }
+          [field]: value,
+        },
+      },
     }));
   };
 
@@ -233,7 +270,7 @@ const OpeningHoursModal: React.FC<HoursModalProps> = ({
           </View>
 
           <ScrollView style={styles.modalBody}>
-            {DAYS_OF_WEEK.map(day => (
+            {DAYS_OF_WEEK.map((day) => (
               <View key={day} style={styles.dayRow}>
                 <View style={styles.dayHeader}>
                   <Text style={styles.dayName}>{day}</Text>
@@ -251,7 +288,9 @@ const OpeningHoursModal: React.FC<HoursModalProps> = ({
                       <TextInput
                         style={styles.timeField}
                         value={hours[day].hours.open}
-                        onChangeText={(value) => handleChangeHours(day, 'open', value)}
+                        onChangeText={(value) =>
+                          handleChangeHours(day, 'open', value)
+                        }
                         placeholder="09:00"
                         keyboardType="numbers-and-punctuation"
                       />
@@ -262,7 +301,9 @@ const OpeningHoursModal: React.FC<HoursModalProps> = ({
                       <TextInput
                         style={styles.timeField}
                         value={hours[day].hours.close}
-                        onChangeText={(value) => handleChangeHours(day, 'close', value)}
+                        onChangeText={(value) =>
+                          handleChangeHours(day, 'close', value)
+                        }
                         placeholder="22:00"
                         keyboardType="numbers-and-punctuation"
                       />
@@ -288,7 +329,7 @@ const PaymentMethodsModal: React.FC<PaymentModalProps> = ({
   visible,
   onClose,
   paymentMethods,
-  onSave
+  onSave,
 }) => {
   const [methods, setMethods] = useState(paymentMethods);
 
@@ -297,9 +338,9 @@ const PaymentMethodsModal: React.FC<PaymentModalProps> = ({
   }, [paymentMethods]);
 
   const toggleMethod = (method: 'cash' | 'card' | 'mobilePayment') => {
-    setMethods(prev => ({
+    setMethods((prev) => ({
       ...prev,
-      [method]: !prev[method]
+      [method]: !prev[method],
     }));
   };
 
@@ -367,9 +408,11 @@ export default function SettingsScreen() {
   const [activeCategory, setActiveCategory] = useState<string>('general');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const toast = useToast();
 
   // États pour les modals
-  const [restaurantInfoModalVisible, setRestaurantInfoModalVisible] = useState(false);
+  const [restaurantInfoModalVisible, setRestaurantInfoModalVisible] =
+    useState(false);
   const [hoursModalVisible, setHoursModalVisible] = useState(false);
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
 
@@ -385,19 +428,26 @@ export default function SettingsScreen() {
       return {
         ...obj,
         [day]: {
-          isOpen: ['Lundi', 'Mardi', 'Mercredi', 'Jeudi', 'Vendredi', 'Samedi'].includes(day),
+          isOpen: [
+            'Lundi',
+            'Mardi',
+            'Mercredi',
+            'Jeudi',
+            'Vendredi',
+            'Samedi',
+          ].includes(day),
           hours: {
             open: '11:30',
             close: '22:00',
-          }
-        }
+          },
+        },
       };
     }, {}),
     paymentMethods: {
       cash: true,
       card: true,
       mobilePayment: false,
-    }
+    },
   };
 
   // État pour la configuration
@@ -409,7 +459,8 @@ export default function SettingsScreen() {
     {
       id: 'notifications',
       title: 'Notifications Push',
-      description: 'Recevoir des alertes pour les nouvelles commandes et les changements de statut des tables',
+      description:
+        'Recevoir des alertes pour les nouvelles commandes et les changements de statut des tables',
       type: 'toggle',
       value: true,
       icon: Bell,
@@ -418,7 +469,8 @@ export default function SettingsScreen() {
     {
       id: 'autoPrint',
       title: 'Impression automatique',
-      description: 'Imprimer automatiquement les reçus lors du paiement des factures',
+      description:
+        'Imprimer automatiquement les reçus lors du paiement des factures',
       type: 'toggle',
       value: false,
       icon: Printer,
@@ -427,7 +479,7 @@ export default function SettingsScreen() {
     {
       id: 'darkMode',
       title: 'Mode sombre',
-      description: 'Utiliser un thème sombre pour l\'application',
+      description: "Utiliser un thème sombre pour l'application",
       type: 'toggle',
       value: false,
       icon: LayoutGrid,
@@ -438,15 +490,16 @@ export default function SettingsScreen() {
     {
       id: 'restaurant',
       title: 'Informations du restaurant',
-      description: 'Mettre à jour les détails de votre restaurant et vos coordonnées',
+      description:
+        'Mettre à jour les détails de votre restaurant et vos coordonnées',
       type: 'action',
       icon: Store,
       category: 'restaurant',
     },
     {
       id: 'hours',
-      title: 'Heures d\'ouverture',
-      description: 'Définir les heures d\'ouverture de votre restaurant',
+      title: "Heures d'ouverture",
+      description: "Définir les heures d'ouverture de votre restaurant",
       type: 'action',
       icon: Clock,
       category: 'restaurant',
@@ -464,7 +517,8 @@ export default function SettingsScreen() {
     {
       id: 'payment',
       title: 'Modes de paiement',
-      description: 'Gérer les méthodes de paiement acceptées et les intégrations',
+      description:
+        'Gérer les méthodes de paiement acceptées et les intégrations',
       type: 'action',
       icon: DollarSign,
       category: 'payment',
@@ -474,7 +528,8 @@ export default function SettingsScreen() {
     {
       id: 'security',
       title: 'Paramètres de sécurité',
-      description: 'Gérer les autorisations des utilisateurs et les contrôles d\'accès',
+      description:
+        "Gérer les autorisations des utilisateurs et les contrôles d'accès",
       type: 'action',
       icon: Shield,
       category: 'security',
@@ -482,7 +537,8 @@ export default function SettingsScreen() {
     {
       id: 'help',
       title: 'Aide & Support',
-      description: 'Obtenir de l\'aide pour utiliser le système de point de vente',
+      description:
+        "Obtenir de l'aide pour utiliser le système de point de vente",
       type: 'action',
       icon: HelpCircle,
       category: 'security',
@@ -493,7 +549,7 @@ export default function SettingsScreen() {
     { id: 'general', name: 'Général' },
     { id: 'restaurant', name: 'Restaurant' },
     { id: 'payment', name: 'Paiement' },
-    { id: 'security', name: 'Sécurité & Support' }
+    { id: 'security', name: 'Sécurité & Support' },
   ];
 
   // Charger les paramètres sauvegardés
@@ -513,13 +569,17 @@ export default function SettingsScreen() {
         if (savedSettings) {
           const parsedSettings = JSON.parse(savedSettings);
 
-          setSettings(prev => prev.map(setting => {
-            const savedSetting = parsedSettings.find((s: any) => s.id === setting.id);
-            if (savedSetting && setting.type === 'toggle') {
-              return { ...setting, value: savedSetting.value };
-            }
-            return setting;
-          }));
+          setSettings((prev) =>
+            prev.map((setting) => {
+              const savedSetting = parsedSettings.find(
+                (s: any) => s.id === setting.id
+              );
+              if (savedSetting && setting.type === 'toggle') {
+                return { ...setting, value: savedSetting.value };
+              }
+              return setting;
+            })
+          );
         }
       } catch (error) {
         console.error('Erreur au chargement des paramètres:', error);
@@ -534,11 +594,11 @@ export default function SettingsScreen() {
   const handleResetAppData = () => {
     Alert.alert(
       'Réinitialiser toutes les données',
-      'Attention ! Cette action va supprimer tout l\'historique des paiements, les tables ouvertes et les additions en cours. Cette action est irréversible.',
+      "Attention ! Cette action va supprimer tout l'historique des paiements, les tables ouvertes et les additions en cours. Cette action est irréversible.",
       [
         {
           text: 'Annuler',
-          style: 'cancel'
+          style: 'cancel',
         },
         {
           text: 'Réinitialiser',
@@ -552,11 +612,11 @@ export default function SettingsScreen() {
 
               // Réinitialiser les tables en conservant leur nom et section
               // mais en effaçant leur statut, commandes, etc.
-              const resetTables = tables.map(table => ({
+              const resetTables = tables.map((table) => ({
                 ...table,
                 status: 'available' as const,
                 guests: undefined,
-                order: undefined
+                order: undefined,
               }));
 
               // Sauvegarder les tables réinitialisées
@@ -568,22 +628,24 @@ export default function SettingsScreen() {
               // Réinitialiser les autres données (disponibilité du menu, etc.)
               await StorageManager.resetApplicationData();
 
-              Alert.alert(
-                'Réinitialisation terminée',
+              toast.showToast(
                 'Toutes les données ont été réinitialisées avec succès.',
-                [{ text: 'OK' }]
+                'success'
               );
             } catch (error) {
-              console.error('Erreur lors de la réinitialisation des données:', error);
-              Alert.alert(
-                'Erreur',
-                'Une erreur est survenue lors de la réinitialisation des données.'
+              console.error(
+                'Erreur lors de la réinitialisation des données:',
+                error
+              );
+              toast.showToast(
+                'Une erreur est survenue lors de la réinitialisation des données.',
+                'error'
               );
             } finally {
               setSaving(false); // Masquer l'indicateur de chargement
             }
-          }
-        }
+          },
+        },
       ]
     );
   };
@@ -598,24 +660,32 @@ export default function SettingsScreen() {
 
       // Sauvegarder les paramètres
       const toggleSettings = settings
-        .filter(setting => setting.type === 'toggle')
-        .map(setting => ({ id: setting.id, value: setting.value }));
+        .filter((setting) => setting.type === 'toggle')
+        .map((setting) => ({ id: setting.id, value: setting.value }));
 
-      await AsyncStorage.setItem('settings_values', JSON.stringify(toggleSettings));
+      await AsyncStorage.setItem(
+        'settings_values',
+        JSON.stringify(toggleSettings)
+      );
 
-      Alert.alert('Succès', 'Paramètres sauvegardés avec succès.');
+      toast.showToast('Paramètres sauvegardés avec succès.', 'success');
     } catch (error) {
       console.error('Erreur lors de la sauvegarde des paramètres:', error);
-      Alert.alert('Erreur', 'Impossible de sauvegarder les paramètres.');
+      toast.showToast(
+        'Impossible de sauvegarder les paramètres.',
+        'error'
+      );
     } finally {
       setSaving(false);
     }
   };
 
   const toggleSetting = (id: string) => {
-    setSettings(settings.map(setting =>
-      setting.id === id ? { ...setting, value: !setting.value } : setting
-    ));
+    setSettings(
+      settings.map((setting) =>
+        setting.id === id ? { ...setting, value: !setting.value } : setting
+      )
+    );
 
     // Sauvegarder automatiquement après chaque changement
     setTimeout(saveSettings, 100);
@@ -633,15 +703,21 @@ export default function SettingsScreen() {
         setPaymentModalVisible(true);
         break;
       case 'tables':
-        Alert.alert('Information', 'Configuration des tables disponible dans une future mise à jour.');
+        toast.showToast(
+          'Configuration des tables disponible dans une future mise à jour.',
+          'info'
+        );
         break;
       case 'security':
-        Alert.alert('Information', 'Paramètres de sécurité disponibles dans une future mise à jour.');
+        toast.showToast(
+          'Paramètres de sécurité disponibles dans une future mise à jour.',
+          'info'
+        );
         break;
       case 'help':
-        Alert.alert(
-          'Aide & Support',
-          'Pour toute assistance, contactez le support technique au 01 23 45 67 89 ou consultez la documentation en ligne.'
+        toast.showToast(
+          'Pour toute assistance, contactez le support technique au 01 23 45 67 89 ou consultez la documentation en ligne.',
+          'info'
         );
         break;
       default:
@@ -651,9 +727,9 @@ export default function SettingsScreen() {
 
   // Gestionnaires pour les modals
   const handleSaveRestaurantInfo = (info: RestaurantInfo) => {
-    setConfig(prev => ({
+    setConfig((prev) => ({
       ...prev,
-      restaurantInfo: info
+      restaurantInfo: info,
     }));
 
     // Sauvegarder automatiquement
@@ -661,9 +737,9 @@ export default function SettingsScreen() {
   };
 
   const handleSaveOpeningHours = (hours: OpeningHours) => {
-    setConfig(prev => ({
+    setConfig((prev) => ({
       ...prev,
-      openingHours: hours
+      openingHours: hours,
     }));
 
     // Sauvegarder automatiquement
@@ -671,9 +747,9 @@ export default function SettingsScreen() {
   };
 
   const handleSavePaymentMethods = (methods: any) => {
-    setConfig(prev => ({
+    setConfig((prev) => ({
       ...prev,
-      paymentMethods: methods
+      paymentMethods: methods,
     }));
 
     // Sauvegarder automatiquement
@@ -681,7 +757,9 @@ export default function SettingsScreen() {
   };
 
   // Filtrer les paramètres par catégorie active
-  const filteredSettings = settings.filter(setting => setting.category === activeCategory);
+  const filteredSettings = settings.filter(
+    (setting) => setting.category === activeCategory
+  );
 
   if (loading) {
     return (
@@ -701,19 +779,19 @@ export default function SettingsScreen() {
       <View style={styles.content}>
         {/* Sidebar avec catégories */}
         <View style={styles.sidebar}>
-          {categories.map(category => (
+          {categories.map((category) => (
             <Pressable
               key={category.id}
               style={[
                 styles.categoryItem,
-                activeCategory === category.id && styles.activeCategoryItem
+                activeCategory === category.id && styles.activeCategoryItem,
               ]}
               onPress={() => setActiveCategory(category.id)}
             >
               <Text
                 style={[
                   styles.categoryText,
-                  activeCategory === category.id && styles.activeCategoryText
+                  activeCategory === category.id && styles.activeCategoryText,
                 ]}
               >
                 {category.name}
@@ -725,10 +803,10 @@ export default function SettingsScreen() {
         {/* Liste des paramètres */}
         <ScrollView style={styles.settingsList}>
           <Text style={styles.categoryTitle}>
-            {categories.find(cat => cat.id === activeCategory)?.name}
+            {categories.find((cat) => cat.id === activeCategory)?.name}
           </Text>
 
-          {filteredSettings.map(setting => {
+          {filteredSettings.map((setting) => {
             const Icon = setting.icon;
             return (
               <Pressable
@@ -740,13 +818,16 @@ export default function SettingsScreen() {
                   } else if (setting.type === 'action') {
                     handleSettingAction(setting.id);
                   }
-                }}>
+                }}
+              >
                 <View style={styles.settingIcon}>
                   <Icon size={24} color="#666" />
                 </View>
                 <View style={styles.settingContent}>
                   <Text style={styles.settingTitle}>{setting.title}</Text>
-                  <Text style={styles.settingDescription}>{setting.description}</Text>
+                  <Text style={styles.settingDescription}>
+                    {setting.description}
+                  </Text>
                 </View>
                 {setting.type === 'toggle' ? (
                   <Switch
@@ -764,18 +845,16 @@ export default function SettingsScreen() {
             <Text style={styles.resetWarning}>
               Zone dangereuse - Les actions ci-dessous sont irréversibles
             </Text>
-            <Pressable
-              style={styles.dangerButton}
-              onPress={handleResetAppData}
-            >
+            <Pressable style={styles.dangerButton} onPress={handleResetAppData}>
               <Trash2 size={24} color="white" />
               <Text style={styles.dangerButtonText}>
                 Réinitialiser toutes les données
               </Text>
             </Pressable>
             <Text style={styles.resetDescription}>
-              Cette action supprimera tout l'historique des paiements, réinitialisera les tables et videra les additions en cours.
-              La structure des tables et leurs noms seront conservés.
+              Cette action supprimera tout l'historique des paiements,
+              réinitialisera les tables et videra les additions en cours. La
+              structure des tables et leurs noms seront conservés.
             </Text>
           </View>
         </ScrollView>
@@ -1099,5 +1178,4 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontStyle: 'italic',
   },
-
 });

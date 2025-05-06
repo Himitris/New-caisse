@@ -25,6 +25,7 @@ import {
   addBill,
   resetTable,
 } from '../../utils/storage';
+import { useToast } from '../../utils/ToastContext';
 
 export default function CustomSplitScreen() {
   const { tableId, total, items } = useLocalSearchParams();
@@ -32,6 +33,7 @@ export default function CustomSplitScreen() {
   const tableIdNum = parseInt(tableId as string, 10);
   const totalAmount = parseFloat(total as string);
   const orderItems = items ? JSON.parse(items as string) : [];
+  const toast = useToast();
 
   // Ajouter un état pour le nom et la section de la table
   const [tableName, setTableName] = useState('');
@@ -112,6 +114,7 @@ export default function CustomSplitScreen() {
   };
 
   // Calculer automatiquement le montant restant et créer un nouveau partage
+  // Calculer automatiquement le montant restant et créer un nouveau partage
   const calculateRemaining = () => {
     // Calculer la somme de tous les montants
     const currentSum = splitAmounts.reduce((sum, amount) => {
@@ -123,12 +126,23 @@ export default function CustomSplitScreen() {
     const remaining = Math.max(0, totalAmount - currentSum);
 
     if (remaining > 0) {
-      // Créer un nouveau partage avec le montant restant
-      const newAmounts = [...splitAmounts, remaining.toFixed(2)];
-      const newMethods = [...paymentMethods, null];
+      // Vérifier si le dernier partage a un montant de 0
+      const lastIndex = splitAmounts.length - 1;
+      const lastAmount = parseFloat(splitAmounts[lastIndex] || '0');
 
-      setSplitAmounts(newAmounts);
-      setPaymentMethods(newMethods);
+      if (lastAmount === 0 && splitAmounts.length > 0) {
+        // Utiliser le dernier partage s'il est à 0
+        const newAmounts = [...splitAmounts];
+        newAmounts[lastIndex] = remaining.toFixed(2);
+        setSplitAmounts(newAmounts);
+      } else {
+        // Créer un nouveau partage avec le montant restant
+        const newAmounts = [...splitAmounts, remaining.toFixed(2)];
+        const newMethods = [...paymentMethods, null];
+
+        setSplitAmounts(newAmounts);
+        setPaymentMethods(newMethods);
+      }
     }
   };
 
@@ -155,9 +169,9 @@ export default function CustomSplitScreen() {
     });
 
     if (!isValid) {
-      Alert.alert(
-        'Informations incomplètes',
-        'Veuillez entrer un montant et sélectionner une méthode de paiement pour chaque partage.'
+      toast.showToast(
+        'Veuillez entrer un montant et sélectionner une méthode de paiement pour chaque partage.',
+        'warning'
       );
       return;
     }
@@ -195,9 +209,9 @@ export default function CustomSplitScreen() {
       const table = await getTable(tableIdNum);
 
       if (!table || !table.order) {
-        Alert.alert(
-          'Erreur',
-          'Impossible de trouver les informations de la table'
+        toast.showToast(
+          'Impossible de trouver les informations de la table',
+          'error'
         );
         return;
       }
@@ -245,11 +259,10 @@ export default function CustomSplitScreen() {
       if (remainingTotal <= 0.01) {
         // Réinitialiser la table
         await resetTable(tableIdNum);
-
-        Alert.alert(
-          'Paiement terminé',
+        router.push('/');
+        toast.showToast(
           'Tous les partages ont été traités avec succès.',
-          [{ text: 'OK', onPress: () => router.push('/') }]
+          'success'
         );
       } else {
         // Mettre à jour le total restant
@@ -262,20 +275,20 @@ export default function CustomSplitScreen() {
         };
 
         await updateTable(updatedTable);
+        router.push(`/table/${tableIdNum}`);
 
-        Alert.alert(
-          'Paiement partiel',
+        toast.showToast(
           `Paiement(s) traité(s) avec succès. Solde restant : ${remainingTotal.toFixed(
             2
           )} €`,
-          [{ text: 'OK', onPress: () => router.push(`/table/${tableIdNum}`) }]
+          'success'
         );
       }
     } catch (error) {
       console.error('Erreur de paiement :', error);
-      Alert.alert(
-        'Erreur de paiement',
-        'Il y a eu une erreur lors du traitement de vos paiements.'
+      toast.showToast(
+        'Il y a eu une erreur lors du traitement de vos paiements.',
+        'error'
       );
     }
   };

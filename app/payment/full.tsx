@@ -5,13 +5,15 @@ import { useState, useEffect } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { CreditCard, Wallet, Receipt, ArrowLeft, Edit3 } from 'lucide-react-native';
 import { getTable, updateTable, resetTable, addBill } from '../../utils/storage';
+import { useToast } from '../../utils/ToastContext';
 
 export default function FullPaymentScreen() {
   const { tableId, total, items } = useLocalSearchParams();
   const router = useRouter();
-  const [printReceipt, setPrintReceipt] = useState(true);
+  const [printReceipt, setPrintReceipt] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [tableName, setTableName] = useState('');
+  const toast = useToast();
 
   const tableIdNum = parseInt(tableId as string, 10);
   const totalAmount = parseFloat(total as string);
@@ -69,31 +71,23 @@ export default function FullPaymentScreen() {
         // Reset the table if payment covers full amount
         await resetTable(tableIdNum);
 
-        // Show success message
-        Alert.alert(
-          'Payment Successful',
-          `${table.name} has been paid in full with ${method}.`,
-          [
-            {
-              text: 'OK',
-              onPress: () => {
-                if (printReceipt) {
-                  router.push({
-                    pathname: '/print-preview',
-                    params: {
-                      tableId: tableIdNum.toString(),
-                      total: totalAmount.toString(),
-                      items: items as string,
-                      paymentMethod: method,
-                      tableName: table.name
-                    }
-                  });
-                } else {
-                  router.push('/');
-                }
-              }
-            }
-          ]
+        if (printReceipt) {
+          router.push({
+            pathname: '/print-preview',
+            params: {
+              tableId: tableIdNum.toString(),
+              total: totalAmount.toString(),
+              items: items as string,
+              paymentMethod: method,
+              tableName: table.name,
+            },
+          });
+        } else {
+          router.push('/');
+        }
+        toast.showToast(
+          `${table.name} a été payée complètement en ${method}.`,
+          'success'
         );
       } else {
         // If payment is partial, update the table's total
@@ -108,38 +102,33 @@ export default function FullPaymentScreen() {
 
         await updateTable(updatedTable);
 
-        // Show success message for partial payment
-        Alert.alert(
-          'Partial Payment Successful',
-          `Paid ${method}: ${totalAmount.toFixed(2)} €\nRemaining: ${remainingAmount.toFixed(2)} €`,
-          [
-            {
-              text: 'OK',
-              onPress: () => {
-                if (printReceipt) {
-                  router.push({
-                    pathname: '/print-preview',
-                    params: {
-                      tableId: tableIdNum.toString(),
-                      total: totalAmount.toString(),
-                      items: items as string,
-                      paymentMethod: method,
-                      isPartial: 'true',
-                      remaining: remainingAmount.toString(),
-                      tableName: table.name
-                    }
-                  });
-                } else {
-                  router.push(`/table/${tableIdNum}`);
-                }
-              }
-            }
-          ]
+        if (printReceipt) {
+          router.push({
+            pathname: '/print-preview',
+            params: {
+              tableId: tableIdNum.toString(),
+              total: totalAmount.toString(),
+              items: items as string,
+              paymentMethod: method,
+              isPartial: 'true',
+              remaining: remainingAmount.toString(),
+              tableName: table.name,
+            },
+          });
+        } else {
+          router.push(`/table/${tableIdNum}`);
+        }
+
+        toast.showToast(
+          `Paiement ${method}: ${totalAmount.toFixed(
+            2
+          )} €\Reste: ${remainingAmount.toFixed(2)} €`,
+          'success'
         );
       }
     } catch (error) {
       console.error('Payment error:', error);
-      Alert.alert('Payment Error', 'There was an error processing your payment.');
+      toast.showToast('There was an error processing your payment.', 'error');
     } finally {
       setProcessing(false);
     }

@@ -20,6 +20,7 @@ import {
 } from '../../utils/storage';
 import CustomCoversModal from '../components/CustomCoversModal';
 import CoversSelectionModal from '../components/CoversSelectionModal';
+import { useToast } from '../../utils/ToastContext';
 
 // Mise en cache des couleurs des tables
 const TABLE_COLORS = {
@@ -41,6 +42,7 @@ export default function TablesScreen() {
   const [activeSection, setActiveSection] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
+  const toast = useToast();
 
   // États pour les modals
   const [customCoversModalVisible, setCustomCoversModalVisible] =
@@ -143,15 +145,15 @@ export default function TablesScreen() {
             try {
               await resetAllTables();
               await loadTables(true);
-              Alert.alert(
-                'Succès',
-                'Toutes les tables ont été réinitialisées.'
+              toast.showToast(
+                'Toutes les tables ont été réinitialisées.',
+                'success',
               );
             } catch (error) {
               console.error('Error resetting tables:', error);
-              Alert.alert(
-                'Erreur',
-                'Un problème est survenu lors de la réinitialisation des tables.'
+              toast.showToast(
+                'Un problème est survenu lors de la réinitialisation des tables.',
+                'error'
               );
             } finally {
               setLoading(false);
@@ -160,7 +162,7 @@ export default function TablesScreen() {
         },
       ]
     );
-  }, [loadTables]);
+  }, [loadTables, toast]);
 
   const openTable = useCallback(
     (table: Table) => {
@@ -254,13 +256,13 @@ export default function TablesScreen() {
         router.push(`/table/${table.id}`);
       } catch (error) {
         console.error('Error opening table:', error);
-        Alert.alert(
-          'Erreur',
-          "Impossible d'ouvrir la table. Veuillez réessayer."
+        toast.showToast(
+          "Impossible d'ouvrir la table. Veuillez réessayer.",
+          'error'
         );
       }
     },
-    [tables, router]
+    [tables, router, toast]
   );
 
   const getTableColor = useCallback((status: Table['status']) => {
