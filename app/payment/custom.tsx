@@ -8,6 +8,7 @@ import {
   Pressable,
   TextInput,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useState, useEffect } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -35,6 +36,7 @@ export default function CustomSplitScreen() {
   const totalAmount = parseFloat(total as string);
   const orderItems = items ? JSON.parse(items as string) : [];
   const toast = useToast();
+  const [processing, setProcessing] = useState(false);
 
   // Ajouter un état pour le nom et la section de la table
   const [tableName, setTableName] = useState('');
@@ -203,103 +205,205 @@ export default function CustomSplitScreen() {
     }
   };
 
-  // Traiter les transactions de paiement réelles
- const processPaymentTransactions = async () => {
-   try {
-     // Obtenir les données actuelles de la table
-     const table = await getTable(tableIdNum);
+  const processPaymentTransactions = async () => {
+    try {
+      setProcessing(true);
+      // Obtenir les données actuelles de la table
+      const table = await getTable(tableIdNum);
 
-     if (!table || !table.order) {
-       toast.showToast(
-         'Impossible de trouver les informations de la table',
-         'error'
-       );
-       return;
-     }
+      if (!table || !table.order) {
+        toast.showToast(
+          'Impossible de trouver les informations de la table',
+          'error'
+        );
+        return;
+      }
 
-     let remainingTotal = table.order.total;
-     let allPaymentsProcessed = true;
+      let allPaymentsProcessed = true;
 
-     // Traiter chaque paiement
-     for (let i = 0; i < splitAmounts.length; i++) {
-       const amount = parseFloat(splitAmounts[i]);
-       const method = paymentMethods[i];
+      // Obtenir tous les paiements valides
+      const validPayments = splitAmounts
+        .map((amount, index) => ({
+          amount: parseFloat(amount),
+          method: paymentMethods[index],
+        }))
+        .filter((p) => !isNaN(p.amount) && p.amount > 0 && p.method !== null);
 
-       if (isNaN(amount) || amount <= 0 || method === null) {
-         continue;
-       }
+      let originalItems = [...table.order.items];
+      let newItems = [...originalItems];
 
-       const bill = {
-         id: Date.now() + i,
-         tableNumber: tableIdNum,
-         tableName: tableName,
-         section: tableSection,
-         amount: amount,
-         items: orderItems.length,
-         status: 'split' as 'split',
-         timestamp: new Date().toISOString(),
-         paymentMethod: method,
-         paymentType: 'custom' as 'custom',
-         // Stocker les articles avec le pourcentage de paiement
-         paidItems: orderItems.map((item: any) => ({
-           ...item,
-           paymentPercentage: table.order
-             ? (amount / table.order.total) * 100
-             : 0,
-           customAmount: amount,
-         })),
-       };
-       // Ajouter à l'historique des factures
-       await addBill(bill);
+      // Pour chaque paiement, appliquer la logique d'ajustement des articles
+      for (const payment of validPayments) {
+        const amountToPay = payment.amount;
+        let remainingAmount = amountToPay;
 
-       // Soustraire du total restant
-       remainingTotal -= amount;
-     }
+        // Trier les articles par prix pour commencer à payer les moins chers
+        newItems.sort((a, b) => a.price - b.price);
 
-     // Vérifier si tout a été payé
-     if (remainingTotal <= 0.01) {
-       // Réinitialiser la table
-       await resetTable(tableIdNum);
-       // Ajouter cette ligne pour émettre l'événement de mise à jour
-       events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
-       router.push('/');
-       toast.showToast(
-         'Tous les partages ont été traités avec succès.',
-         'success'
-       );
-     } else {
-       // Mettre à jour le total restant
-       const updatedTable = {
-         ...table,
-         order: {
-           ...table.order,
-           total: remainingTotal,
-         },
-       };
+        let i = 0;
+        // Essayer de payer des articles complets d'abord
+        while (i < newItems.length && remainingAmount > 0) {
+          const item = newItems[i];
 
-       await updateTable(updatedTable);
-       // Ajouter cette ligne pour émettre l'événement de mise à jour
-       events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
-       router.push(`/table/${tableIdNum}`);
+          // Si on peut payer au moins un article complet
+          if (item.price <= remainingAmount) {
+            // Combien d'unités peut-on payer complètement?
+            const unitsToPay = Math.floor(remainingAmount / item.price);
 
-       toast.showToast(
-         `Paiement(s) traité(s) avec succès. Solde restant : ${remainingTotal.toFixed(
-           2
-         )} €`,
-         'success'
-       );
-     }
-   } catch (error) {
-     console.error('Erreur de paiement :', error);
-     toast.showToast(
-       'Il y a eu une erreur lors du traitement de vos paiements.',
-       'error'
-     );
-   }
- };
+            if (unitsToPay >= item.quantity) {
+              // On peut payer toutes les unités de cet article
+              remainingAmount -= item.price * item.quantity;
+              // Supprimer l'article (il sera payé entièrement)
+              newItems.splice(i, 1);
+              // Ne pas incrémenter i car on a supprimé un élément
+            } else {
+              // On peut payer certaines unités, mais pas toutes
+              remainingAmount -= item.price * unitsToPay;
+              // Réduire la quantité
+              newItems[i].quantity -= unitsToPay;
+              i++;
+            }
+          } else {
+            // Cet article est trop cher pour être payé complètement
+            i++;
+          }
+        }
+
+        // S'il reste un montant à payer, créer un article "Reste" pour le montant partiel
+        if (remainingAmount > 0.01) {
+          // Chercher s'il existe déjà un "Reste" pour ajuster son montant
+          const resteIndex = newItems.findIndex((item) =>
+            item.name.startsWith('Reste de')
+          );
+
+          if (resteIndex >= 0) {
+            // Ajouter au "Reste" existant
+            newItems[resteIndex].price -= remainingAmount;
+          } else {
+            // Chercher l'article le moins cher dont on peut payer une partie
+            const cheapestItem = [...originalItems].sort(
+              (a, b) => a.price - b.price
+            )[0];
+
+            if (cheapestItem && cheapestItem.price > remainingAmount) {
+              // Si l'article le moins cher coûte plus que ce qu'il nous reste à payer,
+              // diminuer sa quantité de 1 et créer un reste
+              const itemIndex = newItems.findIndex(
+                (item) => item.id === cheapestItem.id
+              );
+
+              if (itemIndex >= 0 && newItems[itemIndex].quantity > 0) {
+                newItems[itemIndex].quantity -= 1;
+
+                // Créer un nouvel article "Reste" pour la différence
+                const resteAmount = cheapestItem.price - remainingAmount;
+                newItems.push({
+                  id: Date.now() + Math.random(),
+                  name: `Reste de ${cheapestItem.name}`,
+                  price: resteAmount,
+                  quantity: 1,
+                });
+              }
+            } else {
+              // Si nous n'avons pas trouvé d'article approprié, ajouter simplement un reste générique
+              newItems.push({
+                id: Date.now() + Math.random(),
+                name: `Reste partiel`,
+                price: remainingAmount,
+                quantity: 1,
+              });
+            }
+          }
+        }
+
+        // Créer la facture pour ce paiement
+        const bill = {
+          id: Date.now() + validPayments.indexOf(payment),
+          tableNumber: tableIdNum,
+          tableName: tableName,
+          section: tableSection,
+          amount: payment.amount,
+          items: orderItems.length,
+          status: 'split' as 'split',
+          timestamp: new Date().toISOString(),
+          // Pour être sûr, faites cette conversion explicite
+          paymentMethod: payment.method as 'card' | 'cash' | 'check',
+          paymentType: 'custom' as 'custom',
+          paidItems: orderItems.map((item: any) => ({
+            ...item,
+            paymentPercentage: table.order
+              ? (payment.amount / table.order.total) * 100
+              : 0,
+            customAmount: payment.amount,
+          })),
+        };
+
+        // Si vous avez toujours des problèmes, vous pouvez ajouter une vérification supplémentaire
+        if (payment.method) {
+          // Assurez-vous que la méthode n'est pas null
+          await addBill(bill);
+        }
+      }
+
+      // Recalculer le nouveau total
+      const newTotal = newItems.reduce(
+        (sum, item) => sum + item.price * item.quantity,
+        0
+      );
+
+      // Vérifier si tout a été payé
+      if (newTotal <= 0.01) {
+        // Réinitialiser la table
+        await resetTable(tableIdNum);
+        // Ajouter cette ligne pour émettre l'événement de mise à jour
+        events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
+        router.push('/');
+        toast.showToast(
+          'Tous les partages ont été traités avec succès.',
+          'success'
+        );
+      } else {
+        // Mettre à jour le total restant
+        const updatedTable = {
+          ...table,
+          order: {
+            ...table.order,
+            total: newTotal,
+            items: newItems,
+          },
+        };
+
+        await updateTable(updatedTable);
+        // Ajouter cette ligne pour émettre l'événement de mise à jour
+        events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
+        router.push(`/table/${tableIdNum}`);
+
+        toast.showToast(
+          `Paiement(s) traité(s) avec succès. Solde restant : ${newTotal.toFixed(
+            2
+          )} €`,
+          'success'
+        );
+      }
+    } catch (error) {
+      console.error('Erreur de paiement :', error);
+      toast.showToast(
+        'Il y a eu une erreur lors du traitement de vos paiements.',
+        'error'
+      );
+    } finally {
+      setProcessing(false);
+    }
+  };
 
   return (
     <View style={styles.container}>
+      {processing && (
+        <View style={styles.processingOverlay}>
+          <ActivityIndicator size="large" color="white" />
+          <Text style={styles.processingText}>Traitement en cours...</Text>
+        </View>
+      )}
       <View style={styles.header}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <ArrowLeft size={24} color="#333" />
@@ -739,5 +843,21 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 18,
     fontWeight: '600',
+  },
+  processingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  processingText: {
+    color: 'white',
+    marginTop: 12,
+    fontSize: 16,
   },
 });

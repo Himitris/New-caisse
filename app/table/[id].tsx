@@ -12,6 +12,7 @@ import {
 } from 'lucide-react-native';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Pressable,
   ScrollView,
@@ -714,13 +715,14 @@ export default function TableScreen() {
     }
   };
 
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <Text>Loading table information...</Text>
-      </View>
-    );
-  }
+if (loading) {
+  return (
+    <View style={styles.loadingContainer}>
+      <ActivityIndicator size="large" color="#007AFF" />
+      <Text style={styles.loadingText}>Chargement des données...</Text>
+    </View>
+  );
+}
 
   if (!table) {
     return (
@@ -1324,11 +1326,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 6,
   },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
   orderColumnScroll: {
     maxHeight: '93%',
     marginTop: 8,
@@ -1353,5 +1350,17 @@ const styles = StyleSheet.create({
   },
   columnWrapper: {
     gap: 8,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F9F9F9', // facultatif, pour adoucir le fond
+    padding: 20,
+  },
+  loadingText: {
+    marginTop: 15,
+    fontSize: 16,
+    color: '#333',
   },
 });

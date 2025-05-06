@@ -7,6 +7,7 @@ import {
   ScrollView,
   Pressable,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useState, useEffect } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -29,6 +30,7 @@ export default function SplitBillScreen() {
   const [tableName, setTableName] = useState('');
   const [tableSection, setTableSection] = useState('');
   const toast = useToast();
+  const [processing, setProcessing] = useState(false);
 
   // Montant partagé par invité (partage égal)
   const splitAmount = totalAmount / guestCount;
@@ -79,6 +81,7 @@ export default function SplitBillScreen() {
     method: 'cash' | 'card' | 'check'
   ) => {
     try {
+      setProcessing(true);
       // Trouver le paiement
       const payment = payments.find((p) => p.id === id);
       if (!payment) return;
@@ -88,6 +91,105 @@ export default function SplitBillScreen() {
         prev.map((payment) =>
           payment.id === id ? { ...payment, paid: true, method } : payment
         )
+      );
+
+      // Obtenir les données actuelles de la table
+      const currentTable = await getTable(tableIdNum);
+      if (!currentTable || !currentTable.order) {
+        console.error('Table non trouvée');
+        return;
+      }
+
+      const amountToPay = payment.amount;
+      let remainingAmount = amountToPay;
+
+      // Copie des articles pour manipulation
+      let newItems = [...currentTable.order.items];
+
+      // Trier les articles par prix (du moins cher au plus cher)
+      // pour commencer à payer les articles les moins chers
+      newItems.sort((a, b) => a.price - b.price);
+
+      let i = 0;
+      // Essayer de payer des articles complets d'abord
+      while (i < newItems.length && remainingAmount > 0) {
+        const item = newItems[i];
+
+        // Si on peut payer au moins un article complet
+        if (item.price <= remainingAmount) {
+          // Combien d'unités peut-on payer complètement?
+          const unitsToPay = Math.floor(remainingAmount / item.price);
+
+          if (unitsToPay >= item.quantity) {
+            // On peut payer toutes les unités de cet article
+            remainingAmount -= item.price * item.quantity;
+            // Supprimer l'article (il sera payé entièrement)
+            newItems.splice(i, 1);
+            // Ne pas incrémenter i car on a supprimé un élément
+          } else {
+            // On peut payer certaines unités, mais pas toutes
+            remainingAmount -= item.price * unitsToPay;
+            // Réduire la quantité
+            newItems[i].quantity -= unitsToPay;
+            i++;
+          }
+        } else {
+          // Cet article est trop cher pour être payé complètement
+          i++;
+        }
+      }
+
+      // S'il reste un montant à payer, créer un article "Reste" pour le montant partiel
+      if (remainingAmount > 0.01) {
+        // Chercher s'il existe déjà un "Reste" pour ajuster son montant
+        const resteIndex = newItems.findIndex((item) =>
+          item.name.startsWith('Reste de')
+        );
+
+        if (resteIndex >= 0) {
+          // Ajouter au "Reste" existant
+          newItems[resteIndex].price -= remainingAmount;
+        } else {
+          // Chercher l'article le moins cher dont on peut payer une partie
+          const cheapestItem = [...currentTable.order.items].sort(
+            (a, b) => a.price - b.price
+          )[0];
+
+          if (cheapestItem && cheapestItem.price > remainingAmount) {
+            // Si l'article le moins cher coûte plus que ce qu'il nous reste à payer,
+            // diminuer sa quantité de 1 et créer un reste
+            const itemIndex = newItems.findIndex(
+              (item) => item.id === cheapestItem.id
+            );
+
+            if (itemIndex >= 0 && newItems[itemIndex].quantity > 0) {
+              newItems[itemIndex].quantity -= 1;
+
+              // Créer un nouvel article "Reste" pour la différence
+              const resteAmount = cheapestItem.price - remainingAmount;
+              newItems.push({
+                id: Date.now(),
+                name: `Reste de ${cheapestItem.name}`,
+                price: resteAmount,
+                quantity: 1,
+              });
+            }
+          } else {
+            // Si nous n'avons pas trouvé d'article approprié, ajouter simplement un reste générique
+            newItems.push({
+              id: Date.now(),
+              name: `Reste partiel`,
+              price: remainingAmount,
+              quantity: 1,
+            });
+          }
+        }
+      }
+
+      // Recalculer le total après ajustements
+      const newTotal = newItems.reduce(
+        (sum, item) => sum + item.price * item.quantity,
+        0
       );
 
       const bill = {
@@ -101,39 +203,29 @@ export default function SplitBillScreen() {
         timestamp: new Date().toISOString(),
         paymentMethod: method,
         paymentType: 'split' as 'split',
-        // Ajouter les articles avec une quantité ajustée
         paidItems: orderItems.map((item: { quantity: number }) => ({
           ...item,
-          quantity: item.quantity / guestCount, // Diviser la quantité par le nombre de parts
-          splitPart: payment.id, // Ajouter un identifiant de la part pour référence
-          totalParts: guestCount, // Le nombre total de parts
+          quantity: item.quantity / guestCount,
+          splitPart: payment.id,
+          totalParts: guestCount,
         })),
       };
 
       // Ajouter à l'historique des factures
       await addBill(bill);
 
-      // Obtenir les données actuelles de la table pour vérifier si la table doit être réinitialisée
-      const table = await getTable(tableIdNum);
-
-      if (!table || !table.order) {
-        console.error('Table non trouvée');
-        return;
-      }
-
-      // Mettre à jour le total restant sur la commande de la table
-      const newRemainingTotal = table.order.total - payment.amount;
-
-      if (newRemainingTotal <= 0.01) {
+      // Mettre à jour la table avec les articles restants
+      if (newTotal <= 0.01) {
         // Si c'était le dernier paiement, réinitialiser la table
         await resetTable(tableIdNum);
       } else {
-        // Sinon, mettre à jour le total restant
+        // Sinon, mettre à jour le total restant et les articles
         const updatedTable = {
-          ...table,
+          ...currentTable,
           order: {
-            ...table.order,
-            total: newRemainingTotal,
+            ...currentTable.order,
+            total: newTotal,
+            items: newItems, // Utiliser la liste des articles ajustée
           },
         };
         await updateTable(updatedTable);
@@ -141,6 +233,8 @@ export default function SplitBillScreen() {
     } catch (error) {
       console.error('Erreur de traitement du paiement:', error);
       toast.showToast('Échec du traitement du paiement', 'error');
+    } finally {
+      setProcessing(false);
     }
   };
 
@@ -172,6 +266,12 @@ export default function SplitBillScreen() {
 
   return (
     <View style={styles.container}>
+      {processing && (
+        <View style={styles.processingOverlay}>
+          <ActivityIndicator size="large" color="white" />
+          <Text style={styles.processingText}>Traitement en cours...</Text>
+        </View>
+      )}
       <View style={styles.header}>
         <Text style={styles.title}>
           Partage de l'Addition - {tableName || `Table ${tableId}`}
@@ -383,5 +483,21 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 18,
     fontWeight: '600',
+  },
+  processingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  processingText: {
+    color: 'white',
+    marginTop: 12,
+    fontSize: 16,
   },
 });
