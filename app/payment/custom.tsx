@@ -28,6 +28,7 @@ import {
 } from '../../utils/storage';
 import { useToast } from '../../utils/ToastContext';
 import { EVENT_TYPES, events } from '@/utils/events';
+import { processPartialPayment } from '@/utils/payment-utils';
 
 export default function CustomSplitScreen() {
   const { tableId, total, items } = useLocalSearchParams();
@@ -229,91 +230,15 @@ export default function CustomSplitScreen() {
         }))
         .filter((p) => !isNaN(p.amount) && p.amount > 0 && p.method !== null);
 
-      let originalItems = [...table.order.items];
-      let newItems = [...originalItems];
-
-      // Pour chaque paiement, appliquer la logique d'ajustement des articles
+      // Traiter chaque paiement séquentiellement pour éviter des conflits
       for (const payment of validPayments) {
-        const amountToPay = payment.amount;
-        let remainingAmount = amountToPay;
+        // Utiliser la fonction optimisée pour chaque paiement
+        const result = await processPartialPayment(tableIdNum, payment.amount);
 
-        // Trier les articles par prix pour commencer à payer les moins chers
-        newItems.sort((a, b) => a.price - b.price);
-
-        let i = 0;
-        // Essayer de payer des articles complets d'abord
-        while (i < newItems.length && remainingAmount > 0) {
-          const item = newItems[i];
-
-          // Si on peut payer au moins un article complet
-          if (item.price <= remainingAmount) {
-            // Combien d'unités peut-on payer complètement?
-            const unitsToPay = Math.floor(remainingAmount / item.price);
-
-            if (unitsToPay >= item.quantity) {
-              // On peut payer toutes les unités de cet article
-              remainingAmount -= item.price * item.quantity;
-              // Supprimer l'article (il sera payé entièrement)
-              newItems.splice(i, 1);
-              // Ne pas incrémenter i car on a supprimé un élément
-            } else {
-              // On peut payer certaines unités, mais pas toutes
-              remainingAmount -= item.price * unitsToPay;
-              // Réduire la quantité
-              newItems[i].quantity -= unitsToPay;
-              i++;
-            }
-          } else {
-            // Cet article est trop cher pour être payé complètement
-            i++;
-          }
-        }
-
-        // S'il reste un montant à payer, créer un article "Reste" pour le montant partiel
-        if (remainingAmount > 0.01) {
-          // Chercher s'il existe déjà un "Reste" pour ajuster son montant
-          const resteIndex = newItems.findIndex((item) =>
-            item.name.startsWith('Reste de')
-          );
-
-          if (resteIndex >= 0) {
-            // Ajouter au "Reste" existant
-            newItems[resteIndex].price -= remainingAmount;
-          } else {
-            // Chercher l'article le moins cher dont on peut payer une partie
-            const cheapestItem = [...originalItems].sort(
-              (a, b) => a.price - b.price
-            )[0];
-
-            if (cheapestItem && cheapestItem.price > remainingAmount) {
-              // Si l'article le moins cher coûte plus que ce qu'il nous reste à payer,
-              // diminuer sa quantité de 1 et créer un reste
-              const itemIndex = newItems.findIndex(
-                (item) => item.id === cheapestItem.id
-              );
-
-              if (itemIndex >= 0 && newItems[itemIndex].quantity > 0) {
-                newItems[itemIndex].quantity -= 1;
-
-                // Créer un nouvel article "Reste" pour la différence
-                const resteAmount = cheapestItem.price - remainingAmount;
-                newItems.push({
-                  id: Date.now() + Math.random(),
-                  name: `Reste de ${cheapestItem.name}`,
-                  price: resteAmount,
-                  quantity: 1,
-                });
-              }
-            } else {
-              // Si nous n'avons pas trouvé d'article approprié, ajouter simplement un reste générique
-              newItems.push({
-                id: Date.now() + Math.random(),
-                name: `Reste partiel`,
-                price: remainingAmount,
-                quantity: 1,
-              });
-            }
-          }
+        if (!result.success) {
+          allPaymentsProcessed = false;
+          console.error('Erreur de paiement:', result.error);
+          continue;
         }
 
         // Créer la facture pour ce paiement
@@ -345,15 +270,15 @@ export default function CustomSplitScreen() {
         }
       }
 
-      // Recalculer le nouveau total
-      const newTotal = newItems.reduce(
-        (sum, item) => sum + item.price * item.quantity,
-        0
-      );
+      // Vérifier si tous les paiements ont été traités
+      const updatedTable = await getTable(tableIdNum);
 
-      // Vérifier si tout a été payé
-      if (newTotal <= 0.01) {
-        // Réinitialiser la table
+      if (
+        !updatedTable ||
+        !updatedTable.order ||
+        updatedTable.order.total <= 0.01
+      ) {
+        // Réinitialiser la table si tout a été payé
         await resetTable(tableIdNum);
         // Ajouter cette ligne pour émettre l'événement de mise à jour
         events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
@@ -363,23 +288,10 @@ export default function CustomSplitScreen() {
           'success'
         );
       } else {
-        // Mettre à jour le total restant
-        const updatedTable = {
-          ...table,
-          order: {
-            ...table.order,
-            total: newTotal,
-            items: newItems,
-          },
-        };
-
-        await updateTable(updatedTable);
-        // Ajouter cette ligne pour émettre l'événement de mise à jour
-        events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
+        // Il reste un solde à payer
         router.push(`/table/${tableIdNum}`);
-
         toast.showToast(
-          `Paiement(s) traité(s) avec succès. Solde restant : ${newTotal.toFixed(
+          `Paiement(s) traité(s) avec succès. Solde restant : ${updatedTable.order.total.toFixed(
             2
           )} €`,
           'success'

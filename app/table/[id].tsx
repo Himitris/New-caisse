@@ -338,20 +338,19 @@ export default function TableScreen() {
   // Fonction pour séparer les items en plats et boissons :
   const categorizeOrderItems = useCallback(
     (items: OrderItem[]) => {
-      return items.reduce(
-        (acc, item) => {
-          const menuItem = menuItems.find(
-            (mi) => mi.name === item.name && mi.price === item.price
-          );
-          if (menuItem?.type === 'boisson') {
-            acc.boissons.push(item);
-          } else {
-            acc.plats.push(item);
-          }
-          return acc;
-        },
-        { plats: [] as OrderItem[], boissons: [] as OrderItem[] }
+      const result = { plats: [] as OrderItem[], boissons: [] as OrderItem[] };
+
+      // Créer un Map pour la recherche rapide
+      const menuItemMap = new Map(
+        menuItems.map((item) => [`${item.name}-${item.price}`, item.type])
       );
+
+      items.forEach((item) => {
+        const type = menuItemMap.get(`${item.name}-${item.price}`) || 'resto';
+        result[type === 'boisson' ? 'boissons' : 'plats'].push(item);
+      });
+
+      return result;
     },
     [menuItems]
   );
@@ -405,22 +404,6 @@ export default function TableScreen() {
       ]
     );
   };
-
-  // Fonction améliorée avec batching pour les mises à jour
-  const batchedUpdate = useCallback(async (updatedTable: Table) => {
-    batchedUpdates.current = updatedTable;
-
-    if (updateTimeoutRef.current) {
-      clearTimeout(updateTimeoutRef.current);
-    }
-
-    updateTimeoutRef.current = setTimeout(async () => {
-      if (batchedUpdates.current) {
-        await updateTable(batchedUpdates.current);
-        batchedUpdates.current = null;
-      }
-    }, 200); // Débounce de 200ms
-  }, []);
 
   // Calculer le total de la commande
   const calculateTotal = useCallback((items: OrderItem[]): number => {
@@ -478,49 +461,44 @@ export default function TableScreen() {
     (itemId: number, increment: boolean) => {
       if (!table || !table.order) return;
 
-      // Utiliser une fonction de mise à jour d'état pour garantir la cohérence
       setTable((prevTable) => {
         if (!prevTable || !prevTable.order) return prevTable;
 
-        const updatedTable = { ...prevTable, order: { ...prevTable.order } };
-        const updatedItems = [...updatedTable.order.items];
+        const updatedItems = prevTable.order.items
+          .map((item) => {
+            if (item.id !== itemId) return item;
 
-        const itemIndex = updatedItems.findIndex((item) => item.id === itemId);
-        if (itemIndex === -1) return prevTable;
+            const newQuantity = increment
+              ? item.quantity + 1
+              : Math.max(0, item.quantity - 1);
 
-        // Créer une copie de l'élément à modifier
-        const currentItem = { ...updatedItems[itemIndex] };
-        const newQuantity = increment
-          ? currentItem.quantity + 1
-          : Math.max(0, currentItem.quantity - 1);
+            return { ...item, quantity: newQuantity };
+          })
+          .filter((item) => item.quantity > 0);
 
-        // Reconstruire le tableau des éléments
-        if (newQuantity <= 0) {
-          // Supprimer l'élément s'il n'en reste plus
-          updatedTable.order.items = updatedItems.filter(
-            (item) => item.id !== itemId
-          );
-        } else {
-          // Mettre à jour la quantité
-          currentItem.quantity = newQuantity;
-          updatedItems[itemIndex] = currentItem;
-          updatedTable.order.items = updatedItems;
-        }
+        const newTotal = calculateTotal(updatedItems);
 
-        // Recalculer le total
-        updatedTable.order.total = calculateTotal(updatedTable.order.items);
+        const updatedTable = {
+          ...prevTable,
+          order: {
+            ...prevTable.order,
+            items: updatedItems,
+            total: newTotal,
+          },
+        };
 
-        // Enregistrer immédiatement le changement
-        updateTable(updatedTable).catch((error) =>
-          console.error('Error updating table:', error)
-        );
+        // Mise à jour asynchrone de la base de données
+        updateTable(updatedTable).catch((error) => {
+          toast.showToast('Erreur lors de la mise à jour', 'error');
+          console.error('Error updating table:', error);
+        });
 
         return updatedTable;
       });
     },
-    [table, calculateTotal]
+    [table, calculateTotal, toast]
   );
-
+  
   // Reste des handlers (existants)...
   const handleCloseTable = async () => {
     if (!table) return;
@@ -715,14 +693,14 @@ export default function TableScreen() {
     }
   };
 
-if (loading) {
-  return (
-    <View style={styles.loadingContainer}>
-      <ActivityIndicator size="large" color="#007AFF" />
-      <Text style={styles.loadingText}>Chargement des données...</Text>
-    </View>
-  );
-}
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={styles.loadingText}>Chargement des données...</Text>
+      </View>
+    );
+  }
 
   if (!table) {
     return (
