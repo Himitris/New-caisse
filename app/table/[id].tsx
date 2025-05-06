@@ -107,38 +107,17 @@ const getCategoryFromName = (
 
 // Composant MenuItem mémoïzé avec optimisations
 const MenuItemComponent = memo(
-  ({
-    item,
-    isUnavailable,
-    onPress,
-  }: {
-    item: MenuItem;
-    isUnavailable: boolean;
-    onPress: () => void;
-  }) => (
+  ({ item, onPress }: { item: MenuItem; onPress: () => void }) => (
     <Pressable
       key={`menu-item-${item.id}-${item.category}`}
-      style={[
-        styles.menuItem,
-        { borderLeftColor: item.color },
-        isUnavailable && styles.unavailableItem,
-      ]}
+      style={[styles.menuItem, { borderLeftColor: item.color }]}
       onPress={onPress}
     >
-      <Text
-        style={[
-          styles.menuItemName,
-          isUnavailable && styles.unavailableItemText,
-        ]}
-      >
-        {item.name}
-      </Text>
+      <Text style={styles.menuItemName}>{item.name}</Text>
       <Text style={styles.menuItemPrice}>{item.price.toFixed(2)} €</Text>
     </Pressable>
   ),
-  (prevProps, nextProps) =>
-    prevProps.item.id === nextProps.item.id &&
-    prevProps.isUnavailable === nextProps.isUnavailable
+  (prevProps, nextProps) => prevProps.item.id === nextProps.item.id
 );
 
 export default function TableScreen() {
@@ -235,25 +214,25 @@ export default function TableScreen() {
     };
   }, [categories, menuItems]);
 
-  // Mémoïser les items filtrés
+  // Mémoïser les items filtrés (et exclure les items non disponibles)
   const filteredMenuItems = useMemo(() => {
     let items = menuItems;
 
+    // Filtrer par type
     if (activeType) {
       items = items.filter((item) => item.type === activeType);
     }
 
+    // Filtrer par catégorie
     if (activeCategory) {
       items = items.filter((item) => item.category === activeCategory);
     }
 
-    return items;
-  }, [menuItems, activeType, activeCategory]);
+    // Exclure les items non disponibles
+    items = items.filter((item) => !unavailableItems.includes(item.id));
 
-  // Utiliser directement filteredMenuItems
-  const displayAllFilteredItems = useMemo(() => {
-    return filteredMenuItems;
-  }, [filteredMenuItems]);
+    return items;
+  }, [menuItems, activeType, activeCategory, unavailableItems]);
 
   useEffect(() => {
     loadTable();
@@ -360,14 +339,6 @@ export default function TableScreen() {
     (item: MenuItem) => {
       if (!table || !table.order) return;
 
-      if (unavailableItems.includes(item.id)) {
-        Alert.alert(
-          'Article indisponible',
-          `${item.name} n'est pas disponible actuellement.`
-        );
-        return;
-      }
-
       const updatedTable = { ...table };
 
       if (!updatedTable.order) {
@@ -402,7 +373,7 @@ export default function TableScreen() {
       setTable(updatedTable);
       batchedUpdate(updatedTable);
     },
-    [table, unavailableItems, guestCount, batchedUpdate]
+    [table, guestCount, batchedUpdate]
   );
 
   // Mise à jour de la quantité avec batching
@@ -491,38 +462,60 @@ export default function TableScreen() {
     );
   };
 
-  // Rendu optimisé du menu grid avec FlatList pour la virtualisation
+  // Rendu du menu grid avec FlatList et restructuration
   const renderMenuGrid = () => {
-    const categoryItems = getVisibleCategories().reduce((acc, category) => {
-      const items = displayAllFilteredItems.filter(
-        (item) => item.category === category
-      );
-      if (items.length > 0) {
-        acc.push(...items);
+    const groupedByCategory = new Map<string, MenuItem[]>();
+
+    // Grouper les articles par catégorie
+    filteredMenuItems.forEach((item) => {
+      if (!groupedByCategory.has(item.category)) {
+        groupedByCategory.set(item.category, []);
       }
-      return acc;
-    }, [] as MenuItem[]);
+      groupedByCategory.get(item.category)!.push(item);
+    });
+
+    const sections: Array<{ category: string; items: MenuItem[] }> = [];
+
+    // Convertir en tableau ordonné
+    categories
+      .filter((cat) =>
+        activeType
+          ? menuItems.some(
+              (item) => item.category === cat && item.type === activeType
+            )
+          : true
+      )
+      .forEach((category) => {
+        const items = groupedByCategory.get(category);
+        if (items && items.length > 0) {
+          sections.push({ category, items });
+        }
+      });
 
     return (
-      <FlatList
-        data={categoryItems}
-        keyExtractor={(item) => `menu-${item.id}`}
-        renderItem={({ item }) => (
-          <MenuItemComponent
-            item={item}
-            isUnavailable={unavailableItems.includes(item.id)}
-            onPress={() => addItemToOrder(item)}
-          />
-        )}
-        numColumns={3}
-        columnWrapperStyle={styles.columnWrapper}
-        removeClippedSubviews={true}
-        maxToRenderPerBatch={10}
-        updateCellsBatchingPeriod={50}
-        windowSize={10}
-        initialNumToRender={20}
-        contentContainerStyle={styles.flatListContainer}
-      />
+      <ScrollView
+        style={styles.menuItemsScroll}
+        showsVerticalScrollIndicator={false}
+      >
+        {sections.map((section, index) => (
+          <View key={section.category} style={styles.categorySection}>
+            <Text style={styles.categoryHeaderText}>{section.category}</Text>
+            <View style={styles.categoryItems}>
+              {section.items.map((item) => (
+                <MenuItemComponent
+                  key={`menu-${item.id}`}
+                  item={item}
+                  onPress={() => addItemToOrder(item)}
+                />
+              ))}
+            </View>
+            {/* Ligne de séparation entre catégories */}
+            {index < sections.length - 1 && (
+              <View style={styles.categorySeparator} />
+            )}
+          </View>
+        ))}
+      </ScrollView>
     );
   };
 
@@ -1159,6 +1152,32 @@ const styles = StyleSheet.create({
   },
   menuItems: {
     flex: 1,
+  },
+  // Nouveaux styles pour la restructuration du menu
+  menuItemsScroll: {
+    flex: 1,
+  },
+  categorySection: {
+    marginBottom: 20,
+  },
+  categoryHeaderText: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 12,
+    marginTop: 8,
+    paddingLeft: 8,
+    color: '#333',
+  },
+  categoryItems: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  categorySeparator: {
+    height: 1,
+    backgroundColor: '#e0e0e0',
+    marginTop: 16,
+    marginBottom: 8,
   },
   menuItem: {
     width: '31%',
