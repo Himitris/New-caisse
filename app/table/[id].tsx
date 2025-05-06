@@ -1,4 +1,4 @@
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ArrowLeft,
   CreditCard,
@@ -17,7 +17,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  View
+  View,
 } from 'react-native';
 import priceData from '../../helpers/ManjosPrice';
 import { EVENT_TYPES, events } from '../../utils/events';
@@ -29,7 +29,7 @@ import {
   getMenuAvailability,
   getTable,
   resetTable,
-  updateTable
+  updateTable,
 } from '../../utils/storage';
 import { useToast } from '../../utils/ToastContext';
 import SplitSelectionModal from '../components/SplitSelectionModal';
@@ -238,15 +238,101 @@ export default function TableScreen() {
     loadTable();
   }, [tableId]);
 
-  const loadTable = async () => {
+  const loadTable = useCallback(async () => {
     setLoading(true);
-    const loadedTable = await getTable(tableId);
-    if (loadedTable) {
-      setTable(loadedTable);
-      setGuestCount(loadedTable.guests || 1);
+    try {
+      // Forcer le rechargement complet depuis le stockage
+      const freshTable = await getTable(tableId);
+      if (freshTable) {
+        // Mettre à jour l'état avec les données fraîches
+        setTable(freshTable);
+        setGuestCount(freshTable.guests || 1);
+
+        // Si la table a un ordre, assurez-vous qu'il est à jour
+        if (freshTable.order) {
+          batchedUpdates.current = null; // Réinitialiser les mises à jour en attente
+        }
+      }
+    } catch (error) {
+      console.error('Error loading table:', error);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
-  };
+  }, [tableId]);
+
+  useEffect(() => {
+    // Écouter les événements de mise à jour de la table
+    const unsubscribe = events.on(
+      EVENT_TYPES.TABLE_UPDATED,
+      (updatedTableId: number) => {
+        if (updatedTableId === tableId) {
+          loadTable();
+        }
+      }
+    );
+
+    // Écouter les événements de paiement ajouté
+    const unsubscribePayment = events.on(
+      EVENT_TYPES.PAYMENT_ADDED,
+      (updatedTableId: number) => {
+        if (updatedTableId === tableId) {
+          loadTable();
+        }
+      }
+    );
+
+    return () => {
+      // Se désabonner des événements lors du nettoyage
+      unsubscribe();
+      unsubscribePayment();
+    };
+  }, [tableId, loadTable]);
+
+  useFocusEffect(
+    useCallback(() => {
+      console.log('Plan du restaurant en focus - rafraîchissement des données');
+      setTable(null); // Réinitialiser d'abord l'état local
+      loadTable(); // Puis charger les données fraîches
+
+      return () => {
+        // Annuler tout timeout en cours lors du déplacement
+        if (updateTimeoutRef.current) {
+          clearTimeout(updateTimeoutRef.current);
+          updateTimeoutRef.current = null;
+        }
+      };
+    }, [loadTable])
+  );
+
+  useEffect(() => {
+    // S'abonner à l'événement TABLE_UPDATED
+    const unsubscribe = events.on(
+      EVENT_TYPES.TABLE_UPDATED,
+      (updatedTableId: number) => {
+        if (updatedTableId === tableId) {
+          // Force un rechargement complet des données de la table
+          console.log(`Table ${tableId} was updated, reloading data...`);
+          setTable(null); // Réinitialiser d'abord
+          loadTable(); // Puis recharger
+        }
+      }
+    );
+
+    return () => {
+      // Se désabonner de l'événement lors du nettoyage
+      unsubscribe();
+    };
+  }, [tableId, loadTable]);
+
+  useEffect(() => {
+    return () => {
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current);
+        updateTimeoutRef.current = null;
+      }
+      batchedUpdates.current = null;
+    };
+  }, []);
 
   // Fonction pour séparer les items en plats et boissons :
   const categorizeOrderItems = useCallback(
@@ -335,12 +421,20 @@ export default function TableScreen() {
     }, 200); // Débounce de 200ms
   }, []);
 
+  // Calculer le total de la commande
+  const calculateTotal = useCallback((items: OrderItem[]): number => {
+    return items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  }, []);
+
   // Handler pour ajouter un item à la commande (useCallback)
   const addItemToOrder = useCallback(
-    (item: MenuItem) => {
-      if (!table || !table.order) return;
+    async (item: MenuItem) => {
+      // Récupérer l'état le plus récent de la table directement depuis le stockage
+      const freshTable = await getTable(tableId);
 
-      const updatedTable = { ...table };
+      if (!freshTable) return;
+
+      const updatedTable = { ...freshTable };
 
       if (!updatedTable.order) {
         updatedTable.order = {
@@ -371,10 +465,11 @@ export default function TableScreen() {
 
       updatedTable.order.total = calculateTotal(updatedTable.order.items);
 
+      // Mettre à jour à la fois l'état local et le stockage
       setTable(updatedTable);
-      batchedUpdate(updatedTable);
+      await updateTable(updatedTable);
     },
-    [table, guestCount, batchedUpdate]
+    [tableId, guestCount, calculateTotal]
   );
 
   // Mise à jour de la quantité avec batching
@@ -382,42 +477,48 @@ export default function TableScreen() {
     (itemId: number, increment: boolean) => {
       if (!table || !table.order) return;
 
+      // Utiliser une fonction de mise à jour d'état pour garantir la cohérence
       setTable((prevTable) => {
         if (!prevTable || !prevTable.order) return prevTable;
 
-        const updatedTable = { ...prevTable };
-        let updatedItems = [...updatedTable.order!.items];
+        const updatedTable = { ...prevTable, order: { ...prevTable.order } };
+        const updatedItems = [...updatedTable.order.items];
 
         const itemIndex = updatedItems.findIndex((item) => item.id === itemId);
         if (itemIndex === -1) return prevTable;
 
-        const currentItem = updatedItems[itemIndex];
+        // Créer une copie de l'élément à modifier
+        const currentItem = { ...updatedItems[itemIndex] };
         const newQuantity = increment
           ? currentItem.quantity + 1
-          : currentItem.quantity - 1;
+          : Math.max(0, currentItem.quantity - 1);
 
+        // Reconstruire le tableau des éléments
         if (newQuantity <= 0) {
-          updatedItems = updatedItems.filter((item) => item.id !== itemId);
+          // Supprimer l'élément s'il n'en reste plus
+          updatedTable.order.items = updatedItems.filter(
+            (item) => item.id !== itemId
+          );
         } else {
-          const updatedItem = { ...currentItem, quantity: newQuantity };
-          updatedItems[itemIndex] = updatedItem;
+          // Mettre à jour la quantité
+          currentItem.quantity = newQuantity;
+          updatedItems[itemIndex] = currentItem;
+          updatedTable.order.items = updatedItems;
         }
 
-        updatedTable.order!.items = updatedItems;
-        updatedTable.order!.total = calculateTotal(updatedItems);
+        // Recalculer le total
+        updatedTable.order.total = calculateTotal(updatedTable.order.items);
 
-        batchedUpdate(updatedTable);
+        // Enregistrer immédiatement le changement
+        updateTable(updatedTable).catch((error) =>
+          console.error('Error updating table:', error)
+        );
 
         return updatedTable;
       });
     },
-    [batchedUpdate]
+    [table, calculateTotal]
   );
-
-  // Calculer le total de la commande
-  const calculateTotal = useCallback((items: OrderItem[]): number => {
-    return items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  }, []);
 
   // Reste des handlers (existants)...
   const handleCloseTable = async () => {

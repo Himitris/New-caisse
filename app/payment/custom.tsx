@@ -26,6 +26,7 @@ import {
   resetTable,
 } from '../../utils/storage';
 import { useToast } from '../../utils/ToastContext';
+import { EVENT_TYPES, events } from '@/utils/events';
 
 export default function CustomSplitScreen() {
   const { tableId, total, items } = useLocalSearchParams();
@@ -203,95 +204,99 @@ export default function CustomSplitScreen() {
   };
 
   // Traiter les transactions de paiement réelles
-  const processPaymentTransactions = async () => {
-    try {
-      // Obtenir les données actuelles de la table
-      const table = await getTable(tableIdNum);
+ const processPaymentTransactions = async () => {
+   try {
+     // Obtenir les données actuelles de la table
+     const table = await getTable(tableIdNum);
 
-      if (!table || !table.order) {
-        toast.showToast(
-          'Impossible de trouver les informations de la table',
-          'error'
-        );
-        return;
-      }
+     if (!table || !table.order) {
+       toast.showToast(
+         'Impossible de trouver les informations de la table',
+         'error'
+       );
+       return;
+     }
 
-      let remainingTotal = table.order.total;
-      let allPaymentsProcessed = true;
+     let remainingTotal = table.order.total;
+     let allPaymentsProcessed = true;
 
-      // Traiter chaque paiement
-      for (let i = 0; i < splitAmounts.length; i++) {
-        const amount = parseFloat(splitAmounts[i]);
-        const method = paymentMethods[i];
+     // Traiter chaque paiement
+     for (let i = 0; i < splitAmounts.length; i++) {
+       const amount = parseFloat(splitAmounts[i]);
+       const method = paymentMethods[i];
 
-        if (isNaN(amount) || amount <= 0 || method === null) {
-          continue;
-        }
+       if (isNaN(amount) || amount <= 0 || method === null) {
+         continue;
+       }
 
-        const bill = {
-          id: Date.now() + i,
-          tableNumber: tableIdNum,
-          tableName: tableName,
-          section: tableSection,
-          amount: amount,
-          items: orderItems.length,
-          status: 'split' as 'split',
-          timestamp: new Date().toISOString(),
-          paymentMethod: method,
-          paymentType: 'custom' as 'custom',
-          // Stocker les articles avec le pourcentage de paiement
-          paidItems: orderItems.map((item: any) => ({
-            ...item,
-            paymentPercentage: table.order
-              ? (amount / table.order.total) * 100
-              : 0,
-            customAmount: amount,
-          })),
-        };
-        // Ajouter à l'historique des factures
-        await addBill(bill);
+       const bill = {
+         id: Date.now() + i,
+         tableNumber: tableIdNum,
+         tableName: tableName,
+         section: tableSection,
+         amount: amount,
+         items: orderItems.length,
+         status: 'split' as 'split',
+         timestamp: new Date().toISOString(),
+         paymentMethod: method,
+         paymentType: 'custom' as 'custom',
+         // Stocker les articles avec le pourcentage de paiement
+         paidItems: orderItems.map((item: any) => ({
+           ...item,
+           paymentPercentage: table.order
+             ? (amount / table.order.total) * 100
+             : 0,
+           customAmount: amount,
+         })),
+       };
+       // Ajouter à l'historique des factures
+       await addBill(bill);
 
-        // Soustraire du total restant
-        remainingTotal -= amount;
-      }
+       // Soustraire du total restant
+       remainingTotal -= amount;
+     }
 
-      // Vérifier si tout a été payé
-      if (remainingTotal <= 0.01) {
-        // Réinitialiser la table
-        await resetTable(tableIdNum);
-        router.push('/');
-        toast.showToast(
-          'Tous les partages ont été traités avec succès.',
-          'success'
-        );
-      } else {
-        // Mettre à jour le total restant
-        const updatedTable = {
-          ...table,
-          order: {
-            ...table.order,
-            total: remainingTotal,
-          },
-        };
+     // Vérifier si tout a été payé
+     if (remainingTotal <= 0.01) {
+       // Réinitialiser la table
+       await resetTable(tableIdNum);
+       // Ajouter cette ligne pour émettre l'événement de mise à jour
+       events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
+       router.push('/');
+       toast.showToast(
+         'Tous les partages ont été traités avec succès.',
+         'success'
+       );
+     } else {
+       // Mettre à jour le total restant
+       const updatedTable = {
+         ...table,
+         order: {
+           ...table.order,
+           total: remainingTotal,
+         },
+       };
 
-        await updateTable(updatedTable);
-        router.push(`/table/${tableIdNum}`);
+       await updateTable(updatedTable);
+       // Ajouter cette ligne pour émettre l'événement de mise à jour
+       events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
+       router.push(`/table/${tableIdNum}`);
 
-        toast.showToast(
-          `Paiement(s) traité(s) avec succès. Solde restant : ${remainingTotal.toFixed(
-            2
-          )} €`,
-          'success'
-        );
-      }
-    } catch (error) {
-      console.error('Erreur de paiement :', error);
-      toast.showToast(
-        'Il y a eu une erreur lors du traitement de vos paiements.',
-        'error'
-      );
-    }
-  };
+       toast.showToast(
+         `Paiement(s) traité(s) avec succès. Solde restant : ${remainingTotal.toFixed(
+           2
+         )} €`,
+         'success'
+       );
+     }
+   } catch (error) {
+     console.error('Erreur de paiement :', error);
+     toast.showToast(
+       'Il y a eu une erreur lors du traitement de vos paiements.',
+       'error'
+     );
+   }
+ };
 
   return (
     <View style={styles.container}>

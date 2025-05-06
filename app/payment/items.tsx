@@ -427,128 +427,130 @@ export default function ItemsPaymentScreen() {
     [allOriginalItems]
   );
 
-  const handlePayment = useCallback(
-    async (method: 'card' | 'cash' | 'check') => {
-      if (selectedItems.length === 0) {
+const handlePayment = useCallback(
+  async (method: 'card' | 'cash' | 'check') => {
+    if (selectedItems.length === 0) {
+      toast.showToast(
+        'Veuillez sélectionner au moins un article à payer.',
+        'warning'
+      );
+      return;
+    }
+
+    setProcessing(true);
+
+    try {
+      const currentTable = await getTable(tableIdNum);
+      if (!currentTable || !currentTable.order) {
         toast.showToast(
-          'Veuillez sélectionner au moins un article à payer.',
-          'warning'
+          'Impossible de récupérer les informations de la table.',
+          'error'
         );
+        setProcessing(false);
         return;
       }
 
-      setProcessing(true);
+      const paidItems = selectedItems.map((item) => ({
+        id: item.id,
+        name: item.name,
+        quantity: item.selectedQuantity,
+        price: item.price,
+      }));
 
-      try {
-        const currentTable = await getTable(tableIdNum);
-        if (!currentTable || !currentTable.order) {
-          toast.showToast(
-            'Impossible de récupérer les informations de la table.',
-            'error'
-          );
-          setProcessing(false);
-          return;
-        }
+      const bill = {
+        id: Date.now(),
+        tableNumber: tableIdNum,
+        tableName: tableName,
+        section: tableSection,
+        amount: totalSelected,
+        items: paidItems.length,
+        status: 'paid' as 'paid',
+        timestamp: new Date().toISOString(),
+        paymentMethod: method,
+        paymentType: 'items' as any,
+        paidItems: paidItems,
+      };
 
-        const paidItems = selectedItems.map((item) => ({
-          id: item.id,
-          name: item.name,
-          quantity: item.selectedQuantity,
-          price: item.price,
-        }));
+      await addBill(bill);
 
-        const bill = {
-          id: Date.now(),
-          tableNumber: tableIdNum,
-          tableName: tableName,
-          section: tableSection,
-          amount: totalSelected,
-          items: paidItems.length,
-          status: 'paid' as 'paid',
-          timestamp: new Date().toISOString(),
-          paymentMethod: method,
-          paymentType: 'items' as any,
-          paidItems: paidItems,
-        };
+      let updatedOrderItems = [...currentTable.order.items];
 
-        await addBill(bill);
+      for (const selectedItem of selectedItems) {
+        const orderItemIndex = updatedOrderItems.findIndex(
+          (item) => item.id === selectedItem.id
+        );
 
-        let updatedOrderItems = [...currentTable.order.items];
+        if (orderItemIndex >= 0) {
+          const orderItem = updatedOrderItems[orderItemIndex];
+          const remainingQuantity =
+            orderItem.quantity - selectedItem.selectedQuantity;
 
-        for (const selectedItem of selectedItems) {
-          const orderItemIndex = updatedOrderItems.findIndex(
-            (item) => item.id === selectedItem.id
-          );
-
-          if (orderItemIndex >= 0) {
-            const orderItem = updatedOrderItems[orderItemIndex];
-            const remainingQuantity =
-              orderItem.quantity - selectedItem.selectedQuantity;
-
-            if (remainingQuantity <= 0) {
-              updatedOrderItems.splice(orderItemIndex, 1);
-            } else {
-              updatedOrderItems[orderItemIndex] = {
-                ...orderItem,
-                quantity: remainingQuantity,
-              };
-            }
+          if (remainingQuantity <= 0) {
+            updatedOrderItems.splice(orderItemIndex, 1);
+          } else {
+            updatedOrderItems[orderItemIndex] = {
+              ...orderItem,
+              quantity: remainingQuantity,
+            };
           }
         }
-
-        const newTotal = updatedOrderItems.reduce(
-          (sum, item) => sum + item.price * item.quantity,
-          0
-        );
-
-        if (updatedOrderItems.length === 0 || newTotal <= 0) {
-          await resetTable(tableIdNum);
-          events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
-          router.push('/');
-
-          toast.showToast('Tous les articles ont été payés.', 'success');
-        } else {
-          const updatedTable = {
-            ...currentTable,
-            order: {
-              ...currentTable.order,
-              items: updatedOrderItems,
-              total: newTotal,
-            },
-          };
-
-          await updateTable(updatedTable);
-          events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
-          setSelectedItems([]);
-          loadTable();
-
-          toast.showToast(
-            `Articles payés: ${totalSelected.toFixed(
-              2
-            )}€\nRestant à payer: ${newTotal.toFixed(2)}€`,
-            'success'
-          );
-        }
-      } catch (error) {
-        console.error('Erreur lors du paiement:', error);
-        toast.showToast(
-          'Une erreur est survenue lors du traitement du paiement.',
-          'error'
-        );
-      } finally {
-        setProcessing(false);
       }
-    },
-    [
-      selectedItems,
-      totalSelected,
-      tableIdNum,
-      tableName,
-      tableSection,
-      loadTable,
-      router,
-    ]
-  );
+
+      const newTotal = updatedOrderItems.reduce(
+        (sum, item) => sum + item.price * item.quantity,
+        0
+      );
+
+      if (updatedOrderItems.length === 0 || newTotal <= 0) {
+        await resetTable(tableIdNum);
+        // Ajouter cette ligne pour émettre l'événement
+        events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
+        router.push('/');
+
+        toast.showToast('Tous les articles ont été payés.', 'success');
+      } else {
+        const updatedTable = {
+          ...currentTable,
+          order: {
+            ...currentTable.order,
+            items: updatedOrderItems,
+            total: newTotal,
+          },
+        };
+
+        await updateTable(updatedTable);
+        // Ajouter cette ligne pour émettre l'événement
+        events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
+        setSelectedItems([]);
+        loadTable();
+
+        toast.showToast(
+          `Articles payés: ${totalSelected.toFixed(
+            2
+          )}€\nRestant à payer: ${newTotal.toFixed(2)}€`,
+          'success'
+        );
+      }
+    } catch (error) {
+      console.error('Erreur lors du paiement:', error);
+      toast.showToast(
+        'Une erreur est survenue lors du traitement du paiement.',
+        'error'
+      );
+    } finally {
+      setProcessing(false);
+    }
+  },
+  [
+    selectedItems,
+    totalSelected,
+    tableIdNum,
+    tableName,
+    tableSection,
+    loadTable,
+    router,
+  ]
+);
 
   // Handler pour le backButton avec useCallback
   const handleBack = useCallback(() => {
