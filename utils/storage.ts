@@ -21,6 +21,7 @@ export interface OrderItem {
   price: number;
   quantity: number;
   notes?: string;
+  offered?: boolean; 
 }
 
 export interface Order {
@@ -43,7 +44,19 @@ export interface Bill {
   section?: string;
   paymentMethod?: 'card' | 'cash' | 'check';
   paymentType?: 'full' | 'split' | 'custom' | 'items';
-  paidItems?: any[];
+  paidItems?: {
+    id: number;
+    name: string;
+    price: number;
+    quantity: number;
+    notes?: string;
+    offered?: boolean;
+    paymentPercentage?: number; // Pour les paiements partagés
+    customAmount?: number; // Pour les paiements personnalisés
+    splitPart?: number; // Pour les paiements divisés
+    totalParts?: number; // Pour les paiements divisés
+  }[];
+  offeredAmount?: number; // Montant total des articles offerts dans cette facture
 }
 
 export interface MenuItemAvailability {
@@ -623,6 +636,16 @@ class TableManager {
       return defaultTables;
     }
   }
+
+  calculateTotal = (items: OrderItem[]): number => {
+    return items.reduce((sum, item) => {
+      // N'ajoute le prix au total que si l'article n'est pas marqué comme offert
+      if (!item.offered) {
+        return sum + item.price * item.quantity;
+      }
+      return sum;
+    }, 0);
+  };
 
   static async getTables(): Promise<Table[]> {
     try {

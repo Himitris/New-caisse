@@ -33,6 +33,7 @@ export default function SplitBillScreen() {
   const [tableSection, setTableSection] = useState('');
   const toast = useToast();
   const [processing, setProcessing] = useState(false);
+  const [totalOffered, setTotalOffered] = useState(0);
 
   // Montant partagé par invité (partage égal)
   const splitAmount = totalAmount / guestCount;
@@ -44,6 +45,18 @@ export default function SplitBillScreen() {
       if (table) {
         setTableName(table.name);
         setTableSection(table.section);
+
+        // Calculer le montant des articles offerts s'il y en a
+        if (table.order && table.order.items) {
+          const offeredAmount = table.order.items.reduce((sum, item) => {
+            if (item.offered) {
+              return sum + item.price * item.quantity;
+            }
+            return sum;
+          }, 0);
+
+          setTotalOffered(offeredAmount);
+        }
       }
     };
 
@@ -104,24 +117,26 @@ export default function SplitBillScreen() {
       }
 
       // Créer la facture pour ce paiement
-      const bill = {
-        id: Date.now() + Math.random(),
-        tableNumber: tableIdNum,
-        tableName: tableName,
-        section: tableSection,
-        amount: payment.amount,
-        items: orderItems.length,
-        status: 'split' as 'split',
-        timestamp: new Date().toISOString(),
-        paymentMethod: method,
-        paymentType: 'split' as 'split',
-        paidItems: orderItems.map((item: { quantity: number }) => ({
-          ...item,
-          quantity: item.quantity / guestCount,
-          splitPart: payment.id,
-          totalParts: guestCount,
-        })),
-      };
+const bill = {
+  id: Date.now() + Math.random(),
+  tableNumber: tableIdNum,
+  tableName: tableName,
+  section: tableSection,
+  amount: payment.amount,
+  items: orderItems.length,
+  status: 'split' as 'split',
+  timestamp: new Date().toISOString(),
+  paymentMethod: method,
+  paymentType: 'split' as 'split',
+  paidItems: orderItems.map((item: any) => ({
+    ...item,
+    quantity: item.quantity / guestCount,
+    splitPart: payment.id,
+    totalParts: guestCount,
+  })),
+  // Ajouter le montant des articles offerts proportionnel à ce paiement
+  offeredAmount: (payment.amount / totalAmount) * totalOffered,
+};
 
       // Ajouter à l'historique des factures
       await addBill(bill);
@@ -186,6 +201,13 @@ export default function SplitBillScreen() {
         <Text style={styles.subtitle}>
           Total : {totalAmount.toFixed(2)} € • {guestCount} Invités
         </Text>
+        {totalOffered > 0 && (
+          <View style={styles.offeredInfoContainer}>
+            <Text style={styles.offeredInfoText}>
+              Articles offerts: {totalOffered.toFixed(2)} €
+            </Text>
+          </View>
+        )}
       </View>
 
       <ScrollView style={styles.content}>
@@ -403,5 +425,19 @@ const styles = StyleSheet.create({
     color: 'white',
     marginTop: 12,
     fontSize: 16,
+  },
+  offeredInfoContainer: {
+    backgroundColor: '#FFF8E1',
+    padding: 8,
+    borderRadius: 8,
+    marginTop: 8,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: '#FFD54F',
+  },
+  offeredInfoText: {
+    color: '#FF9800',
+    fontWeight: '500',
+    fontSize: 14,
   },
 });

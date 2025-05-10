@@ -3,6 +3,7 @@ import {
   ArrowLeft,
   CreditCard,
   Edit3,
+  Gift, // Ajout de l'icône Gift
   Minus,
   Plus,
   ShoppingCart,
@@ -34,10 +35,12 @@ interface MenuItem {
   price: number;
   total: number;
   notes?: string;
+  offered?: boolean; // Ajout de la propriété offered
 }
 
 interface SelectedMenuItem extends MenuItem {
   selectedQuantity: number;
+  offered?: boolean; // Ajout de la propriété offered
 }
 
 // Fonction pour catégoriser les items
@@ -97,20 +100,37 @@ const ItemCard = memo(
     onAdd,
     onQuantityChange,
     onRemoveCompletely,
+    onToggleOffered,
   }: {
     item: MenuItem | SelectedMenuItem;
     isSelected: boolean;
     onAdd?: (addAll?: boolean) => void;
     onQuantityChange?: (increment: boolean) => void;
     onRemoveCompletely?: () => void;
+    onToggleOffered?: () => void;
   }) => {
     if (isSelected) {
       const selectedItem = item as SelectedMenuItem;
+      const isOffered = selectedItem.offered;
+
       return (
-        <View style={[styles.itemCard, styles.selectedItemCard]}>
+        <View
+          style={[
+            styles.itemCard,
+            styles.selectedItemCard,
+            isOffered && styles.offeredItemCard,
+          ]}
+        >
           <View style={styles.selectedItemRow}>
             <View style={styles.leftContent}>
-              <Text style={styles.itemName}>{selectedItem.name}</Text>
+              <View style={styles.itemNameRow}>
+                {isOffered && <Gift size={14} color="#FF9800" />}
+                <Text
+                  style={[styles.itemName, isOffered && styles.offeredItemText]}
+                >
+                  {selectedItem.name} {isOffered ? '(Offert)' : ''}
+                </Text>
+              </View>
               <View style={styles.quantityControl}>
                 <Pressable
                   style={styles.quantityButton}
@@ -131,29 +151,61 @@ const ItemCard = memo(
             </View>
 
             <View style={styles.rightContent}>
-              <Text style={styles.subtotalText}>
+              <Text
+                style={[styles.subtotalText, isOffered && styles.offeredPrice]}
+              >
                 {(selectedItem.price * selectedItem.selectedQuantity).toFixed(
                   2
                 )}{' '}
                 €
               </Text>
-              <Pressable
-                style={styles.removeButton}
-                onPress={onRemoveCompletely}
-              >
-                <Text style={styles.removeButtonText}>Retirer</Text>
-              </Pressable>
+              <View style={styles.actionButtons}>
+                <Pressable
+                  style={styles.removeButton}
+                  onPress={onRemoveCompletely}
+                >
+                  <Text style={styles.removeButtonText}>Retirer</Text>
+                </Pressable>
+                <Pressable
+                  style={[
+                    styles.offerButton,
+                    isOffered && styles.cancelOfferButton,
+                  ]}
+                  onPress={onToggleOffered}
+                >
+                  <Text
+                    style={[
+                      styles.offerButtonText,
+                      isOffered && styles.cancelOfferButtonText,
+                    ]}
+                  >
+                    {isOffered ? 'Annuler offre' : 'Offrir'}
+                  </Text>
+                </Pressable>
+              </View>
             </View>
           </View>
         </View>
       );
     }
 
+    // Affichage pour article non sélectionné
+    const isOffered = item.offered;
+
     return (
       <View style={styles.itemCard}>
         <View style={styles.itemHeader}>
-          <Text style={styles.itemName}>{item.name}</Text>
-          <Text style={styles.itemPrice}>{item.price.toFixed(2)} €</Text>
+          <View style={styles.itemNameRow}>
+            {isOffered && <Gift size={14} color="#FF9800" />}
+            <Text
+              style={[styles.itemName, isOffered && styles.offeredItemText]}
+            >
+              {item.name} {isOffered ? '(Offert)' : ''}
+            </Text>
+          </View>
+          <Text style={[styles.itemPrice, isOffered && styles.offeredPrice]}>
+            {item.price.toFixed(2)} €
+          </Text>
         </View>
 
         <View style={styles.itemActions}>
@@ -194,24 +246,52 @@ export default function ItemsPaymentScreen() {
   const [tableSection, setTableSection] = useState('');
   const [processing, setProcessing] = useState(false);
   const [allOriginalItems, setAllOriginalItems] = useState<MenuItem[]>([]);
+  const [totalOffered, setTotalOffered] = useState(0); // Ajout de l'état pour les articles offerts
 
   // Mémoïzation des calculs de total
   const totalOrder = useMemo(() => {
     return (
       availableItems.reduce((sum, item) => sum + item.total, 0) +
-      selectedItems.reduce(
-        (sum, item) => sum + item.price * item.selectedQuantity,
-        0
-      )
+      selectedItems.reduce((sum, item) => {
+        if (!item.offered) {
+          return sum + item.price * item.selectedQuantity;
+        }
+        return sum;
+      }, 0)
     );
   }, [availableItems, selectedItems]);
 
+  // Calcul du total des articles sélectionnés (excluant les articles offerts)
   const totalSelected = useMemo(() => {
-    return selectedItems.reduce(
-      (sum, item) => sum + item.price * item.selectedQuantity,
-      0
-    );
+    return selectedItems.reduce((sum, item) => {
+      if (!item.offered) {
+        return sum + item.price * item.selectedQuantity;
+      }
+      return sum;
+    }, 0);
   }, [selectedItems]);
+
+  // Calculer le total des articles offerts
+  const offeredSelected = useMemo(() => {
+    return selectedItems.reduce((sum, item) => {
+      if (item.offered) {
+        return sum + item.price * item.selectedQuantity;
+      }
+      return sum;
+    }, 0);
+  }, [selectedItems]);
+
+  // Fonction pour basculer l'état offert d'un article
+  const toggleItemOffered = useCallback((itemId: number) => {
+    setSelectedItems((prevItems) => {
+      return prevItems.map((item) => {
+        if (item.id === itemId) {
+          return { ...item, offered: !item.offered };
+        }
+        return item;
+      });
+    });
+  }, []);
 
   // loadTable avec useCallback
   const loadTable = useCallback(async () => {
@@ -229,9 +309,19 @@ export default function ItemsPaymentScreen() {
           price: item.price,
           total: item.price * item.quantity,
           notes: item.notes,
+          offered: item.offered, // Préserver l'état offert
         }));
         setAvailableItems(items);
         setAllOriginalItems(items);
+
+        // Calculer le total des articles offerts dans la commande
+        const offeredTotal = tableData.order.items.reduce((sum, item) => {
+          if (item.offered) {
+            return sum + item.price * item.quantity;
+          }
+          return sum;
+        }, 0);
+        setTotalOffered(offeredTotal);
       }
     }
   }, [tableIdNum]);
@@ -279,12 +369,14 @@ export default function ItemsPaymentScreen() {
           updatedSelectedItems[existingIndex] = {
             ...currentItem,
             selectedQuantity: currentItem.selectedQuantity + quantityToAdd,
+            offered: currentItem.offered, // Préserver l'état offert
           };
           return updatedSelectedItems;
         } else {
           const newSelectedItem: SelectedMenuItem = {
             ...item,
             selectedQuantity: quantityToAdd,
+            offered: item.offered, // Préserver l'état offert de l'article original
           };
           return [...prevSelectedItems, newSelectedItem];
         }
@@ -317,6 +409,7 @@ export default function ItemsPaymentScreen() {
             total:
               availableItem.price *
               (availableItem.quantity + itemToRemove.selectedQuantity),
+            offered: itemToRemove.offered, // Préserver l'état offert
           };
           return updatedAvailableItems;
         } else {
@@ -333,6 +426,7 @@ export default function ItemsPaymentScreen() {
                 price: originalItem.price,
                 total: originalItem.price * itemToRemove.selectedQuantity,
                 notes: originalItem.notes,
+                offered: itemToRemove.offered, // Préserver l'état offert
               },
             ];
           }
@@ -383,6 +477,7 @@ export default function ItemsPaymentScreen() {
     },
     [selectedItems]
   );
+
   const updateAvailableItemsQuantity = useCallback(
     (itemId: number, change: number) => {
       setAvailableItems((prevItems) => {
@@ -416,6 +511,7 @@ export default function ItemsPaymentScreen() {
                 price: originalItem.price,
                 total: originalItem.price * change,
                 notes: originalItem.notes,
+                offered: originalItem.offered, // Préserver l'état offert
               },
             ];
           }
@@ -427,130 +523,141 @@ export default function ItemsPaymentScreen() {
     [allOriginalItems]
   );
 
-const handlePayment = useCallback(
-  async (method: 'card' | 'cash' | 'check') => {
-    if (selectedItems.length === 0) {
-      toast.showToast(
-        'Veuillez sélectionner au moins un article à payer.',
-        'warning'
-      );
-      return;
-    }
-
-    setProcessing(true);
-
-    try {
-      const currentTable = await getTable(tableIdNum);
-      if (!currentTable || !currentTable.order) {
+  const handlePayment = useCallback(
+    async (method: 'card' | 'cash' | 'check') => {
+      if (selectedItems.length === 0) {
         toast.showToast(
-          'Impossible de récupérer les informations de la table.',
-          'error'
+          'Veuillez sélectionner au moins un article à payer.',
+          'warning'
         );
-        setProcessing(false);
         return;
       }
 
-      const paidItems = selectedItems.map((item) => ({
-        id: item.id,
-        name: item.name,
-        quantity: item.selectedQuantity,
-        price: item.price,
-      }));
+      setProcessing(true);
 
-      const bill = {
-        id: Date.now(),
-        tableNumber: tableIdNum,
-        tableName: tableName,
-        section: tableSection,
-        amount: totalSelected,
-        items: paidItems.length,
-        status: 'paid' as 'paid',
-        timestamp: new Date().toISOString(),
-        paymentMethod: method,
-        paymentType: 'items' as any,
-        paidItems: paidItems,
-      };
-
-      await addBill(bill);
-
-      let updatedOrderItems = [...currentTable.order.items];
-
-      for (const selectedItem of selectedItems) {
-        const orderItemIndex = updatedOrderItems.findIndex(
-          (item) => item.id === selectedItem.id
-        );
-
-        if (orderItemIndex >= 0) {
-          const orderItem = updatedOrderItems[orderItemIndex];
-          const remainingQuantity =
-            orderItem.quantity - selectedItem.selectedQuantity;
-
-          if (remainingQuantity <= 0) {
-            updatedOrderItems.splice(orderItemIndex, 1);
-          } else {
-            updatedOrderItems[orderItemIndex] = {
-              ...orderItem,
-              quantity: remainingQuantity,
-            };
-          }
+      try {
+        const currentTable = await getTable(tableIdNum);
+        if (!currentTable || !currentTable.order) {
+          toast.showToast(
+            'Impossible de récupérer les informations de la table.',
+            'error'
+          );
+          setProcessing(false);
+          return;
         }
-      }
 
-      const newTotal = updatedOrderItems.reduce(
-        (sum, item) => sum + item.price * item.quantity,
-        0
-      );
+        const paidItems = selectedItems.map((item) => ({
+          id: item.id,
+          name: item.name,
+          quantity: item.selectedQuantity,
+          price: item.price,
+          offered: item.offered, // Inclure l'état offert
+        }));
 
-      if (updatedOrderItems.length === 0 || newTotal <= 0) {
-        await resetTable(tableIdNum);
-        // Ajouter cette ligne pour émettre l'événement
-        events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
-        router.push('/');
+        const offeredAmount = paidItems.reduce((sum, item) => {
+          return item.offered ? sum + item.price * item.quantity : sum;
+        }, 0);
 
-        toast.showToast('Tous les articles ont été payés.', 'success');
-      } else {
-        const updatedTable = {
-          ...currentTable,
-          order: {
-            ...currentTable.order,
-            items: updatedOrderItems,
-            total: newTotal,
-          },
+        const bill = {
+          id: Date.now(),
+          tableNumber: tableIdNum,
+          tableName: tableName,
+          section: tableSection,
+          amount: totalSelected, // Le total exclut déjà les articles offerts
+          items: paidItems.length,
+          status: 'paid' as 'paid',
+          timestamp: new Date().toISOString(),
+          paymentMethod: method,
+          paymentType: 'items' as any,
+          paidItems: paidItems,
+          offeredAmount: offeredAmount, // Ajout du montant total des articles offerts
         };
 
-        await updateTable(updatedTable);
-        // Ajouter cette ligne pour émettre l'événement
-        events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
-        setSelectedItems([]);
-        loadTable();
+        await addBill(bill);
 
+        let updatedOrderItems = [...currentTable.order.items];
+
+        for (const selectedItem of selectedItems) {
+          const orderItemIndex = updatedOrderItems.findIndex(
+            (item) => item.id === selectedItem.id
+          );
+
+          if (orderItemIndex >= 0) {
+            const orderItem = updatedOrderItems[orderItemIndex];
+            const remainingQuantity =
+              orderItem.quantity - selectedItem.selectedQuantity;
+
+            if (remainingQuantity <= 0) {
+              updatedOrderItems.splice(orderItemIndex, 1);
+            } else {
+              updatedOrderItems[orderItemIndex] = {
+                ...orderItem,
+                quantity: remainingQuantity,
+                // Maintenir l'état "offered" si c'était déjà marqué comme tel
+                offered: orderItem.offered,
+              };
+            }
+          }
+        }
+
+        // Calculer le nouveau total en excluant les articles offerts
+        const newTotal = updatedOrderItems.reduce((sum, item) => {
+          if (!item.offered) {
+            return sum + item.price * item.quantity;
+          }
+          return sum;
+        }, 0);
+
+        if (updatedOrderItems.length === 0 || newTotal <= 0) {
+          await resetTable(tableIdNum);
+          // Ajouter cette ligne pour émettre l'événement
+          events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
+          router.push('/');
+
+          toast.showToast('Tous les articles ont été payés.', 'success');
+        } else {
+          const updatedTable = {
+            ...currentTable,
+            order: {
+              ...currentTable.order,
+              items: updatedOrderItems,
+              total: newTotal,
+            },
+          };
+
+          await updateTable(updatedTable);
+          // Ajouter cette ligne pour émettre l'événement
+          events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
+          setSelectedItems([]);
+          loadTable();
+
+          toast.showToast(
+            `Articles payés: ${totalSelected.toFixed(
+              2
+            )}€\nRestant à payer: ${newTotal.toFixed(2)}€`,
+            'success'
+          );
+        }
+      } catch (error) {
+        console.error('Erreur lors du paiement:', error);
         toast.showToast(
-          `Articles payés: ${totalSelected.toFixed(
-            2
-          )}€\nRestant à payer: ${newTotal.toFixed(2)}€`,
-          'success'
+          'Une erreur est survenue lors du traitement du paiement.',
+          'error'
         );
+      } finally {
+        setProcessing(false);
       }
-    } catch (error) {
-      console.error('Erreur lors du paiement:', error);
-      toast.showToast(
-        'Une erreur est survenue lors du traitement du paiement.',
-        'error'
-      );
-    } finally {
-      setProcessing(false);
-    }
-  },
-  [
-    selectedItems,
-    totalSelected,
-    tableIdNum,
-    tableName,
-    tableSection,
-    loadTable,
-    router,
-  ]
-);
+    },
+    [
+      selectedItems,
+      totalSelected,
+      tableIdNum,
+      tableName,
+      tableSection,
+      loadTable,
+      router,
+    ]
+  );
 
   // Handler pour le backButton avec useCallback
   const handleBack = useCallback(() => {
@@ -580,6 +687,7 @@ const handlePayment = useCallback(
       const newSelectedItems = availableItems.map((item) => ({
         ...item,
         selectedQuantity: item.quantity,
+        offered: item.offered, // Préserver l'état offert
       }));
       return [...prevSelectedItems, ...newSelectedItems];
     });
@@ -593,6 +701,7 @@ const handlePayment = useCallback(
         ...item,
         quantity: item.selectedQuantity,
         total: item.price * item.selectedQuantity,
+        offered: item.offered, // Préserver l'état offert
       }));
       return [...prevAvailableItems, ...newAvailableItems];
     });
@@ -641,6 +750,14 @@ const handlePayment = useCallback(
             {totalSelected.toFixed(2)} €
           </Text>
         </View>
+        {offeredSelected > 0 && (
+          <View style={styles.offeredRow}>
+            <Text style={styles.offeredLabel}>Articles offerts:</Text>
+            <Text style={styles.offeredAmount}>
+              {offeredSelected.toFixed(2)} €
+            </Text>
+          </View>
+        )}
       </View>
 
       <View style={styles.columnsContainer}>
@@ -713,6 +830,7 @@ const handlePayment = useCallback(
                         handleSelectedItemQuantityChange(item.id, increment)
                       }
                       onRemoveCompletely={() => removeItemCompletely(item.id)}
+                      onToggleOffered={() => toggleItemOffered(item.id)}
                     />
                   ))}
                 </ScrollView>
@@ -729,6 +847,7 @@ const handlePayment = useCallback(
                         handleSelectedItemQuantityChange(item.id, increment)
                       }
                       onRemoveCompletely={() => removeItemCompletely(item.id)}
+                      onToggleOffered={() => toggleItemOffered(item.id)}
                     />
                   ))}
                 </ScrollView>
@@ -871,6 +990,27 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#4CAF50',
   },
+  // Styles pour les articles offerts
+  offeredRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#FFD54F',
+    borderStyle: 'dashed',
+  },
+  offeredLabel: {
+    fontSize: 14,
+    color: '#FF9800',
+    fontWeight: '500',
+  },
+  offeredAmount: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FF9800',
+  },
   columnsContainer: {
     flex: 1,
     flexDirection: 'row',
@@ -910,12 +1050,11 @@ const styles = StyleSheet.create({
     borderRightWidth: 1,
     borderColor: '#e0e0e0',
   },
-
   subColumnTitle: {
-    fontSize: 11, // Réduit de 12 à 11
+    fontSize: 11,
     fontWeight: '600',
     color: '#666',
-    padding: 6, // Réduit de 8 à 6
+    padding: 6,
     backgroundColor: '#f5f5f5',
     textAlign: 'center',
   },
@@ -929,21 +1068,37 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   itemCard: {
-    padding: 6, // Réduit de 8 à 6
+    padding: 6,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
-
   selectedItemCard: {
     backgroundColor: '#f9fff9',
   },
-
+  // Styles pour les articles offerts
+  offeredItemCard: {
+    backgroundColor: '#FFF8E1',
+    borderLeftWidth: 2,
+    borderLeftColor: '#FF9800',
+  },
+  offeredItemText: {
+    fontStyle: 'italic',
+    color: '#FF9800',
+  },
+  offeredPrice: {
+    textDecorationLine: 'line-through',
+    color: '#FF9800',
+  },
   itemHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 4, // Réduit de 6 à 4
+    marginBottom: 4,
   },
-
+  itemNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
   itemName: {
     fontSize: 13,
     fontWeight: '500',
@@ -954,7 +1109,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   selectedItemPrice: {
-    fontSize: 12, // Réduit de 13 à 12
+    fontSize: 12,
     fontWeight: '600',
     color: '#4CAF50',
   },
@@ -1002,31 +1157,27 @@ const styles = StyleSheet.create({
     backgroundColor: '#f0f0f0',
     borderRadius: 4,
     overflow: 'hidden',
-    alignSelf: 'flex-start', // S'adapter à sa taille
+    alignSelf: 'flex-start',
     marginTop: 4,
   },
-
   quantityButton: {
-    width: 24, // Réduit de 26 à 24
-    height: 24, // Réduit de 26 à 24
+    width: 24,
+    height: 24,
     justifyContent: 'center',
     alignItems: 'center',
   },
-
   quantityValue: {
-    width: 24, // Réduit de 28 à 24
+    width: 24,
     textAlign: 'center',
     fontSize: 12,
     fontWeight: '600',
   },
-
   subtotalText: {
     fontSize: 14,
     fontWeight: 'bold',
     color: '#4CAF50',
     marginBottom: 4,
   },
-
   removeButton: {
     paddingHorizontal: 8,
     paddingVertical: 3,
@@ -1036,8 +1187,27 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   removeButtonText: {
-    fontSize: 10, // Réduit de 11 à 10
+    fontSize: 10,
     color: '#F44336',
+  },
+  // Bouton pour offrir/annuler l'offre
+  offerButton: {
+    padding: 4,
+    marginLeft: 4,
+    borderRadius: 4,
+    backgroundColor: '#FFF8E1',
+    borderWidth: 1,
+    borderColor: '#FF9800',
+  },
+  offerButtonText: {
+    fontSize: 10,
+    color: '#FF9800',
+  },
+  cancelOfferButton: {
+    backgroundColor: '#FFECB3',
+  },
+  cancelOfferButtonText: {
+    fontWeight: '500',
   },
   paymentMethods: {
     backgroundColor: 'white',
@@ -1096,12 +1266,10 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-
   leftContent: {
     flex: 1,
     marginRight: 8,
   },
-
   rightContent: {
     alignItems: 'flex-end',
   },

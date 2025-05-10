@@ -14,22 +14,35 @@ export default function FullPaymentScreen() {
   const [processing, setProcessing] = useState(false);
   const [tableName, setTableName] = useState('');
   const toast = useToast();
+  const [totalOffered, setTotalOffered] = useState(0);
 
   const tableIdNum = parseInt(tableId as string, 10);
   const totalAmount = parseFloat(total as string);
   const orderItems = items ? JSON.parse(items as string) : [];
 
   // Get table name on load
-  useEffect(() => {
-    const fetchTableName = async () => {
-      const tableData = await getTable(tableIdNum);
-      if (tableData) {
-        setTableName(tableData.name);
-      }
-    };
+useEffect(() => {
+  const fetchTableData = async () => {
+    const tableData = await getTable(tableIdNum);
+    if (tableData) {
+      setTableName(tableData.name);
 
-    fetchTableName();
-  }, [tableIdNum]);
+      // Calculer le montant des articles offerts
+      if (tableData.order && tableData.order.items) {
+        const offeredAmount = tableData.order.items.reduce((sum, item) => {
+          if (item.offered) {
+            return sum + item.price * item.quantity;
+          }
+          return sum;
+        }, 0);
+
+        setTotalOffered(offeredAmount);
+      }
+    }
+  };
+
+  fetchTableData();
+}, [tableIdNum]);
 
   // Rest of the payment handling code...
   const handlePayment = async (method: 'card' | 'cash' | 'check') => {
@@ -60,7 +73,9 @@ export default function FullPaymentScreen() {
         paymentMethod: method,
         paymentType: 'full' as 'full',
         // Ajouter cette ligne pour stocker les articles payés
-        paidItems: orderItems  // Ceci contiendra tous les détails des articles
+        paidItems: orderItems, // Ceci contiendra tous les détails des articles
+        // Ajouter le montant des articles offerts
+        offeredAmount: totalOffered,
       };
 
       // Add to bills history
@@ -140,7 +155,9 @@ export default function FullPaymentScreen() {
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <ArrowLeft size={24} color="#333" />
         </Pressable>
-        <Text style={styles.title}>Payment - {tableName || `Table ${tableId}`}</Text>
+        <Text style={styles.title}>
+          Payment - {tableName || `Table ${tableId}`}
+        </Text>
       </View>
 
       {/* Rest of the UI remains the same */}
@@ -148,6 +165,14 @@ export default function FullPaymentScreen() {
         <View style={styles.amountCard}>
           <Text style={styles.amountLabel}>Montant total</Text>
           <Text style={styles.amount}>{totalAmount.toFixed(2)} €</Text>
+          {totalOffered > 0 && (
+            <View style={styles.offeredTotalSection}>
+              <Text style={styles.offeredLabel}>Articles offerts:</Text>
+              <Text style={styles.offeredAmount}>
+                {totalOffered.toFixed(2)} €
+              </Text>
+            </View>
+          )}
 
           <View style={styles.printOption}>
             <Text style={styles.printLabel}>Imprimer le ticket</Text>
@@ -163,7 +188,8 @@ export default function FullPaymentScreen() {
           <Pressable
             style={[styles.paymentButton, { backgroundColor: '#4CAF50' }]}
             onPress={() => handlePayment('card')}
-            disabled={processing}>
+            disabled={processing}
+          >
             <CreditCard size={32} color="white" />
             <Text style={styles.buttonText}>Paiement par carte</Text>
           </Pressable>
@@ -171,7 +197,8 @@ export default function FullPaymentScreen() {
           <Pressable
             style={[styles.paymentButton, { backgroundColor: '#2196F3' }]}
             onPress={() => handlePayment('cash')}
-            disabled={processing}>
+            disabled={processing}
+          >
             <Wallet size={32} color="white" />
             <Text style={styles.buttonText}>Paiement en espèces</Text>
           </Pressable>
@@ -179,7 +206,8 @@ export default function FullPaymentScreen() {
           <Pressable
             style={[styles.paymentButton, { backgroundColor: '#9C27B0' }]}
             onPress={() => handlePayment('check')}
-            disabled={processing}>
+            disabled={processing}
+          >
             <Edit3 size={32} color="white" />
             <Text style={styles.buttonText}>Paiement par chèque</Text>
           </Pressable>
@@ -268,5 +296,24 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 20,
     fontWeight: '600',
+  },
+  offeredTotalSection: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#FFD54F',
+    borderStyle: 'dashed',
+  },
+  offeredLabel: {
+    fontSize: 14,
+    color: '#FF9800',
+    fontWeight: '500',
+  },
+  offeredAmount: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FF9800',
   },
 });

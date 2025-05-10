@@ -3,7 +3,7 @@
 import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { useEffect, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Printer, Share, Home } from 'lucide-react-native';
+import { Printer, Share, Home, Gift } from 'lucide-react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 
@@ -66,22 +66,37 @@ export default function PrintPreviewScreen() {
 
   const generateHTML = () => {
     let totalPrice = 0;
+    let offeredTotal = 0;
+
     interface OrderItem {
       name: string;
       quantity: number;
       price: number;
+      offered?: boolean; // Ajout de la propriété offered
     }
 
     const itemsHTML: string = order.items
       .map((item: OrderItem) => {
         const itemTotal: number = item.quantity * item.price;
-        totalPrice += itemTotal;
+
+        // Calculer séparément les totaux normaux et offerts
+        if (!item.offered) {
+          totalPrice += itemTotal;
+        } else {
+          offeredTotal += itemTotal;
+        }
+
+        // Marquer visuellement les produits offerts
         return `
-      <tr>
-        <td>${item.name}</td>
+      <tr class="${item.offered ? 'offered-item' : ''}">
+        <td>${item.name}${
+          item.offered ? ' <span class="offered-label">(Offert)</span>' : ''
+        }</td>
         <td>${item.quantity}</td>
         <td>${item.price.toFixed(2)} €</td>
-        <td>${itemTotal.toFixed(2)} €</td>
+        <td class="${item.offered ? 'offered-price' : ''}">${itemTotal.toFixed(
+          2
+        )} €</td>
       </tr>
       `;
       })
@@ -91,98 +106,109 @@ export default function PrintPreviewScreen() {
     const taxInfo = 'TVA non applicable - art.293B du CGI';
 
     return `
-      <html>
-        <head>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 20px; }
-            .header, .footer { text-align: center; margin-bottom: 20px; }
-            .info { margin-bottom: 20px; text-align: center; }
-            .items { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-            .items th, .items td { padding: 8px; text-align: center; border-bottom: 1px solid #ddd; }
-            .totals { text-align: right; font-weight: bold; }
-            .payment-info { text-align: center; margin-top: 20px; padding: 10px; border: 1px dashed #ccc; }
-            .partial { color: #f44336; font-weight: bold; }
-            .preview-notice { 
-              background-color: #9C27B0; 
-              color: white; 
-              text-align: center; 
-              padding: 10px; 
-              font-weight: bold; 
-              font-size: 18px; 
-              margin-bottom: 15px; 
-              border-radius: 5px;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <h1>${restaurantInfo.name}</h1>
-            <p>${restaurantInfo.address}</p>
-            <p>${restaurantInfo.siret}</p>
-            <p>${taxInfo}</p>
-          </div>
-  
-          <div class="info">
-            <p><strong>${order.tableName}</strong></p>
-            <p>Date: ${order.timestamp}</p>
-            ${
-              isPreviewMode
-                ? '<p class="partial">NOTE NON PAYÉE</p>'
-                : order.isPartial
-                ? `<p class="partial">PAIEMENT PARTIEL</p>`
-                : ''
-            }
-          </div>
-  
-          <table class="items">
-            <tr>
-              <th>Description</th>
-              <th>Quantité</th>
-              <th>Prix</th>
-              <th>Total</th>
-            </tr>
-            ${itemsHTML}
-          </table>
-  
-          <div class="totals">
-            <h2>Total: ${order.total.toFixed(2)} €</h2>
-            ${
-              order.isPartial && !isPreviewMode
-                ? `<p class="partial">Solde restant: ${order.remaining.toFixed(
-                    2
-                  )} €</p>`
-                : ''
-            }
-          </div>
-  
-          <div class="payment-info">
-            ${
-              isPreviewMode
-                ? `<p style="color: #9C27B0; font-weight: bold; font-size: 16px;">PRÉVISUALISATION - NOTE NON PAYÉE</p>`
-                : `<p>Méthode de paiement: ${
-                    order.paymentMethod === 'card'
-                      ? 'Carte bancaire'
-                      : order.paymentMethod === 'cash'
-                      ? 'Espèces'
-                      : 'Chèque'
-                  }</p>
-              <p>Montant payé: ${order.total.toFixed(2)} €</p>
-              <p>Statut: ${
-                order.isPartial ? 'Paiement partiel' : 'Payé en totalité'
-              }</p>`
-            }
-          </div>
-  
-          <div class="footer">
-            <p>${taxInfo}</p>
-            <p>Merci de votre visite !</p>
-            <p>À bientôt,<br>${restaurantInfo.owner}<br>${
+    <html>
+      <head>
+        <style>
+          body { font-family: Arial, sans-serif; padding: 20px; }
+          .header, .footer { text-align: center; margin-bottom: 20px; }
+          .info { margin-bottom: 20px; text-align: center; }
+          .items { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+          .items th, .items td { padding: 8px; text-align: center; border-bottom: 1px solid #ddd; }
+          .totals { text-align: right; font-weight: bold; }
+          .payment-info { text-align: center; margin-top: 20px; padding: 10px; border: 1px dashed #ccc; }
+          .partial { color: #f44336; font-weight: bold; }
+          .preview-notice { 
+            background-color: #9C27B0; 
+            color: white; 
+            text-align: center; 
+            padding: 10px; 
+            font-weight: bold; 
+            font-size: 18px; 
+            margin-bottom: 15px; 
+            border-radius: 5px;
+          }
+          .offered-item { background-color: #FFF8E1; } /* Fond jaune clair pour les articles offerts */
+          .offered-label { color: #FF9800; font-style: italic; }
+          .offered-price { text-decoration: line-through; color: #FF9800; }
+          .offered-total { color: #FF9800; border-top: 1px dashed #FFD54F; padding-top: 8px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>${restaurantInfo.name}</h1>
+          <p>${restaurantInfo.address}</p>
+          <p>${restaurantInfo.siret}</p>
+          <p>${taxInfo}</p>
+        </div>
+
+        <div class="info">
+          <p><strong>${order.tableName}</strong></p>
+          <p>Date: ${order.timestamp}</p>
+          ${
+            isPreviewMode
+              ? '<p class="partial">NOTE NON PAYÉE</p>'
+              : order.isPartial
+              ? `<p class="partial">PAIEMENT PARTIEL</p>`
+              : ''
+          }
+        </div>
+
+        <table class="items">
+          <tr>
+            <th>Description</th>
+            <th>Quantité</th>
+            <th>Prix</th>
+            <th>Total</th>
+          </tr>
+          ${itemsHTML}
+        </table>
+
+        <div class="totals">
+          ${
+            offeredTotal > 0
+              ? `<p class="offered-total">Articles offerts: ${offeredTotal.toFixed(
+                  2
+                )} €</p>`
+              : ''
+          }
+          <h2>Total: ${order.total.toFixed(2)} €</h2>
+          ${
+            order.isPartial && !isPreviewMode
+              ? `<p class="partial">Solde restant: ${order.remaining.toFixed(
+                  2
+                )} €</p>`
+              : ''
+          }
+        </div>
+
+        <div class="payment-info">
+          ${
+            isPreviewMode
+              ? `<p style="color: #9C27B0; font-weight: bold; font-size: 16px;">PRÉVISUALISATION - NOTE NON PAYÉE</p>`
+              : `<p>Méthode de paiement: ${
+                  order.paymentMethod === 'card'
+                    ? 'Carte bancaire'
+                    : order.paymentMethod === 'cash'
+                    ? 'Espèces'
+                    : 'Chèque'
+                }</p>
+            <p>Montant payé: ${order.total.toFixed(2)} €</p>
+            <p>Statut: ${
+              order.isPartial ? 'Paiement partiel' : 'Payé en totalité'
+            }</p>`
+          }
+        </div>
+
+        <div class="footer">
+          <p>${taxInfo}</p>
+          <p>Merci de votre visite !</p>
+          <p>À bientôt,<br>${restaurantInfo.owner}<br>${
       restaurantInfo.phone
     }</p>
-          </div>
-        </body>
-      </html>
-    `;
+        </div>
+      </body>
+    </html>
+  `;
   };
 
   const handlePrint = async () => {
@@ -253,15 +279,40 @@ export default function PrintPreviewScreen() {
         <View style={styles.itemsSection}>
           {order.items.map(
             (
-              item: { name: string; quantity: number; price: number },
+              item: {
+                name: string;
+                quantity: number;
+                price: number;
+                offered?: boolean;
+              },
               index: number
             ) => (
-              <View key={index} style={styles.item}>
+              <View
+                key={index}
+                style={[styles.item, item.offered && styles.offeredItem]}
+              >
                 <View style={styles.itemDetails}>
-                  <Text style={styles.itemName}>{item.name}</Text>
+                  <View style={styles.itemNameRow}>
+                    {item.offered && (
+                      <Gift size={14} color="#FF9800" style={styles.giftIcon} />
+                    )}
+                    <Text
+                      style={[
+                        styles.itemName,
+                        item.offered && styles.offeredItemText,
+                      ]}
+                    >
+                      {item.name} {item.offered ? '(Offert)' : ''}
+                    </Text>
+                  </View>
                   <Text style={styles.itemQuantity}>x{item.quantity}</Text>
                 </View>
-                <Text style={styles.itemTotal}>
+                <Text
+                  style={[
+                    styles.itemTotal,
+                    item.offered && styles.offeredItemPrice,
+                  ]}
+                >
                   {(item.quantity * item.price).toFixed(2)} €
                 </Text>
               </View>
@@ -529,5 +580,44 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontSize: 14,
     marginLeft: 10,
+  },
+  offeredItem: {
+    backgroundColor: '#FFF8E1',
+    borderLeftWidth: 2,
+    borderLeftColor: '#FF9800',
+  },
+  offeredItemText: {
+    fontStyle: 'italic',
+    color: '#FF9800',
+  },
+  offeredItemPrice: {
+    textDecorationLine: 'line-through',
+    color: '#FF9800',
+  },
+  giftIcon: {
+    marginRight: 4,
+  },
+  itemNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  offeredTotalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#FFD54F',
+    borderStyle: 'dashed',
+  },
+  offeredTotalLabel: {
+    fontSize: 14,
+    color: '#FF9800',
+    fontWeight: '500',
+  },
+  offeredTotalValue: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FF9800',
   },
 });

@@ -2,6 +2,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ArrowLeft,
   CreditCard,
+  Gift,
   Minus,
   Plus,
   Receipt,
@@ -404,11 +405,70 @@ export default function TableScreen() {
       ]
     );
   };
+  const offeredTotal = useMemo(() => {
+    if (!table || !table.order) return 0;
+
+    return table.order.items.reduce((sum, item) => {
+      if (item.offered) {
+        return sum + item.price * item.quantity;
+      }
+      return sum;
+    }, 0);
+  }, [table]);
+
+  const toggleItemOffered = useCallback(
+    (itemId: number) => {
+      if (!table || !table.order) return;
+
+      setTable((prevTable) => {
+        if (!prevTable || !prevTable.order) return prevTable;
+
+        const updatedItems = prevTable.order.items.map((item) => {
+          if (item.id !== itemId) return item;
+
+          // Inverser l'état "offered"
+          return { ...item, offered: !item.offered };
+        });
+
+        // Recalculer le total en excluant les articles offerts
+        const newTotal = updatedItems.reduce((sum, item) => {
+          if (!item.offered) {
+            return sum + item.price * item.quantity;
+          }
+          return sum;
+        }, 0);
+
+        const updatedTable = {
+          ...prevTable,
+          order: {
+            ...prevTable.order,
+            items: updatedItems,
+            total: newTotal,
+          },
+        };
+
+        // Mise à jour asynchrone de la base de données
+        updateTable(updatedTable).catch((error) => {
+          toast.showToast('Erreur lors de la mise à jour', 'error');
+          console.error('Error updating table:', error);
+        });
+
+        return updatedTable;
+      });
+    },
+    [table, toast]
+  );
 
   // Calculer le total de la commande
-  const calculateTotal = useCallback((items: OrderItem[]): number => {
-    return items.reduce((sum, item) => sum + item.price * item.quantity, 0);
-  }, []);
+  const calculateTotal = (items: OrderItem[]): number => {
+    return items.reduce((sum, item) => {
+      // N'ajoute le prix au total que si l'article n'est pas marqué comme offert
+      if (!item.offered) {
+        return sum + item.price * item.quantity;
+      }
+      return sum;
+    }, 0);
+  };
 
   // Handler pour ajouter un item à la commande (useCallback)
   const addItemToOrder = useCallback(
@@ -498,7 +558,7 @@ export default function TableScreen() {
     },
     [table, calculateTotal, toast]
   );
-  
+
   // Reste des handlers (existants)...
   const handleCloseTable = async () => {
     if (!table) return;
@@ -601,11 +661,26 @@ export default function TableScreen() {
 
   // Rendu ultra-compact d'un item de commande
   const renderUltraCompactItem = (item: OrderItem) => (
-    <View key={`order-${item.id}`} style={styles.ultraCompactItem}>
+    <View
+      key={`order-${item.id}`}
+      style={[
+        styles.ultraCompactItem,
+        item.offered && styles.offeredItem, // Ajouter un style spécial pour les articles offerts
+      ]}
+    >
       <View style={styles.firstLineCompact}>
-        <Text style={styles.itemNameUltraCompact} numberOfLines={1}>
-          {truncateName(item.name)}
-        </Text>
+        <View style={styles.itemNameContainer}>
+          {item.offered && <Gift size={14} color="#FF9800" />}
+          <Text
+            style={[
+              styles.itemNameUltraCompact,
+              item.offered && styles.offeredItemText,
+            ]}
+            numberOfLines={1}
+          >
+            {truncateName(item.name)} {item.offered ? '(Offert)' : ''}
+          </Text>
+        </View>
         <View style={styles.quantityControlCompact}>
           <Pressable
             style={styles.quantityButton}
@@ -622,9 +697,24 @@ export default function TableScreen() {
           </Pressable>
         </View>
       </View>
-      <Text style={styles.priceUltraCompact}>
-        {(item.price * item.quantity).toFixed(2)} €
-      </Text>
+      <View style={styles.secondLineCompact}>
+        <Text
+          style={[
+            styles.priceUltraCompact,
+            item.offered && styles.offeredItemPrice,
+          ]}
+        >
+          {(item.price * item.quantity).toFixed(2)} €
+        </Text>
+        <Pressable
+          style={styles.offerButton}
+          onPress={() => toggleItemOffered(item.id)}
+        >
+          <Text style={styles.offerButtonText}>
+            {item.offered ? 'Annuler offre' : 'Offrir'}
+          </Text>
+        </Pressable>
+      </View>
     </View>
   );
 
@@ -645,7 +735,6 @@ export default function TableScreen() {
     if (!activeType) return categories;
     return categoriesByType[activeType];
   };
-
 
   const handlePreviewNote = useCallback(() => {
     if (!table || !table.order || table.order.items.length === 0) {
@@ -830,6 +919,15 @@ export default function TableScreen() {
               <Text style={styles.totalLabel}>Total:</Text>
               <Text style={styles.totalAmount}>{total.toFixed(2)} €</Text>
             </View>
+
+            {offeredTotal > 0 && (
+              <View style={styles.offeredTotalRow}>
+                <Text style={styles.offeredTotalLabel}>Articles offerts:</Text>
+                <Text style={styles.offeredTotalAmount}>
+                  {offeredTotal.toFixed(2)} €
+                </Text>
+              </View>
+            )}
           </View>
           <View style={styles.paymentActions}>
             <View style={styles.paymentActionsRow}>
@@ -1367,5 +1465,63 @@ const styles = StyleSheet.create({
     marginTop: 15,
     fontSize: 16,
     color: '#333',
+  },
+  offeredItem: {
+    backgroundColor: '#FFF8E1', // Fond légèrement jaune pour les articles offerts
+    borderLeftWidth: 2,
+    borderLeftColor: '#FF9800',
+  },
+  offeredItemText: {
+    fontStyle: 'italic',
+    color: '#FF9800',
+  },
+  offeredItemPrice: {
+    textDecorationLine: 'line-through',
+    color: '#FF9800',
+  },
+  offerButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    backgroundColor: '#f5f5f5',
+    borderWidth: 1,
+    borderColor: '#FF9800',
+    borderRadius: 4,
+  },
+  offerButtonText: {
+    fontSize: 10,
+    color: '#FF9800',
+  },
+  itemNameContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginRight: 6,
+  },
+  secondLineCompact: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+  offeredTotalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#FFD54F',
+    borderStyle: 'dashed',
+  },
+  offeredTotalLabel: {
+    fontSize: 14,
+    color: '#FF9800',
+    fontWeight: '500',
+  },
+  offeredTotalAmount: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FF9800',
   },
 });

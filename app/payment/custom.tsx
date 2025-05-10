@@ -38,6 +38,7 @@ export default function CustomSplitScreen() {
   const orderItems = items ? JSON.parse(items as string) : [];
   const toast = useToast();
   const [processing, setProcessing] = useState(false);
+const [totalOffered, setTotalOffered] = useState(0);
 
   // Ajouter un état pour le nom et la section de la table
   const [tableName, setTableName] = useState('');
@@ -50,6 +51,18 @@ export default function CustomSplitScreen() {
       if (table) {
         setTableName(table.name);
         setTableSection(table.section);
+
+        // Calculer le montant des articles offerts s'il y en a
+        if (table.order && table.order.items) {
+          const offeredAmount = table.order.items.reduce((sum, item) => {
+            if (item.offered) {
+              return sum + item.price * item.quantity;
+            }
+            return sum;
+          }, 0);
+
+          setTotalOffered(offeredAmount);
+        }
       }
     };
 
@@ -243,7 +256,7 @@ export default function CustomSplitScreen() {
 
         // Créer la facture pour ce paiement
         const bill = {
-          id: Date.now() + validPayments.indexOf(payment),
+          id: Date.now(),
           tableNumber: tableIdNum,
           tableName: tableName,
           section: tableSection,
@@ -261,6 +274,8 @@ export default function CustomSplitScreen() {
               : 0,
             customAmount: payment.amount,
           })),
+          // Ajouter le montant des articles offerts proportionnel à ce paiement
+          offeredAmount: (payment.amount / totalAmount) * totalOffered,
         };
 
         // Si vous avez toujours des problèmes, vous pouvez ajouter une vérification supplémentaire
@@ -327,6 +342,13 @@ export default function CustomSplitScreen() {
           <View style={styles.sectionBadge}>
             <Text style={styles.sectionText}>{tableSection}</Text>
           </View>
+          {totalOffered > 0 && (
+            <View style={styles.offeredInfoContainer}>
+              <Text style={styles.offeredInfoText}>
+                Articles offerts: {totalOffered.toFixed(2)} €
+              </Text>
+            </View>
+          )}
         </View>
       </View>
 
@@ -481,6 +503,14 @@ export default function CustomSplitScreen() {
           <View style={styles.totalCard}>
             <Text style={styles.totalLabel}>Montant total de la facture</Text>
             <Text style={styles.totalAmount}>{totalAmount.toFixed(2)} €</Text>
+
+            {totalOffered > 0 && (
+              <View style={styles.offeredContainer}>
+                <Text style={styles.offeredText}>
+                  Articles offerts: {totalOffered.toFixed(2)} €
+                </Text>
+              </View>
+            )}
 
             {errorMessage && (
               <Text
@@ -771,5 +801,32 @@ const styles = StyleSheet.create({
     color: 'white',
     marginTop: 12,
     fontSize: 16,
+  },
+  offeredInfoContainer: {
+    backgroundColor: '#FFF8E1',
+    padding: 6,
+    borderRadius: 6,
+    marginTop: 8,
+    alignSelf: 'flex-start',
+    borderWidth: 1,
+    borderColor: '#FFD54F',
+  },
+  offeredInfoText: {
+    color: '#FF9800',
+    fontWeight: '500',
+    fontSize: 13,
+  },
+  offeredContainer: {
+    marginTop: 10,
+    padding: 10,
+    backgroundColor: '#FFF8E1',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#FFD54F',
+  },
+  offeredText: {
+    color: '#FF9800',
+    fontWeight: '500',
+    textAlign: 'center',
   },
 });

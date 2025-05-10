@@ -10,7 +10,7 @@ import {
   ActivityIndicator,
   TouchableOpacity
 } from 'react-native';
-import { X, Calendar, ChevronRight, AlertCircle, TrendingUp, BarChart3, DollarSign, Users } from 'lucide-react-native';
+import { X, Calendar, ChevronRight, AlertCircle, TrendingUp, BarChart3, DollarSign, Users, Gift } from 'lucide-react-native';
 import { getBills, Bill } from '../../utils/storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 
@@ -65,6 +65,8 @@ interface DayStats {
     custom: number;
     unknown: number;
   };
+  offeredTotal: number; // Nouveau champ pour le total des articles offerts
+  offeredCount: number; // Nouveau champ pour le nombre d'articles offerts
 }
 
 // Interface pour les statistiques par période
@@ -76,6 +78,9 @@ interface PeriodStats {
   averageTicket: number;
   dailyAverage: number;
   busyTables: { tableNumber: number; tableName: string; amount: number }[];
+  offeredTotal: number; // Nouveau champ pour le total des articles offerts
+  offeredCount: number; // Nouveau champ pour le nombre de factures avec des articles offerts
+  offeredPercentage: number; // Nouveau champ pour le pourcentage des ventes "offert"
 }
 
 const StatsModal: React.FC<StatsModalProps> = ({ visible, onClose }) => {
@@ -105,102 +110,203 @@ const StatsModal: React.FC<StatsModalProps> = ({ visible, onClose }) => {
     try {
       // Charger toutes les factures
       const bills = await getBills();
-      
+
       // Déterminer la période sélectionnée
       let startDate: Date;
       let endDate = new Date();
       endDate.setHours(23, 59, 59, 999);
-      
+
       if (selectedPeriod === 'custom') {
         startDate = new Date(customStartDate);
         startDate.setHours(0, 0, 0, 0);
         endDate = new Date(customEndDate);
         endDate.setHours(23, 59, 59, 999);
       } else {
-        const daysToLookBack = selectedPeriod === '3days' ? 3 : selectedPeriod === '7days' ? 7 : 30;
+        const daysToLookBack =
+          selectedPeriod === '3days' ? 3 : selectedPeriod === '7days' ? 7 : 30;
         startDate = new Date();
         startDate.setDate(startDate.getDate() - (daysToLookBack - 1));
         startDate.setHours(0, 0, 0, 0);
       }
-      
+
       // Filtrer les factures pour la période
-      const filteredBills = bills.filter(bill => {
+      const filteredBills = bills.filter((bill) => {
         const billDate = new Date(bill.timestamp);
         return billDate >= startDate && billDate <= endDate;
       });
-      
+
       // Générer les statistiques quotidiennes
       const days = [];
       let currentDate = new Date(startDate);
-      
+
       while (currentDate <= endDate) {
-        const dayBills = filteredBills.filter(bill => {
+        const dayBills = filteredBills.filter((bill) => {
           const billDate = new Date(bill.timestamp);
           return isSameDay(billDate, currentDate);
         });
-        
+
         const totalSales = dayBills.reduce((sum, bill) => sum + bill.amount, 0);
         const paymentCount = dayBills.length;
-        
+
         // Compter les méthodes de paiement
         const paymentMethods = {
-          card: dayBills.filter(bill => bill.paymentMethod === 'card').length,
-          cash: dayBills.filter(bill => bill.paymentMethod === 'cash').length,
-          check: dayBills.filter(bill => bill.paymentMethod === 'check').length,
-          unknown: dayBills.filter(bill => !bill.paymentMethod).length
+          card: dayBills.filter((bill) => bill.paymentMethod === 'card').length,
+          cash: dayBills.filter((bill) => bill.paymentMethod === 'cash').length,
+          check: dayBills.filter((bill) => bill.paymentMethod === 'check')
+            .length,
+          unknown: dayBills.filter((bill) => !bill.paymentMethod).length,
         };
-        
+
         // Compter les types de paiement
         const paymentTypes = {
-          full: dayBills.filter(bill => bill.paymentType === 'full').length,
-          split: dayBills.filter(bill => bill.paymentType === 'split').length,
-          custom: dayBills.filter(bill => bill.paymentType === 'custom').length,
-          unknown: dayBills.filter(bill => !bill.paymentType).length
+          full: dayBills.filter((bill) => bill.paymentType === 'full').length,
+          split: dayBills.filter((bill) => bill.paymentType === 'split').length,
+          custom: dayBills.filter((bill) => bill.paymentType === 'custom')
+            .length,
+          unknown: dayBills.filter((bill) => !bill.paymentType).length,
         };
-        
+
+        // Calculer le total des articles offerts pour ce jour
+        const offeredTotal = dayBills.reduce((sum, bill) => {
+          // Si la facture a un champ offeredAmount, l'utiliser
+          if (typeof bill.offeredAmount === 'number') {
+            return sum + bill.offeredAmount;
+          }
+
+          // Sinon, essayer de calculer à partir des articles
+          if (bill.paidItems && Array.isArray(bill.paidItems)) {
+            return (
+              sum +
+              bill.paidItems.reduce((itemSum, item) => {
+                if (item.offered) {
+                  return itemSum + item.price * item.quantity;
+                }
+                return itemSum;
+              }, 0)
+            );
+          }
+
+          return sum;
+        }, 0);
+
+        // Compter le nombre de factures avec des articles offerts
+        const offeredCount = dayBills.filter((bill) => {
+          // Si bill.offeredAmount existe et est supérieur à 0
+          if (
+            typeof bill.offeredAmount === 'number' &&
+            bill.offeredAmount > 0
+          ) {
+            return true;
+          }
+
+          // Ou si au moins un article est marqué comme offert
+          if (bill.paidItems && Array.isArray(bill.paidItems)) {
+            return bill.paidItems.some((item) => item.offered);
+          }
+
+          return false;
+        }).length;
+
         days.push({
           date: new Date(currentDate),
           totalSales,
           paymentCount,
           averageTicket: paymentCount > 0 ? totalSales / paymentCount : 0,
           paymentMethods,
-          paymentTypes
+          paymentTypes,
+          offeredTotal,
+          offeredCount,
         });
-        
+
         // Passer au jour suivant
         currentDate.setDate(currentDate.getDate() + 1);
         currentDate.setHours(0, 0, 0, 0);
       }
-      
+
       setDailyStats(days);
-      
+
       // Calculer les statistiques de la période
-      const totalSales = filteredBills.reduce((sum, bill) => sum + bill.amount, 0);
+      const totalSales = filteredBills.reduce(
+        (sum, bill) => sum + bill.amount,
+        0
+      );
       const paymentCount = filteredBills.length;
-      
+
       // Trouver les tables les plus occupées
-      const tableMap = new Map<number, { tableNumber: number; tableName: string; amount: number }>();
-      
-      filteredBills.forEach(bill => {
+      const tableMap = new Map<
+        number,
+        { tableNumber: number; tableName: string; amount: number }
+      >();
+
+      filteredBills.forEach((bill) => {
         if (!tableMap.has(bill.tableNumber)) {
           tableMap.set(bill.tableNumber, {
             tableNumber: bill.tableNumber,
             tableName: bill.tableName || `Table ${bill.tableNumber}`,
-            amount: 0
+            amount: 0,
           });
         }
-        
+
         const tableData = tableMap.get(bill.tableNumber)!;
         tableData.amount += bill.amount;
       });
-      
+
       const busyTables = Array.from(tableMap.values())
         .sort((a, b) => b.amount - a.amount)
         .slice(0, 5);
-      
+
       // Calculer le nombre de jours dans la période
-      const daysDiff = Math.max(1, Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)));
-      
+      const daysDiff = Math.max(
+        1,
+        Math.ceil(
+          (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)
+        )
+      );
+
+      // Calculer le total des articles offerts pour toute la période
+      const periodOfferedTotal = filteredBills.reduce((sum, bill) => {
+        // Si la facture a un champ offeredAmount, l'utiliser
+        if (typeof bill.offeredAmount === 'number') {
+          return sum + bill.offeredAmount;
+        }
+
+        // Sinon, essayer de calculer à partir des articles
+        if (bill.paidItems && Array.isArray(bill.paidItems)) {
+          return (
+            sum +
+            bill.paidItems.reduce((itemSum, item) => {
+              if (item.offered) {
+                return itemSum + item.price * item.quantity;
+              }
+              return itemSum;
+            }, 0)
+          );
+        }
+
+        return sum;
+      }, 0);
+
+      // Compter le nombre de factures avec des articles offerts
+      const periodOfferedCount = filteredBills.filter((bill) => {
+        // Si bill.offeredAmount existe et est supérieur à 0
+        if (typeof bill.offeredAmount === 'number' && bill.offeredAmount > 0) {
+          return true;
+        }
+
+        // Ou si au moins un article est marqué comme offert
+        if (bill.paidItems && Array.isArray(bill.paidItems)) {
+          return bill.paidItems.some((item) => item.offered);
+        }
+
+        return false;
+      }).length;
+
+      // Calculer le pourcentage des ventes "offert"
+      const periodOfferedPercentage =
+        totalSales > 0
+          ? (periodOfferedTotal / (totalSales + periodOfferedTotal)) * 100
+          : 0;
+
       setPeriodStats({
         startDate,
         endDate,
@@ -208,9 +314,11 @@ const StatsModal: React.FC<StatsModalProps> = ({ visible, onClose }) => {
         paymentCount,
         averageTicket: paymentCount > 0 ? totalSales / paymentCount : 0,
         dailyAverage: totalSales / daysDiff,
-        busyTables
+        busyTables,
+        offeredTotal: periodOfferedTotal,
+        offeredCount: periodOfferedCount,
+        offeredPercentage: periodOfferedPercentage,
       });
-      
     } catch (error) {
       console.error('Erreur lors du chargement des statistiques:', error);
     } finally {
@@ -279,34 +387,66 @@ const StatsModal: React.FC<StatsModalProps> = ({ visible, onClose }) => {
           {/* Onglets de navigation */}
           <View style={styles.tabsContainer}>
             <Pressable
-              style={[styles.tab, selectedPeriod === '3days' && styles.activeTab]}
+              style={[
+                styles.tab,
+                selectedPeriod === '3days' && styles.activeTab,
+              ]}
               onPress={() => handlePeriodChange('3days')}
             >
-              <Text style={[styles.tabText, selectedPeriod === '3days' && styles.activeTabText]}>
+              <Text
+                style={[
+                  styles.tabText,
+                  selectedPeriod === '3days' && styles.activeTabText,
+                ]}
+              >
                 3 derniers jours
               </Text>
             </Pressable>
             <Pressable
-              style={[styles.tab, selectedPeriod === '7days' && styles.activeTab]}
+              style={[
+                styles.tab,
+                selectedPeriod === '7days' && styles.activeTab,
+              ]}
               onPress={() => handlePeriodChange('7days')}
             >
-              <Text style={[styles.tabText, selectedPeriod === '7days' && styles.activeTabText]}>
+              <Text
+                style={[
+                  styles.tabText,
+                  selectedPeriod === '7days' && styles.activeTabText,
+                ]}
+              >
                 7 jours
               </Text>
             </Pressable>
             <Pressable
-              style={[styles.tab, selectedPeriod === '30days' && styles.activeTab]}
+              style={[
+                styles.tab,
+                selectedPeriod === '30days' && styles.activeTab,
+              ]}
               onPress={() => handlePeriodChange('30days')}
             >
-              <Text style={[styles.tabText, selectedPeriod === '30days' && styles.activeTabText]}>
+              <Text
+                style={[
+                  styles.tabText,
+                  selectedPeriod === '30days' && styles.activeTabText,
+                ]}
+              >
                 30 jours
               </Text>
             </Pressable>
             <Pressable
-              style={[styles.tab, selectedPeriod === 'custom' && styles.activeTab]}
+              style={[
+                styles.tab,
+                selectedPeriod === 'custom' && styles.activeTab,
+              ]}
               onPress={() => handlePeriodChange('custom')}
             >
-              <Text style={[styles.tabText, selectedPeriod === 'custom' && styles.activeTabText]}>
+              <Text
+                style={[
+                  styles.tabText,
+                  selectedPeriod === 'custom' && styles.activeTabText,
+                ]}
+              >
                 Personnalisé
               </Text>
             </Pressable>
@@ -331,7 +471,9 @@ const StatsModal: React.FC<StatsModalProps> = ({ visible, onClose }) => {
                     value={customStartDate}
                     mode="date"
                     display="default"
-                    onChange={(event, date) => handleDateChange(event, date, true)}
+                    onChange={(event, date) =>
+                      handleDateChange(event, date, true)
+                    }
                   />
                 )}
               </View>
@@ -352,7 +494,9 @@ const StatsModal: React.FC<StatsModalProps> = ({ visible, onClose }) => {
                     value={customEndDate}
                     mode="date"
                     display="default"
-                    onChange={(event, date) => handleDateChange(event, date, false)}
+                    onChange={(event, date) =>
+                      handleDateChange(event, date, false)
+                    }
                   />
                 )}
               </View>
@@ -362,20 +506,42 @@ const StatsModal: React.FC<StatsModalProps> = ({ visible, onClose }) => {
           {/* Onglets pour les différentes vues */}
           <View style={styles.viewTabsContainer}>
             <Pressable
-              style={[styles.viewTab, activeView === 'daily' && styles.activeViewTab]}
+              style={[
+                styles.viewTab,
+                activeView === 'daily' && styles.activeViewTab,
+              ]}
               onPress={() => setActiveView('daily')}
             >
-              <BarChart3 size={16} color={activeView === 'daily' ? '#2196F3' : '#666'} />
-              <Text style={[styles.viewTabText, activeView === 'daily' && styles.activeViewTabText]}>
+              <BarChart3
+                size={16}
+                color={activeView === 'daily' ? '#2196F3' : '#666'}
+              />
+              <Text
+                style={[
+                  styles.viewTabText,
+                  activeView === 'daily' && styles.activeViewTabText,
+                ]}
+              >
                 Jours
               </Text>
             </Pressable>
             <Pressable
-              style={[styles.viewTab, activeView === 'period' && styles.activeViewTab]}
+              style={[
+                styles.viewTab,
+                activeView === 'period' && styles.activeViewTab,
+              ]}
               onPress={() => setActiveView('period')}
             >
-              <TrendingUp size={16} color={activeView === 'period' ? '#2196F3' : '#666'} />
-              <Text style={[styles.viewTabText, activeView === 'period' && styles.activeViewTabText]}>
+              <TrendingUp
+                size={16}
+                color={activeView === 'period' ? '#2196F3' : '#666'}
+              />
+              <Text
+                style={[
+                  styles.viewTabText,
+                  activeView === 'period' && styles.activeViewTabText,
+                ]}
+              >
                 Résumé
               </Text>
             </Pressable>
@@ -385,7 +551,9 @@ const StatsModal: React.FC<StatsModalProps> = ({ visible, onClose }) => {
           {loading ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color="#2196F3" />
-              <Text style={styles.loadingText}>Chargement des statistiques...</Text>
+              <Text style={styles.loadingText}>
+                Chargement des statistiques...
+              </Text>
             </View>
           ) : (
             <ScrollView style={styles.contentContainer}>
@@ -394,7 +562,9 @@ const StatsModal: React.FC<StatsModalProps> = ({ visible, onClose }) => {
                   {dailyStats.length === 0 ? (
                     <View style={styles.noDataContainer}>
                       <AlertCircle size={40} color="#FFC107" />
-                      <Text style={styles.noDataText}>Aucune donnée disponible pour cette période</Text>
+                      <Text style={styles.noDataText}>
+                        Aucune donnée disponible pour cette période
+                      </Text>
                     </View>
                   ) : (
                     dailyStats.map((dayStat, index) => (
@@ -407,15 +577,21 @@ const StatsModal: React.FC<StatsModalProps> = ({ visible, onClose }) => {
                           onPress={() => toggleDayExpansion(dayStat.date)}
                         >
                           <View style={styles.dayCardHeaderLeft}>
-                            <Text style={styles.dayCardDate}>{formatDate(dayStat.date, 'long')}</Text>
+                            <Text style={styles.dayCardDate}>
+                              {formatDate(dayStat.date, 'long')}
+                            </Text>
                             <View style={styles.dayCardSummary}>
                               <View style={styles.daySummaryItem}>
                                 <DollarSign size={14} color="#4CAF50" />
-                                <Text style={styles.daySummaryText}>{dayStat.totalSales.toFixed(2)} €</Text>
+                                <Text style={styles.daySummaryText}>
+                                  {dayStat.totalSales.toFixed(2)} €
+                                </Text>
                               </View>
                               <View style={styles.daySummaryItem}>
                                 <Users size={14} color="#2196F3" />
-                                <Text style={styles.daySummaryText}>{dayStat.paymentCount} paiements</Text>
+                                <Text style={styles.daySummaryText}>
+                                  {dayStat.paymentCount} paiements
+                                </Text>
                               </View>
                             </View>
                           </View>
@@ -423,66 +599,151 @@ const StatsModal: React.FC<StatsModalProps> = ({ visible, onClose }) => {
                             size={20}
                             color="#666"
                             style={{
-                              transform: [{
-                                rotate: expandedDay && isSameDay(expandedDay, dayStat.date) ? '90deg' : '0deg'
-                              }]
+                              transform: [
+                                {
+                                  rotate:
+                                    expandedDay &&
+                                    isSameDay(expandedDay, dayStat.date)
+                                      ? '90deg'
+                                      : '0deg',
+                                },
+                              ],
                             }}
                           />
                         </TouchableOpacity>
 
-                        {expandedDay && isSameDay(expandedDay, dayStat.date) && (
-                          <View style={styles.dayCardDetails}>
-                            <View style={styles.detailSection}>
-                              <Text style={styles.detailSectionTitle}>Statistiques</Text>
-                              <View style={styles.detailRow}>
-                                <Text style={styles.detailLabel}>Total des ventes</Text>
-                                <Text style={styles.detailValue}>{dayStat.totalSales.toFixed(2)} €</Text>
-                              </View>
-                              <View style={styles.detailRow}>
-                                <Text style={styles.detailLabel}>Nombre de transactions</Text>
-                                <Text style={styles.detailValue}>{dayStat.paymentCount}</Text>
-                              </View>
-                              <View style={styles.detailRow}>
-                                <Text style={styles.detailLabel}>Ticket moyen</Text>
-                                <Text style={styles.detailValue}>
-                                  {dayStat.averageTicket > 0 ? dayStat.averageTicket.toFixed(2) : '0.00'} €
+                        {expandedDay &&
+                          isSameDay(expandedDay, dayStat.date) && (
+                            <View style={styles.dayCardDetails}>
+                              <View style={styles.detailSection}>
+                                <Text style={styles.detailSectionTitle}>
+                                  Statistiques
                                 </Text>
+                                <View style={styles.detailRow}>
+                                  <Text style={styles.detailLabel}>
+                                    Total des ventes
+                                  </Text>
+                                  <Text style={styles.detailValue}>
+                                    {dayStat.totalSales.toFixed(2)} €
+                                  </Text>
+                                </View>
+                                <View style={styles.detailRow}>
+                                  <Text style={styles.detailLabel}>
+                                    Nombre de transactions
+                                  </Text>
+                                  <Text style={styles.detailValue}>
+                                    {dayStat.paymentCount}
+                                  </Text>
+                                </View>
+                                <View style={styles.detailRow}>
+                                  <Text style={styles.detailLabel}>
+                                    Ticket moyen
+                                  </Text>
+                                  <Text style={styles.detailValue}>
+                                    {dayStat.averageTicket > 0
+                                      ? dayStat.averageTicket.toFixed(2)
+                                      : '0.00'}{' '}
+                                    €
+                                  </Text>
+                                </View>
                               </View>
-                            </View>
+                              {dayStat.offeredCount > 0 && (
+                                <View style={styles.detailSection}>
+                                  <Text style={styles.detailSectionTitle}>
+                                    Articles Offerts
+                                  </Text>
+                                  <View style={styles.detailRow}>
+                                    <Text style={styles.detailLabel}>
+                                      Montant total offert
+                                    </Text>
+                                    <Text style={styles.offeredValue}>
+                                      {dayStat.offeredTotal.toFixed(2)} €
+                                    </Text>
+                                  </View>
+                                  <View style={styles.detailRow}>
+                                    <Text style={styles.detailLabel}>
+                                      Nombre de cadeaux
+                                    </Text>
+                                    <Text style={styles.detailValue}>
+                                      {dayStat.offeredCount}
+                                    </Text>
+                                  </View>
+                                  <View style={styles.detailRow}>
+                                    <Text style={styles.detailLabel}>
+                                      % des ventes
+                                    </Text>
+                                    <Text style={styles.offeredValue}>
+                                      {(
+                                        (dayStat.offeredTotal /
+                                          (dayStat.totalSales +
+                                            dayStat.offeredTotal)) *
+                                        100
+                                      ).toFixed(1)}{' '}
+                                      %
+                                    </Text>
+                                  </View>
+                                </View>
+                              )}
 
-                            <View style={styles.detailSection}>
-                              <Text style={styles.detailSectionTitle}>Méthodes de paiement</Text>
-                              <View style={styles.detailRow}>
-                                <Text style={styles.detailLabel}>Carte bancaire</Text>
-                                <Text style={styles.detailValue}>{dayStat.paymentMethods.card}</Text>
+                              <View style={styles.detailSection}>
+                                <Text style={styles.detailSectionTitle}>
+                                  Méthodes de paiement
+                                </Text>
+                                <View style={styles.detailRow}>
+                                  <Text style={styles.detailLabel}>
+                                    Carte bancaire
+                                  </Text>
+                                  <Text style={styles.detailValue}>
+                                    {dayStat.paymentMethods.card}
+                                  </Text>
+                                </View>
+                                <View style={styles.detailRow}>
+                                  <Text style={styles.detailLabel}>
+                                    Espèces
+                                  </Text>
+                                  <Text style={styles.detailValue}>
+                                    {dayStat.paymentMethods.cash}
+                                  </Text>
+                                </View>
+                                <View style={styles.detailRow}>
+                                  <Text style={styles.detailLabel}>Chèque</Text>
+                                  <Text style={styles.detailValue}>
+                                    {dayStat.paymentMethods.check}
+                                  </Text>
+                                </View>
                               </View>
-                              <View style={styles.detailRow}>
-                                <Text style={styles.detailLabel}>Espèces</Text>
-                                <Text style={styles.detailValue}>{dayStat.paymentMethods.cash}</Text>
-                              </View>
-                              <View style={styles.detailRow}>
-                                <Text style={styles.detailLabel}>Chèque</Text>
-                                <Text style={styles.detailValue}>{dayStat.paymentMethods.check}</Text>
-                              </View>
-                            </View>
 
-                            <View style={styles.detailSection}>
-                              <Text style={styles.detailSectionTitle}>Types de paiement</Text>
-                              <View style={styles.detailRow}>
-                                <Text style={styles.detailLabel}>Paiement complet</Text>
-                                <Text style={styles.detailValue}>{dayStat.paymentTypes.full}</Text>
-                              </View>
-                              <View style={styles.detailRow}>
-                                <Text style={styles.detailLabel}>Paiement partagé</Text>
-                                <Text style={styles.detailValue}>{dayStat.paymentTypes.split}</Text>
-                              </View>
-                              <View style={styles.detailRow}>
-                                <Text style={styles.detailLabel}>Paiement personnalisé</Text>
-                                <Text style={styles.detailValue}>{dayStat.paymentTypes.custom}</Text>
+                              <View style={styles.detailSection}>
+                                <Text style={styles.detailSectionTitle}>
+                                  Types de paiement
+                                </Text>
+                                <View style={styles.detailRow}>
+                                  <Text style={styles.detailLabel}>
+                                    Paiement complet
+                                  </Text>
+                                  <Text style={styles.detailValue}>
+                                    {dayStat.paymentTypes.full}
+                                  </Text>
+                                </View>
+                                <View style={styles.detailRow}>
+                                  <Text style={styles.detailLabel}>
+                                    Paiement partagé
+                                  </Text>
+                                  <Text style={styles.detailValue}>
+                                    {dayStat.paymentTypes.split}
+                                  </Text>
+                                </View>
+                                <View style={styles.detailRow}>
+                                  <Text style={styles.detailLabel}>
+                                    Paiement personnalisé
+                                  </Text>
+                                  <Text style={styles.detailValue}>
+                                    {dayStat.paymentTypes.custom}
+                                  </Text>
+                                </View>
                               </View>
                             </View>
-                          </View>
-                        )}
+                          )}
                       </View>
                     ))
                   )}
@@ -493,61 +754,106 @@ const StatsModal: React.FC<StatsModalProps> = ({ visible, onClose }) => {
                     <View style={styles.periodStatsContainer}>
                       <View style={styles.periodHeader}>
                         <Text style={styles.periodTitle}>
-                          Rapport du {formatDate(periodStats.startDate, 'long')} au {formatDate(periodStats.endDate, 'long')}
+                          Rapport du {formatDate(periodStats.startDate, 'long')}{' '}
+                          au {formatDate(periodStats.endDate, 'long')}
                         </Text>
                       </View>
 
                       <View style={styles.periodCardGrid}>
                         <View style={styles.periodCard}>
                           <DollarSign size={24} color="#4CAF50" />
-                          <Text style={styles.periodCardValue}>{periodStats.totalSales.toFixed(2)} €</Text>
-                          <Text style={styles.periodCardLabel}>Ventes totales</Text>
+                          <Text style={styles.periodCardValue}>
+                            {periodStats.totalSales.toFixed(2)} €
+                          </Text>
+                          <Text style={styles.periodCardLabel}>
+                            Ventes totales
+                          </Text>
                         </View>
 
                         <View style={styles.periodCard}>
                           <Users size={24} color="#2196F3" />
-                          <Text style={styles.periodCardValue}>{periodStats.paymentCount}</Text>
-                          <Text style={styles.periodCardLabel}>Transactions</Text>
+                          <Text style={styles.periodCardValue}>
+                            {periodStats.paymentCount}
+                          </Text>
+                          <Text style={styles.periodCardLabel}>
+                            Transactions
+                          </Text>
                         </View>
+                        {periodStats.offeredTotal > 0 && (
+                          <View style={styles.periodCard}>
+                            <Gift size={24} color="#FF9800" />
+                            <Text style={styles.periodCardValue}>
+                              {periodStats.offeredTotal.toFixed(2)} €
+                            </Text>
+                            <Text style={styles.periodCardLabel}>
+                              Articles offerts
+                            </Text>
+                            <Text style={styles.periodCardSubLabel}>
+                              ({periodStats.offeredPercentage.toFixed(1)}% des
+                              ventes)
+                            </Text>
+                          </View>
+                        )}
 
                         <View style={styles.periodCard}>
                           <BarChart3 size={24} color="#9C27B0" />
                           <Text style={styles.periodCardValue}>
-                            {periodStats.averageTicket > 0 ? periodStats.averageTicket.toFixed(2) : '0.00'} €
+                            {periodStats.averageTicket > 0
+                              ? periodStats.averageTicket.toFixed(2)
+                              : '0.00'}{' '}
+                            €
                           </Text>
-                          <Text style={styles.periodCardLabel}>Ticket moyen</Text>
+                          <Text style={styles.periodCardLabel}>
+                            Ticket moyen
+                          </Text>
                         </View>
 
                         <View style={styles.periodCard}>
                           <TrendingUp size={24} color="#FF9800" />
-                          <Text style={styles.periodCardValue}>{periodStats.dailyAverage.toFixed(2)} €</Text>
-                          <Text style={styles.periodCardLabel}>Moyenne quotidienne</Text>
+                          <Text style={styles.periodCardValue}>
+                            {periodStats.dailyAverage.toFixed(2)} €
+                          </Text>
+                          <Text style={styles.periodCardLabel}>
+                            Moyenne quotidienne
+                          </Text>
                         </View>
                       </View>
 
                       <View style={styles.topTablesSection}>
-                        <Text style={styles.topTablesTitle}>Top 5 des tables</Text>
+                        <Text style={styles.topTablesTitle}>
+                          Top 5 des tables
+                        </Text>
                         {periodStats.busyTables.length > 0 ? (
                           <View style={styles.topTablesContainer}>
                             {periodStats.busyTables.map((table, index) => (
                               <View key={index} style={styles.topTableRow}>
                                 <View style={styles.topTableInfo}>
-                                  <Text style={styles.topTableRank}>#{index + 1}</Text>
-                                  <Text style={styles.topTableName}>{table.tableName}</Text>
+                                  <Text style={styles.topTableRank}>
+                                    #{index + 1}
+                                  </Text>
+                                  <Text style={styles.topTableName}>
+                                    {table.tableName}
+                                  </Text>
                                 </View>
-                                <Text style={styles.topTableAmount}>{table.amount.toFixed(2)} €</Text>
+                                <Text style={styles.topTableAmount}>
+                                  {table.amount.toFixed(2)} €
+                                </Text>
                               </View>
                             ))}
                           </View>
                         ) : (
-                          <Text style={styles.noDataText}>Aucune donnée disponible</Text>
+                          <Text style={styles.noDataText}>
+                            Aucune donnée disponible
+                          </Text>
                         )}
                       </View>
                     </View>
                   ) : (
                     <View style={styles.noDataContainer}>
                       <AlertCircle size={40} color="#FFC107" />
-                      <Text style={styles.noDataText}>Aucune donnée disponible pour cette période</Text>
+                      <Text style={styles.noDataText}>
+                        Aucune donnée disponible pour cette période
+                      </Text>
                     </View>
                   )}
                 </>
@@ -744,7 +1050,7 @@ const styles = StyleSheet.create({
   dayCardHeaderExpanded: {
     borderBottomWidth: 1,
   },
-  
+
   dayCardHeaderLeft: {
     flex: 1,
   },
@@ -909,7 +1215,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#333',
-  }
+  },
+  offeredValue: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#FF9800',
+  },
+  periodCardSubLabel: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 2,
+  },
+  
 });
 
 
