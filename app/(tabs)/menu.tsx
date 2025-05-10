@@ -1113,7 +1113,8 @@ function getCategoryFromName(name: string, type: 'resto' | 'boisson'): string {
     if (
       lowerName.includes('bière') ||
       lowerName.includes('blonde') ||
-      lowerName.includes('ambree')
+      lowerName.includes('ambree') ||
+      lowerName.includes('pinte') 
     )
       return 'Bières';
     if (
@@ -1128,7 +1129,8 @@ function getCategoryFromName(name: string, type: 'resto' | 'boisson'): string {
       lowerName.includes('ricard') ||
       lowerName.includes('alcool') ||
       lowerName.includes('punch') ||
-      lowerName.includes('cocktail')
+      lowerName.includes('cocktail') ||
+      lowerName.includes('baby')
     )
       return 'Alcools';
     return 'Softs';
