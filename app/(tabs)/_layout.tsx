@@ -51,15 +51,6 @@ export default function TabLayout() {
           }}
         />
         <Tabs.Screen
-          name="journal"
-          options={{
-            title: 'Journal',
-            tabBarIcon: ({ size, color }) => (
-              <BarChart3 size={size} color={color} />
-            ),
-          }}
-        />
-        <Tabs.Screen
           name="settings"
           options={{
             title: 'Paramètres',

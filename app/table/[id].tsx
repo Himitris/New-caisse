@@ -646,6 +646,26 @@ export default function TableScreen() {
     return categoriesByType[activeType];
   };
 
+
+  const handlePreviewNote = useCallback(() => {
+    if (!table || !table.order || table.order.items.length === 0) {
+      toast.showToast("Il n'y a pas d'articles à afficher", 'warning');
+      return;
+    }
+
+    // Naviguer vers la prévisualisation de la note
+    router.push({
+      pathname: '/print-preview',
+      params: {
+        tableId: tableId.toString(),
+        total: table.order.total.toString(),
+        items: JSON.stringify(table.order.items),
+        isPreview: 'true', // Marque comme prévisualisation (non payée)
+        tableName: table.name,
+      },
+    });
+  }, [table, tableId, router]);
+
   const handlePayment = (type: 'full' | 'split' | 'custom' | 'items') => {
     if (!table || !table.order) return;
 
@@ -738,6 +758,13 @@ export default function TableScreen() {
             <Plus size={24} color="#666" />
           </Pressable>
         </View>
+        <Pressable
+          style={[styles.paymentButton, { backgroundColor: '#9C27B0' }]}
+          onPress={() => handlePreviewNote()}
+        >
+          <Receipt size={24} color="white" />
+          <Text style={styles.paymentButtonText}>Prévisualiser Note</Text>
+        </Pressable>
 
         <Pressable
           style={[

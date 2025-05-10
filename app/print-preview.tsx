@@ -8,7 +8,16 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 
 export default function PrintPreviewScreen() {
-  const { tableId, total, items, paymentMethod, isPartial, remaining, tableName, isPreview } = useLocalSearchParams();
+  const {
+    tableId,
+    total,
+    items,
+    paymentMethod,
+    isPartial,
+    remaining,
+    tableName,
+    isPreview,
+  } = useLocalSearchParams();
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   // Suppression des états liés à la TVA
@@ -51,7 +60,7 @@ export default function PrintPreviewScreen() {
       minute: '2-digit',
       second: '2-digit',
       hour12: false,
-      timeZone: 'Europe/Paris'
+      timeZone: 'Europe/Paris',
     }),
   };
 
@@ -63,10 +72,11 @@ export default function PrintPreviewScreen() {
       price: number;
     }
 
-    const itemsHTML: string = order.items.map((item: OrderItem) => {
-      const itemTotal: number = item.quantity * item.price;
-      totalPrice += itemTotal;
-      return `
+    const itemsHTML: string = order.items
+      .map((item: OrderItem) => {
+        const itemTotal: number = item.quantity * item.price;
+        totalPrice += itemTotal;
+        return `
       <tr>
         <td>${item.name}</td>
         <td>${item.quantity}</td>
@@ -74,7 +84,8 @@ export default function PrintPreviewScreen() {
         <td>${itemTotal.toFixed(2)} €</td>
       </tr>
       `;
-    }).join('');
+      })
+      .join('');
 
     // Information sur la TVA (maintenant toujours la même)
     const taxInfo = 'TVA non applicable - art.293B du CGI';
@@ -91,10 +102,19 @@ export default function PrintPreviewScreen() {
             .totals { text-align: right; font-weight: bold; }
             .payment-info { text-align: center; margin-top: 20px; padding: 10px; border: 1px dashed #ccc; }
             .partial { color: #f44336; font-weight: bold; }
+            .preview-notice { 
+              background-color: #9C27B0; 
+              color: white; 
+              text-align: center; 
+              padding: 10px; 
+              font-weight: bold; 
+              font-size: 18px; 
+              margin-bottom: 15px; 
+              border-radius: 5px;
+            }
           </style>
         </head>
         <body>
-          ${isPreviewMode ? '<div class="preview">PRÉVISUALISATION - NON PAYÉ</div>' : ''}
           <div class="header">
             <h1>${restaurantInfo.name}</h1>
             <p>${restaurantInfo.address}</p>
@@ -105,7 +125,13 @@ export default function PrintPreviewScreen() {
           <div class="info">
             <p><strong>${order.tableName}</strong></p>
             <p>Date: ${order.timestamp}</p>
-            ${order.isPartial ? `<p class="partial">PAIEMENT PARTIEL</p>` : ''}
+            ${
+              isPreviewMode
+                ? '<p class="partial">NOTE NON PAYÉE</p>'
+                : order.isPartial
+                ? `<p class="partial">PAIEMENT PARTIEL</p>`
+                : ''
+            }
           </div>
   
           <table class="items">
@@ -120,23 +146,39 @@ export default function PrintPreviewScreen() {
   
           <div class="totals">
             <h2>Total: ${order.total.toFixed(2)} €</h2>
-            ${order.isPartial ? `<p class="partial">Solde restant: ${order.remaining.toFixed(2)} €</p>` : ''}
+            ${
+              order.isPartial && !isPreviewMode
+                ? `<p class="partial">Solde restant: ${order.remaining.toFixed(
+                    2
+                  )} €</p>`
+                : ''
+            }
           </div>
   
           <div class="payment-info">
-            <p>Méthode de paiement: ${order.paymentMethod === 'card' ?
-                  'Carte bancaire' :
-                  order.paymentMethod === 'cash' ?
-                    'Espèces' :
-                    'Chèque'}</p>
-            <p>Montant payé: ${order.total.toFixed(2)} €</p>
-            <p>Statut: ${order.isPartial ? 'Paiement partiel' : 'Payé en totalité'}</p>
+            ${
+              isPreviewMode
+                ? `<p style="color: #9C27B0; font-weight: bold; font-size: 16px;">PRÉVISUALISATION - NOTE NON PAYÉE</p>`
+                : `<p>Méthode de paiement: ${
+                    order.paymentMethod === 'card'
+                      ? 'Carte bancaire'
+                      : order.paymentMethod === 'cash'
+                      ? 'Espèces'
+                      : 'Chèque'
+                  }</p>
+              <p>Montant payé: ${order.total.toFixed(2)} €</p>
+              <p>Statut: ${
+                order.isPartial ? 'Paiement partiel' : 'Payé en totalité'
+              }</p>`
+            }
           </div>
   
           <div class="footer">
             <p>${taxInfo}</p>
             <p>Merci de votre visite !</p>
-            <p>À bientôt,<br>${restaurantInfo.owner}<br>${restaurantInfo.phone}</p>
+            <p>À bientôt,<br>${restaurantInfo.owner}<br>${
+      restaurantInfo.phone
+    }</p>
           </div>
         </body>
       </html>
@@ -151,7 +193,7 @@ export default function PrintPreviewScreen() {
       });
       setLoading(false);
     } catch (error) {
-      console.error('Échec de l\'impression:', error);
+      console.error("Échec de l'impression:", error);
       setLoading(false);
     }
   };
@@ -185,9 +227,10 @@ export default function PrintPreviewScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>
-          {isPreviewMode ? 'Prévisualisation - ' : 'Reçu - '}{displayName}
+          {isPreviewMode ? 'Prévisualisation - ' : 'Reçu - '}
+          {displayName}
         </Text>
-        {isPartialPayment && (
+        {isPartialPayment && !isPreviewMode && (
           <Text style={styles.partialBadge}>Paiement partiel</Text>
         )}
         {isPreviewMode && (
@@ -208,17 +251,22 @@ export default function PrintPreviewScreen() {
         </View>
 
         <View style={styles.itemsSection}>
-          {order.items.map((item: { name: string; quantity: number; price: number }, index: number) => (
-            <View key={index} style={styles.item}>
-              <View style={styles.itemDetails}>
-                <Text style={styles.itemName}>{item.name}</Text>
-                <Text style={styles.itemQuantity}>x{item.quantity}</Text>
+          {order.items.map(
+            (
+              item: { name: string; quantity: number; price: number },
+              index: number
+            ) => (
+              <View key={index} style={styles.item}>
+                <View style={styles.itemDetails}>
+                  <Text style={styles.itemName}>{item.name}</Text>
+                  <Text style={styles.itemQuantity}>x{item.quantity}</Text>
+                </View>
+                <Text style={styles.itemTotal}>
+                  {(item.quantity * item.price).toFixed(2)} €
+                </Text>
               </View>
-              <Text style={styles.itemTotal}>
-                {(item.quantity * item.price).toFixed(2)} €
-              </Text>
-            </View>
-          ))}
+            )
+          )}
         </View>
 
         <View style={styles.totals}>
@@ -227,25 +275,37 @@ export default function PrintPreviewScreen() {
             <Text style={styles.totalValue}>{order.total.toFixed(2)} €</Text>
           </View>
 
-          {isPartialPayment && (
+          {isPartialPayment && !isPreviewMode && (
             <View style={[styles.totalRow, styles.remainingRow]}>
               <Text style={styles.remainingLabel}>Solde restant</Text>
-              <Text style={styles.remainingValue}>{order.remaining.toFixed(2)} €</Text>
+              <Text style={styles.remainingValue}>
+                {order.remaining.toFixed(2)} €
+              </Text>
             </View>
           )}
         </View>
 
         <View style={styles.paymentInfo}>
-          <Text style={styles.paymentMethod}>
-            {isPreviewMode ? '' : `Méthode de paiement: ${order.paymentMethod === 'card' ?
-                'Carte bancaire' :
-                order.paymentMethod === 'cash' ?
-                  'Espèces' :
-                  'Chèque'}`}
-          </Text>
-          <Text style={styles.paymentStatus}>
-            Statut: {isPreviewMode ? 'Prévisualisation - Non payé' : (isPartialPayment ? 'Paiement partiel' : 'Payé en totalité')}
-          </Text>
+          {isPreviewMode ? (
+            <Text style={[styles.paymentStatus, styles.previewText]}>
+              Statut: PRÉVISUALISATION - NON PAYÉ
+            </Text>
+          ) : (
+            <>
+              <Text style={styles.paymentMethod}>
+                Méthode de paiement:{' '}
+                {order.paymentMethod === 'card'
+                  ? 'Carte bancaire'
+                  : order.paymentMethod === 'cash'
+                  ? 'Espèces'
+                  : 'Chèque'}
+              </Text>
+              <Text style={styles.paymentStatus}>
+                Statut:{' '}
+                {isPartialPayment ? 'Paiement partiel' : 'Payé en totalité'}
+              </Text>
+            </>
+          )}
         </View>
 
         <Text style={styles.thankYou}>Merci d'avoir mangé avec nous !</Text>
@@ -255,20 +315,23 @@ export default function PrintPreviewScreen() {
         <Pressable
           style={[styles.actionButton, { backgroundColor: '#4CAF50' }]}
           onPress={handlePrint}
-          disabled={loading}>
+          disabled={loading}
+        >
           <Printer size={24} color="white" />
           <Text style={styles.actionText}>Imprimer</Text>
         </Pressable>
         <Pressable
           style={[styles.actionButton, { backgroundColor: '#2196F3' }]}
           onPress={handleShare}
-          disabled={loading}>
+          disabled={loading}
+        >
           <Share size={24} color="white" />
           <Text style={styles.actionText}>Partager</Text>
         </Pressable>
         <Pressable
           style={[styles.actionButton, { backgroundColor: '#FF9800' }]}
-          onPress={handleDone}>
+          onPress={handleDone}
+        >
           <Home size={24} color="white" />
           <Text style={styles.actionText}>
             {isPreviewMode ? 'Retour à la Table' : 'Terminé'}
@@ -423,6 +486,11 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     textAlign: 'center',
+  },
+  previewText: {
+    color: '#9C27B0',
+    fontWeight: 'bold',
+    fontSize: 18,
   },
   thankYou: {
     textAlign: 'center',
