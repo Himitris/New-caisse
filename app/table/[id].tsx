@@ -917,17 +917,18 @@ export default function TableScreen() {
           <View style={styles.totalSection}>
             <View style={styles.finalTotal}>
               <Text style={styles.totalLabel}>Total:</Text>
+              {offeredTotal > 0 && (
+                <View style={styles.offeredTotalRow}>
+                  <Text style={styles.offeredTotalLabel}>
+                    Articles offerts:
+                  </Text>
+                  <Text style={styles.offeredTotalAmount}>
+                    {offeredTotal.toFixed(2)} €
+                  </Text>
+                </View>
+              )}
               <Text style={styles.totalAmount}>{total.toFixed(2)} €</Text>
             </View>
-
-            {offeredTotal > 0 && (
-              <View style={styles.offeredTotalRow}>
-                <Text style={styles.offeredTotalLabel}>Articles offerts:</Text>
-                <Text style={styles.offeredTotalAmount}>
-                  {offeredTotal.toFixed(2)} €
-                </Text>
-              </View>
-            )}
           </View>
           <View style={styles.paymentActions}>
             <View style={styles.paymentActionsRow}>
@@ -1508,11 +1509,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#FFD54F',
-    borderStyle: 'dashed',
   },
   offeredTotalLabel: {
     fontSize: 14,
