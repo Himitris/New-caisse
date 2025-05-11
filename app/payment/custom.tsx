@@ -1,4 +1,4 @@
-// app/payment/custom.tsx - Fonctionnalité de partage personnalisé
+// app/payment/custom.tsx - Fonctionnalité de partage personnalisé corrigée
 
 import {
   View,
@@ -10,7 +10,7 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ArrowLeft,
@@ -38,7 +38,8 @@ export default function CustomSplitScreen() {
   const orderItems = items ? JSON.parse(items as string) : [];
   const toast = useToast();
   const [processing, setProcessing] = useState(false);
-const [totalOffered, setTotalOffered] = useState(0);
+  const [totalOffered, setTotalOffered] = useState(0);
+  const [tableFullyPaid, setTableFullyPaid] = useState(false);
 
   // Ajouter un état pour le nom et la section de la table
   const [tableName, setTableName] = useState('');
@@ -88,17 +89,18 @@ const [totalOffered, setTotalOffered] = useState(0);
       return sum + (isNaN(parsedAmount) ? 0 : parsedAmount);
     }, 0);
 
-    setCurrentTotal(calculatedTotal);
+    // Arrondir à 2 décimales pour éviter les erreurs de précision
+    const roundedTotal = Math.round(calculatedTotal * 100) / 100;
+    setCurrentTotal(roundedTotal);
 
     // Vérifier si le total est valide
-    if (calculatedTotal > totalAmount) {
+    // Comparer avec une petite marge d'erreur pour gérer les problèmes d'arrondi
+    if (roundedTotal > totalAmount + 0.01) {
       setErrorMessage('Le total des partages dépasse le montant de la facture');
-    } else if (calculatedTotal < totalAmount && calculatedTotal > 0) {
-      setErrorMessage(
-        `Restant : ${(totalAmount - calculatedTotal).toFixed(2)} €`
-      );
-    } else if (calculatedTotal === totalAmount) {
-      setErrorMessage('');
+    } else if (roundedTotal < totalAmount - 0.01 && roundedTotal > 0) {
+      setErrorMessage(`Restant : ${(totalAmount - roundedTotal).toFixed(2)} €`);
+    } else if (Math.abs(roundedTotal - totalAmount) <= 0.01) {
+      setErrorMessage(''); // Le total est correct
     }
   }, [splitAmounts, totalAmount]);
 
@@ -123,14 +125,13 @@ const [totalOffered, setTotalOffered] = useState(0);
   const updateSplitAmount = (index: number, value: string) => {
     const newAmounts = [...splitAmounts];
 
-    // Autoriser uniquement les chiffres et une seule virgule
+    // Autoriser uniquement les chiffres et une seule virgule/point
     if (value === '' || /^\d*\.?\d*$/.test(value)) {
       newAmounts[index] = value;
       setSplitAmounts(newAmounts);
     }
   };
 
-  // Calculer automatiquement le montant restant et créer un nouveau partage
   // Calculer automatiquement le montant restant et créer un nouveau partage
   const calculateRemaining = () => {
     // Calculer la somme de tous les montants
@@ -139,8 +140,11 @@ const [totalOffered, setTotalOffered] = useState(0);
       return sum + (isNaN(parsedAmount) ? 0 : parsedAmount);
     }, 0);
 
-    // Calculer le reste
-    const remaining = Math.max(0, totalAmount - currentSum);
+    // Arrondir pour éviter les problèmes de précision
+    const roundedSum = Math.round(currentSum * 100) / 100;
+
+    // Calculer le reste avec une précision de 2 décimales
+    const remaining = Math.round((totalAmount - roundedSum) * 100) / 100;
 
     if (remaining > 0) {
       // Vérifier si le dernier partage a un montant de 0
@@ -193,12 +197,12 @@ const [totalOffered, setTotalOffered] = useState(0);
       return;
     }
 
-    // Vérifier si le total correspond au montant de la facture
+    // Vérifier si le total correspond au montant de la facture (avec une petite marge d'erreur)
     const calculatedTotal = splitAmounts.reduce((sum, amount) => {
       return sum + parseFloat(amount || '0');
     }, 0);
 
-    if (Math.abs(calculatedTotal - totalAmount) > 0.01) {
+    if (Math.abs(calculatedTotal - totalAmount) > 0.02) {
       Alert.alert(
         'Montant incorrect',
         `Le total des partages (${calculatedTotal.toFixed(
@@ -234,6 +238,7 @@ const [totalOffered, setTotalOffered] = useState(0);
       }
 
       let allPaymentsProcessed = true;
+      let tableWasClosed = false;
 
       // Obtenir tous les paiements valides
       const validPayments = splitAmounts
@@ -243,8 +248,32 @@ const [totalOffered, setTotalOffered] = useState(0);
         }))
         .filter((p) => !isNaN(p.amount) && p.amount > 0 && p.method !== null);
 
+      // Calculer le total de tous les paiements valides
+      const totalValidPayments = validPayments.reduce(
+        (sum, payment) => sum + payment.amount,
+        0
+      );
+
+      // Vérifier si tous les paiements couvrent le total (avec marge d'erreur)
+      const willPayFull = Math.abs(totalValidPayments - totalAmount) <= 0.02;
+
       // Traiter chaque paiement séquentiellement pour éviter des conflits
-      for (const payment of validPayments) {
+      for (let i = 0; i < validPayments.length; i++) {
+        const payment = validPayments[i];
+        const isLastPayment = i === validPayments.length - 1;
+
+        // Pour le dernier paiement quand on est sur le point de tout payer, on force le montant exact restant
+        if (isLastPayment && willPayFull) {
+          // Recalculer le montant final pour s'assurer que tout est payé
+          const remainingTable = await getTable(tableIdNum);
+          if (remainingTable?.order?.total) {
+            payment.amount = Math.min(
+              payment.amount,
+              remainingTable.order.total
+            );
+          }
+        }
+
         // Utiliser la fonction optimisée pour chaque paiement
         const result = await processPartialPayment(tableIdNum, payment.amount);
 
@@ -254,9 +283,14 @@ const [totalOffered, setTotalOffered] = useState(0);
           continue;
         }
 
+        // Vérifier si la table a été fermée
+        if (result.tableClosed) {
+          tableWasClosed = true;
+        }
+
         // Créer la facture pour ce paiement
         const bill = {
-          id: Date.now(),
+          id: Date.now() + Math.random(),
           tableNumber: tableIdNum,
           tableName: tableName,
           section: tableSection,
@@ -285,32 +319,41 @@ const [totalOffered, setTotalOffered] = useState(0);
         }
       }
 
-      // Vérifier si tous les paiements ont été traités
-      const updatedTable = await getTable(tableIdNum);
-
-      if (
-        !updatedTable ||
-        !updatedTable.order ||
-        updatedTable.order.total <= 0.01
-      ) {
-        // Réinitialiser la table si tout a été payé
+      // Si tous les paiements ont été traités et couvrent tout le montant, forcer la fermeture de la table
+      if (allPaymentsProcessed && willPayFull) {
         await resetTable(tableIdNum);
-        // Ajouter cette ligne pour émettre l'événement de mise à jour
         events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
+        setTableFullyPaid(true);
+
         router.push('/');
         toast.showToast(
           'Tous les partages ont été traités avec succès.',
           'success'
         );
       } else {
-        // Il reste un solde à payer
-        router.push(`/table/${tableIdNum}`);
-        toast.showToast(
-          `Paiement(s) traité(s) avec succès. Solde restant : ${updatedTable.order.total.toFixed(
-            2
-          )} €`,
-          'success'
-        );
+        // Vérifier si la table a été fermée automatiquement
+        if (tableWasClosed) {
+          setTableFullyPaid(true);
+          router.push('/');
+          toast.showToast(
+            'Tous les partages ont été traités avec succès.',
+            'success'
+          );
+        } else {
+          // Il reste un solde à payer
+          router.push(`/table/${tableIdNum}`);
+
+          // Récupérer les données les plus récentes pour afficher le solde correct
+          const updatedTable = await getTable(tableIdNum);
+          const remainingAmount = updatedTable?.order?.total || 0;
+
+          toast.showToast(
+            `Paiement(s) traité(s) avec succès. Solde restant : ${remainingAmount.toFixed(
+              2
+            )} €`,
+            'success'
+          );
+        }
       }
     } catch (error) {
       console.error('Erreur de paiement :', error);

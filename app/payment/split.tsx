@@ -1,4 +1,4 @@
-// app/payment/split.tsx - Écran de paiement partagé mis à jour
+// app/payment/split.tsx - Écran de paiement partagé corrigé
 
 import {
   View,
@@ -34,9 +34,11 @@ export default function SplitBillScreen() {
   const toast = useToast();
   const [processing, setProcessing] = useState(false);
   const [totalOffered, setTotalOffered] = useState(0);
+  const [tableFullyPaid, setTableFullyPaid] = useState(false);
 
   // Montant partagé par invité (partage égal)
-  const splitAmount = totalAmount / guestCount;
+  // Utiliser toFixed pour éviter les problèmes d'arrondis
+  const splitAmount = Math.round((totalAmount / guestCount) * 100) / 100;
 
   // Récupérer les détails de la table au chargement
   useEffect(() => {
@@ -70,13 +72,25 @@ export default function SplitBillScreen() {
       paid: boolean;
       method?: 'cash' | 'card' | 'check';
     }>
-  >(
-    Array.from({ length: guestCount }, (_, i) => ({
-      id: i + 1,
-      amount: splitAmount,
-      paid: false,
-    }))
-  );
+  >([]);
+
+  // Initialiser les paiements une fois que totalAmount est disponible
+  useEffect(() => {
+    if (totalAmount > 0 && guestCount > 0) {
+      // Répartir équitablement le montant
+      const baseAmount = splitAmount;
+      const newPayments = Array.from({ length: guestCount }, (_, i) => ({
+        id: i + 1,
+        // Pour le dernier, ajuster pour compenser les arrondis
+        amount:
+          i === guestCount - 1
+            ? totalAmount - baseAmount * (guestCount - 1)
+            : baseAmount,
+        paid: false,
+      }));
+      setPayments(newPayments);
+    }
+  }, [totalAmount, guestCount, splitAmount]);
 
   // Suivre le total restant
   const [remainingTotal, setRemainingTotal] = useState(totalAmount);
@@ -88,7 +102,20 @@ export default function SplitBillScreen() {
       0
     );
 
-    setRemainingTotal(totalAmount - paidTotal);
+    const remaining = Math.max(
+      0,
+      parseFloat((totalAmount - paidTotal).toFixed(2))
+    );
+    setRemainingTotal(remaining);
+
+    // Vérifier si tout est payé
+    if (
+      remaining < 0.01 &&
+      payments.length > 0 &&
+      payments.every((p) => p.paid)
+    ) {
+      setTableFullyPaid(true);
+    }
   }, [payments, totalAmount]);
 
   const handlePayment = async (
@@ -116,36 +143,47 @@ export default function SplitBillScreen() {
         return;
       }
 
+      // Si la table a été fermée automatiquement
+      if (result.tableClosed) {
+        setTableFullyPaid(true);
+      }
+
       // Créer la facture pour ce paiement
-const bill = {
-  id: Date.now() + Math.random(),
-  tableNumber: tableIdNum,
-  tableName: tableName,
-  section: tableSection,
-  amount: payment.amount,
-  items: orderItems.length,
-  status: 'split' as 'split',
-  timestamp: new Date().toISOString(),
-  paymentMethod: method,
-  paymentType: 'split' as 'split',
-  paidItems: orderItems.map((item: any) => ({
-    ...item,
-    quantity: item.quantity / guestCount,
-    splitPart: payment.id,
-    totalParts: guestCount,
-  })),
-  // Ajouter le montant des articles offerts proportionnel à ce paiement
-  offeredAmount: (payment.amount / totalAmount) * totalOffered,
-};
+      const bill = {
+        id: Date.now() + Math.random(),
+        tableNumber: tableIdNum,
+        tableName: tableName,
+        section: tableSection,
+        amount: payment.amount,
+        items: orderItems.length,
+        status: 'split' as 'split',
+        timestamp: new Date().toISOString(),
+        paymentMethod: method,
+        paymentType: 'split' as 'split',
+        paidItems: orderItems.map((item: any) => ({
+          ...item,
+          quantity: item.quantity / guestCount,
+          splitPart: payment.id,
+          totalParts: guestCount,
+        })),
+        // Ajouter le montant des articles offerts proportionnel à ce paiement
+        offeredAmount: (payment.amount / totalAmount) * totalOffered,
+      };
 
       // Ajouter à l'historique des factures
       await addBill(bill);
 
-      // Si c'était le dernier paiement, réinitialiser la table
-      if ((result.newTotal ?? 0) <= 0.01) {
+      // Si c'était le dernier paiement (vérifié avec le nouveau état)
+      const updatedPayments = payments.map((p) =>
+        p.id === id ? { ...p, paid: true, method } : p
+      );
+      const allPaid = updatedPayments.every((p) => p.paid);
+
+      if (allPaid || result.tableClosed) {
+        // Fermer la table explicitement, même si c'est potentiellement redondant
         await resetTable(tableIdNum);
-        // Ajouter cette ligne pour émettre l'événement de mise à jour
         events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
+        setTableFullyPaid(true);
       }
 
       toast.showToast(`Paiement ${method} traité avec succès`, 'success');
@@ -160,7 +198,8 @@ const bill = {
   const allPaid = payments.every((payment) => payment.paid);
 
   const handleComplete = () => {
-    if (allPaid) {
+    if (tableFullyPaid || allPaid) {
+      // Si tout est payé, retourner à l'écran d'accueil
       router.push('/');
       toast.showToast(
         'Tous les paiements ont été traités avec succès.',
@@ -272,7 +311,9 @@ const bill = {
         <Pressable style={styles.completeButton} onPress={handleComplete}>
           <Home size={20} color="white" />
           <Text style={styles.completeButtonText}>
-            {allPaid ? "Retour à l'Accueil" : 'Terminer & Retour à la Table'}
+            {tableFullyPaid || allPaid
+              ? "Retour à l'Accueil"
+              : 'Terminer & Retour à la Table'}
           </Text>
         </Pressable>
       </View>
