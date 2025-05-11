@@ -1,40 +1,37 @@
+import DateTimePicker from '@react-native-community/datetimepicker';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  Alert,
-  Modal,
-  ActivityIndicator,
-  Share,
-  TextInput,
-  FlatList,
-} from 'react-native';
-import { useState, useEffect, useCallback, useMemo, memo } from 'react';
-import {
-  Receipt,
-  Printer,
-  Download,
-  Share as ShareIcon,
-  Eye,
-  X,
-  Trash2,
-  Search,
-  Calendar,
-  Filter,
   ArrowDownAZ,
   ArrowUpAZ,
   ArrowUpDown,
-  BarChart3,
-  RefreshCw,
+  Calendar,
   CreditCard,
+  Download,
+  Eye,
+  Filter,
+  Printer,
+  Receipt,
+  RefreshCw,
+  Search,
+  Share as ShareIcon,
+  Trash2,
+  X
 } from 'lucide-react-native';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View
+} from 'react-native';
 import { getBills, saveBills } from '../../utils/storage';
-import * as Print from 'expo-print';
-import * as Sharing from 'expo-sharing';
-import DateTimePicker from '@react-native-community/datetimepicker';
-import StatsModal from '../components/StatsModal';
 import { useToast } from '../../utils/ToastContext';
 
 interface Bill {
@@ -922,13 +919,6 @@ export default function BillsScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Factures & Paiements</Text>
-        <Pressable
-          style={styles.statsButton}
-          onPress={() => setStatsModalVisible(true)}
-        >
-          <BarChart3 size={20} color="#673AB7" />
-          <Text style={styles.statsButtonText}>Statistiques</Text>
-        </Pressable>
       </View>
 
       {bills.length === 0 ? (
@@ -1109,10 +1099,6 @@ export default function BillsScreen() {
         </View>
       )}
 
-      <StatsModal
-        visible={statsModalVisible}
-        onClose={() => setStatsModalVisible(false)}
-      />
     </View>
   );
 }
@@ -1515,20 +1501,6 @@ const styles = StyleSheet.create({
     color: '#666',
     fontStyle: 'italic',
     textAlign: 'center',
-  },
-  statsButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 10,
-    borderRadius: 8,
-    gap: 8,
-    borderWidth: 1,
-    borderColor: '#673AB7',
-    backgroundColor: 'white',
-  },
-  statsButtonText: {
-    color: '#673AB7',
-    fontWeight: '600',
   },
   loadingMore: {
     padding: 10,
