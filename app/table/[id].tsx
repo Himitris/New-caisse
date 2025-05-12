@@ -27,6 +27,7 @@ import {
   CustomMenuItem,
   OrderItem,
   Table,
+  addBill,
   getCustomMenuItems,
   getMenuAvailability,
   getTable,
@@ -577,15 +578,77 @@ export default function TableScreen() {
           onPress: async () => {
             setSaveInProgress(true);
             try {
-              await resetTable(tableId);
-              router.push('/');
-              toast.showToast(
-                `Table ${table.name} fermée avec succès`,
-                'success'
-              );
+              // Si la table a une commande active avec des articles, offrir de sauvegarder en tant qu'addition
+              if (
+                table.order?.items &&
+                table.order.items.length > 0 &&
+                table.order.total > 0
+              ) {
+                Alert.alert(
+                  'Sauvegarder la commande?',
+                  'Voulez-vous enregistrer cette commande non payée comme une addition annulée?',
+                  [
+                    {
+                      text: 'Non, tout supprimer',
+                      onPress: async () => {
+                        await resetTable(tableId);
+                        router.push('/');
+                        toast.showToast(
+                          `Table ${table.name} fermée avec succès`,
+                          'success'
+                        );
+                      },
+                    },
+                    {
+                      text: 'Oui, sauvegarder',
+                      onPress: async () => {
+                        try {
+                          // Créer une facture "annulée" pour garder trace de la commande
+                          const bill = {
+                            id: Date.now(),
+                            tableNumber: tableId,
+                            tableName: table.name,
+                            section: table.section,
+                            amount: table.order?.total ?? 0,
+                            items: table.order?.items.length || 0,
+                            status: 'pending' as 'pending',
+                            timestamp: new Date().toISOString(),
+                            paidItems: table.order?.items || [],
+                            notes:
+                              'Table fermée avec commande active - annulée',
+                          };
+                          await addBill(bill);
+                          await resetTable(tableId);
+                          router.push('/');
+                          toast.showToast(
+                            `Table ${table.name} fermée et commande sauvegardée`,
+                            'success'
+                          );
+                        } catch (error) {
+                          console.error(
+                            'Erreur lors de la sauvegarde de la commande:',
+                            error
+                          );
+                          toast.showToast(
+                            'Erreur lors de la sauvegarde de la commande',
+                            'error'
+                          );
+                        }
+                      },
+                    },
+                  ]
+                );
+              } else {
+                // Si pas de commande active, réinitialiser simplement
+                await resetTable(tableId);
+                router.push('/');
+                toast.showToast(
+                  `Table ${table.name} fermée avec succès`,
+                  'success'
+                );
+              }
             } catch (error) {
               console.error('Erreur lors de la fermeture de la table:', error);
-
               toast.showToast('Impossible de fermer la table', 'error');
             } finally {
               setSaveInProgress(false);

@@ -144,6 +144,7 @@ export const processPartialPayment = async (
     if (roundedNewTotal < 0.01) {
       // Réinitialiser la table au lieu de juste mettre à jour
       await resetTable(tableId);
+
       // Émettre l'événement pour informer l'interface
       events.emit(EVENT_TYPES.TABLE_UPDATED, tableId);
 

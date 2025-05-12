@@ -145,6 +145,28 @@ export default function SplitBillScreen() {
 
       // Si la table a été fermée automatiquement
       if (result.tableClosed) {
+        // Double vérification pour s'assurer que la table est réellement fermée
+        const checkTable = await getTable(tableIdNum);
+        if (checkTable && (checkTable.order || checkTable.guests)) {
+          console.warn(
+            'Table marquée comme fermée mais contient encore des données, nettoyage forcé'
+          );
+          await resetTable(tableIdNum);
+
+          // Vérification supplémentaire après le nettoyage forcé
+          const verifyReset = await getTable(tableIdNum);
+          if (verifyReset && (verifyReset.order || verifyReset.guests)) {
+            // Mise à jour directe si la réinitialisation échoue
+            const forcedCleanTable = {
+              ...verifyReset,
+              status: "available" as "available",
+              guests: undefined,
+              order: undefined,
+            };
+            await updateTable(forcedCleanTable);
+          }
+        }
+
         setTableFullyPaid(true);
       }
 
@@ -182,6 +204,20 @@ export default function SplitBillScreen() {
       if (allPaid || result.tableClosed) {
         // Fermer la table explicitement, même si c'est potentiellement redondant
         await resetTable(tableIdNum);
+
+        // Vérification supplémentaire que la table est bien réinitialisée
+        const finalCheck = await getTable(tableIdNum);
+        if (finalCheck && (finalCheck.order || finalCheck.guests)) {
+          // Forcer un nettoyage direct
+          const forcedCleanTable = {
+            ...finalCheck,
+            status: 'available' as 'available',
+            guests: undefined,
+            order: undefined,
+          };
+          await updateTable(forcedCleanTable);
+        }
+
         events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
         setTableFullyPaid(true);
       }

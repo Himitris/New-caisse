@@ -4,7 +4,7 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { View, Text, ActivityIndicator } from 'react-native';
-import { initializeTables, StorageManager } from '../utils/storage';
+import { initializeTables, StorageManager, TableManager } from '../utils/storage';
 import { ToastProvider } from '../utils/ToastContext';
 
 declare global {
@@ -25,6 +25,9 @@ export default function RootLayout() {
 
         // Initialiser les tables seulement si nécessaire
         await initializeTables();
+
+        // Nettoyer les données orphelines
+        await TableManager.cleanupOrphanedTableData();
 
         // Marquer l'application comme lancée si c'est le premier lancement
         if (isFirstLaunch) {

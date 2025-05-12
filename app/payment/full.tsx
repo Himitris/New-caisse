@@ -3,9 +3,21 @@
 import { View, Text, StyleSheet, Pressable, Alert, Switch } from 'react-native';
 import { useState, useEffect } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { CreditCard, Wallet, Receipt, ArrowLeft, Edit3 } from 'lucide-react-native';
-import { getTable, updateTable, resetTable, addBill } from '../../utils/storage';
+import {
+  CreditCard,
+  Wallet,
+  Receipt,
+  ArrowLeft,
+  Edit3,
+} from 'lucide-react-native';
+import {
+  getTable,
+  updateTable,
+  resetTable,
+  addBill,
+} from '../../utils/storage';
 import { useToast } from '../../utils/ToastContext';
+import { EVENT_TYPES, events } from '@/utils/events';
 
 export default function FullPaymentScreen() {
   const { tableId, total, items } = useLocalSearchParams();
@@ -21,28 +33,28 @@ export default function FullPaymentScreen() {
   const orderItems = items ? JSON.parse(items as string) : [];
 
   // Get table name on load
-useEffect(() => {
-  const fetchTableData = async () => {
-    const tableData = await getTable(tableIdNum);
-    if (tableData) {
-      setTableName(tableData.name);
+  useEffect(() => {
+    const fetchTableData = async () => {
+      const tableData = await getTable(tableIdNum);
+      if (tableData) {
+        setTableName(tableData.name);
 
-      // Calculer le montant des articles offerts
-      if (tableData.order && tableData.order.items) {
-        const offeredAmount = tableData.order.items.reduce((sum, item) => {
-          if (item.offered) {
-            return sum + item.price * item.quantity;
-          }
-          return sum;
-        }, 0);
+        // Calculer le montant des articles offerts
+        if (tableData.order && tableData.order.items) {
+          const offeredAmount = tableData.order.items.reduce((sum, item) => {
+            if (item.offered) {
+              return sum + item.price * item.quantity;
+            }
+            return sum;
+          }, 0);
 
-        setTotalOffered(offeredAmount);
+          setTotalOffered(offeredAmount);
+        }
       }
-    }
-  };
+    };
 
-  fetchTableData();
-}, [tableIdNum]);
+    fetchTableData();
+  }, [tableIdNum]);
 
   // Rest of the payment handling code...
   const handlePayment = async (method: 'card' | 'cash' | 'check') => {
@@ -82,28 +94,49 @@ useEffect(() => {
       await addBill(bill);
 
       // Check if this payment completes the bill
+      // Dans handlePayment après le paiement réussi
       if (totalAmount >= table.order.total) {
-        // Reset the table if payment covers full amount
-        await resetTable(tableIdNum);
+        try {
+          // Reset the table if payment covers full amount
+          await resetTable(tableIdNum);
 
-        if (printReceipt) {
-          router.push({
-            pathname: '/print-preview',
-            params: {
-              tableId: tableIdNum.toString(),
-              total: totalAmount.toString(),
-              items: items as string,
-              paymentMethod: method,
-              tableName: table.name,
-            },
-          });
-        } else {
-          router.push('/');
+          // Vérifier que la table est bien réinitialisée
+          const checkTable = await getTable(tableIdNum);
+          if (checkTable && (checkTable.order || checkTable.guests)) {
+            console.warn(
+              "La table n'a pas été correctement réinitialisée, nettoyage forcé"
+            );
+            await resetTable(tableIdNum); // Essayer à nouveau
+          }
+
+          // Émettre un événement pour s'assurer que l'interface est à jour
+          events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
+
+          if (printReceipt) {
+            router.push({
+              pathname: '/print-preview',
+              params: {
+                tableId: tableIdNum.toString(),
+                total: totalAmount.toString(),
+                items: items as string,
+                paymentMethod: method,
+                tableName: table.name,
+              },
+            });
+          } else {
+            router.push('/');
+          }
+          toast.showToast(
+            `${table.name} a été payée complètement en ${method}.`,
+            'success'
+          );
+        } catch (error) {
+          console.error(
+            'Erreur lors de la réinitialisation de la table:',
+            error
+          );
+          toast.showToast('Erreur lors de la fermeture de la table', 'error');
         }
-        toast.showToast(
-          `${table.name} a été payée complètement en ${method}.`,
-          'success'
-        );
       } else {
         // If payment is partial, update the table's total
         const remainingAmount = table.order.total - totalAmount;
@@ -111,8 +144,8 @@ useEffect(() => {
           ...table,
           order: {
             ...table.order,
-            total: remainingAmount
-          }
+            total: remainingAmount,
+          },
         };
 
         await updateTable(updatedTable);

@@ -231,9 +231,10 @@ export default function CustomSplitScreen() {
 
       if (!table || !table.order) {
         toast.showToast(
-          'Impossible de trouver les informations de la table',
+          'Impossible de récupérer les informations de la table',
           'error'
         );
+        setProcessing(false);
         return;
       }
 
@@ -298,7 +299,6 @@ export default function CustomSplitScreen() {
           items: orderItems.length,
           status: 'split' as 'split',
           timestamp: new Date().toISOString(),
-          // Pour être sûr, faites cette conversion explicite
           paymentMethod: payment.method as 'card' | 'cash' | 'check',
           paymentType: 'custom' as 'custom',
           paidItems: orderItems.map((item: any) => ({
@@ -308,7 +308,6 @@ export default function CustomSplitScreen() {
               : 0,
             customAmount: payment.amount,
           })),
-          // Ajouter le montant des articles offerts proportionnel à ce paiement
           offeredAmount: (payment.amount / totalAmount) * totalOffered,
         };
 
@@ -321,7 +320,29 @@ export default function CustomSplitScreen() {
 
       // Si tous les paiements ont été traités et couvrent tout le montant, forcer la fermeture de la table
       if (allPaymentsProcessed && willPayFull) {
-        await resetTable(tableIdNum);
+        // Double vérification: vérifier que la table est réellement fermée
+        const finalCheck = await getTable(tableIdNum);
+        if (finalCheck && (finalCheck.order || finalCheck.guests)) {
+          // La table n'a pas été correctement fermée, forcer la réinitialisation
+          console.warn(
+            "La table n'a pas été correctement fermée, forçage de la réinitialisation"
+          );
+          await resetTable(tableIdNum);
+
+          // Vérification supplémentaire
+          const verifyReset = await getTable(tableIdNum);
+          if (verifyReset && (verifyReset.order || verifyReset.guests)) {
+            // Nettoyage forcé si la réinitialisation n'a pas fonctionné
+            const forcedCleanTable = {
+              ...verifyReset,
+              status: "available" as "available",
+              guests: undefined,
+              order: undefined,
+            };
+            await updateTable(forcedCleanTable);
+          }
+        }
+
         events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
         setTableFullyPaid(true);
 
@@ -333,6 +354,15 @@ export default function CustomSplitScreen() {
       } else {
         // Vérifier si la table a été fermée automatiquement
         if (tableWasClosed) {
+          // Vérification supplémentaire que la table est réellement fermée
+          const checkTable = await getTable(tableIdNum);
+          if (checkTable && (checkTable.order || checkTable.guests)) {
+            console.warn(
+              'Table marquée comme fermée mais contient encore des données, nettoyage forcé'
+            );
+            await resetTable(tableIdNum);
+          }
+
           setTableFullyPaid(true);
           router.push('/');
           toast.showToast(

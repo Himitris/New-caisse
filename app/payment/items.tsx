@@ -539,7 +539,7 @@ export default function ItemsPaymentScreen() {
         const currentTable = await getTable(tableIdNum);
         if (!currentTable || !currentTable.order) {
           toast.showToast(
-            'Impossible de récupérer les informations de la table.',
+            'Impossible de récupérer les informations de la table',
             'error'
           );
           setProcessing(false);
@@ -609,8 +609,33 @@ export default function ItemsPaymentScreen() {
         }, 0);
 
         if (updatedOrderItems.length === 0 || newTotal <= 0) {
+          // Table complètement payée, s'assurer qu'elle est correctement fermée
           await resetTable(tableIdNum);
-          // Ajouter cette ligne pour émettre l'événement
+
+          // Vérification supplémentaire pour s'assurer que la table est bien réinitialisée
+          const checkTable = await getTable(tableIdNum);
+          if (checkTable && (checkTable.order || checkTable.guests)) {
+            console.warn(
+              'Table non correctement réinitialisée, forçage du nettoyage'
+            );
+
+            // Méthode 1: Réessayer la réinitialisation
+            await resetTable(tableIdNum);
+
+            // Méthode 2: Forcer une mise à jour directe si nécessaire
+            const verifyReset = await getTable(tableIdNum);
+            if (verifyReset && (verifyReset.order || verifyReset.guests)) {
+              const forcedCleanTable = {
+                ...verifyReset,
+                status: 'available' as 'available', // Explicitly cast to the expected type
+                guests: undefined,
+                order: undefined,
+              };
+              await updateTable(forcedCleanTable);
+            }
+          }
+
+          // Émettre l'événement pour mettre à jour l'interface
           events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
           router.push('/');
 
@@ -626,7 +651,7 @@ export default function ItemsPaymentScreen() {
           };
 
           await updateTable(updatedTable);
-          // Ajouter cette ligne pour émettre l'événement
+          // Émettre l'événement pour mettre à jour l'interface
           events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
           setSelectedItems([]);
           loadTable();

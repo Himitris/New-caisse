@@ -715,6 +715,7 @@ class TableManager {
     }
   }
 
+  // Modifier la fonction resetTable pour garantir un nettoyage complet
   static async resetTable(tableId: number): Promise<void> {
     try {
       const tables = await TableManager.getTables();
@@ -722,24 +723,80 @@ class TableManager {
 
       if (tableIndex >= 0) {
         const defaultTable = defaultTables.find((t) => t.id === tableId);
+        const currentTable = tables[tableIndex];
 
+        // Conserver uniquement les informations de base et réinitialiser tout le reste
         tables[tableIndex] = {
-          ...(defaultTable || tables[tableIndex]),
-          name: tables[tableIndex].name,
-          section: tables[tableIndex].section,
+          ...(defaultTable || { id: tableId, seats: 4 }),
+          id: tableId,
+          name: currentTable.name,
+          section:
+            currentTable.section || defaultTable?.section || TABLE_SECTIONS.EAU,
           status: 'available',
+          seats: currentTable.seats || defaultTable?.seats || 4,
+          // Supprimer explicitement les propriétés ci-dessous
           guests: undefined,
           order: undefined,
         };
 
         await TableManager.saveTables(tables);
-        log.info(`Reset table ${tableId} to available state`);
+        log.info(
+          `Reset table ${tableId} to available state - order data completely purged`
+        );
+
+        // Émettre un événement pour notification
+        events.emit(EVENT_TYPES.TABLE_UPDATED, tableId);
+
+        return;
       } else {
         log.info(`Table ${tableId} not found for reset`);
       }
     } catch (error) {
       log.error(`Error resetting table ${tableId}:`, error);
       throw error;
+    }
+  }
+
+  static async cleanupOrphanedTableData(): Promise<void> {
+    try {
+      const tables = await TableManager.getTables();
+      let cleanedTables = 0;
+
+      // Parcourir toutes les tables pour nettoyer les données orphelines
+      for (const table of tables) {
+        let needsCleanup = false;
+
+        // Vérifier les incohérences
+        if (table.status === 'available' && (table.order || table.guests)) {
+          needsCleanup = true;
+        }
+
+        // Vérifier les commandes vides
+        if (
+          table.order &&
+          (!table.order.items || table.order.items.length === 0)
+        ) {
+          needsCleanup = true;
+        }
+
+        // Nettoyer si nécessaire
+        if (needsCleanup) {
+          const defaultTable = defaultTables.find((t) => t.id === table.id);
+          table.status = 'available';
+          table.guests = undefined;
+          table.order = undefined;
+          cleanedTables++;
+        }
+      }
+
+      if (cleanedTables > 0) {
+        await TableManager.saveTables(tables);
+        log.info(
+          `Auto-cleanup: fixed ${cleanedTables} tables with orphaned data`
+        );
+      }
+    } catch (error) {
+      log.error('Error during orphaned table data cleanup:', error);
     }
   }
 
