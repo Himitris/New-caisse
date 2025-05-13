@@ -7,10 +7,12 @@ import {
   Alert,
   Platform,
   ActivityIndicator,
+  Animated,
+  Dimensions,
 } from 'react-native';
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter, useFocusEffect } from 'expo-router';
-import { Users, RefreshCcw, Filter } from 'lucide-react-native';
+import { Users, RefreshCcw, Filter, Coffee } from 'lucide-react-native';
 import {
   getTables,
   saveTables,
@@ -21,18 +23,22 @@ import {
 import CustomCoversModal from '../components/CustomCoversModal';
 import CoversSelectionModal from '../components/CoversSelectionModal';
 import { useToast } from '../../utils/ToastContext';
+import { LinearGradient } from 'expo-linear-gradient';
+import * as Haptics from 'expo-haptics';
 
-// Mise en cache des couleurs des tables
+// Mise en cache des couleurs et gradients des tables
 const TABLE_COLORS = {
-  available: '#4CAF50',
-  occupied: '#F44336',
-  reserved: '#FFC107',
-  default: '#E0E0E0',
+  available: ['#4CAF50', '#2E7D32'],
+  occupied: ['#F44336', '#C62828'],
+  reserved: ['#FFC107', '#FFA000'],
+  default: ['#E0E0E0', '#9E9E9E'],
 } as const;
 
 // Constantes optimisées
 const LOADING_DELAY = 200; // ms
 const REFRESH_DEBOUNCE = 300; // ms
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const ANIMATION_DURATION = 300; // ms
 
 export default function TablesScreen() {
   const router = useRouter();
@@ -43,6 +49,11 @@ export default function TablesScreen() {
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const toast = useToast();
+
+  // Animations
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(50)).current;
+  const refreshRotation = useRef(new Animated.Value(0)).current;
 
   // États pour les modals
   const [customCoversModalVisible, setCustomCoversModalVisible] =
@@ -64,6 +75,38 @@ export default function TablesScreen() {
       return acc;
     }, {} as Record<string, Table[]>);
   }, [tables, sections]);
+
+  // Animation de rotation pour le bouton de rafraîchissement
+  const spinRefreshIcon = useCallback(() => {
+    refreshRotation.setValue(0);
+    Animated.timing(refreshRotation, {
+      toValue: 1,
+      duration: 800,
+      useNativeDriver: true,
+    }).start();
+  }, [refreshRotation]);
+
+  // Transformation de rotation
+  const spin = refreshRotation.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+
+  // Animation d'entrée
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: ANIMATION_DURATION,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: ANIMATION_DURATION,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [fadeAnim, slideAnim]);
 
   // Chargement initial des tables avec buffer optionnel
   useEffect(() => {
@@ -91,6 +134,24 @@ export default function TablesScreen() {
   useFocusEffect(
     useCallback(() => {
       console.log('Plan du restaurant en focus - rafraîchissement des données');
+      
+      // Animation d'entrée à chaque focus
+      fadeAnim.setValue(0.7);
+      slideAnim.setValue(20);
+      
+      Animated.parallel([
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+        Animated.timing(slideAnim, {
+          toValue: 0,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+      ]).start();
+      
       loadTables(false);
       return () => {
         // Fonction de nettoyage si nécessaire
@@ -104,6 +165,7 @@ export default function TablesScreen() {
       setError(null);
     } else {
       setRefreshing(true);
+      spinRefreshIcon();
     }
 
     try {
@@ -124,11 +186,13 @@ export default function TablesScreen() {
         setRefreshing(false);
       }
     }
-  }, []);
+  }, [spinRefreshIcon]);
 
   // Fonction de rafraîchissement avec debounce
   const handleRefreshTables = useCallback(() => {
     loadTables(false);
+    // Retour haptique sur rafraîchissement
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   }, [loadTables]);
 
   const handleResetAllTables = useCallback(() => {
@@ -142,6 +206,8 @@ export default function TablesScreen() {
           style: 'destructive',
           onPress: async () => {
             setLoading(true);
+            // Retour haptique sur action destructive
+            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             try {
               await resetAllTables();
               await loadTables(true);
@@ -166,6 +232,9 @@ export default function TablesScreen() {
 
   const openTable = useCallback(
     (table: Table) => {
+      // Retour haptique léger lorsqu'on touche une table
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+      
       if (table.status === 'available') {
         setSelectedTable(table);
         setCoversSelectionModalVisible(true);
@@ -230,6 +299,9 @@ export default function TablesScreen() {
   const processOpenTable = useCallback(
     async (table: Table, guestNumber: number) => {
       try {
+        // Retour haptique de succès
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        
         // Mettre à jour le statut de la table
         const updatedTable: Table = {
           ...table,
@@ -265,51 +337,194 @@ export default function TablesScreen() {
     [tables, router, toast]
   );
 
-  const getTableColor = useCallback((status: Table['status']) => {
+  const getTableColors = useCallback((status: Table['status']) => {
     return TABLE_COLORS[status] || TABLE_COLORS.default;
   }, []);
 
   // Toggle section filtering
   const toggleSection = useCallback((section: string) => {
-    setActiveSection((current) => (current === section ? null : section));
-  }, []);
+    // Retour haptique léger sur changement de section
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    
+    // Réinitialiser les animations avant de changer de section
+    // Cela garantit que les animations ne s'accumulent pas entre les transitions
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 0.5,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+      Animated.timing(slideAnim, {
+        toValue: 10,
+        duration: 100,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      // Changer la section dans le callback d'animation
+      setActiveSection((current) => {
+        const newActive = current === section ? null : section;
+        
+        // Réanimer pour entrer la nouvelle section
+        Animated.parallel([
+          Animated.timing(fadeAnim, {
+            toValue: 1,
+            duration: 200,
+            useNativeDriver: true,
+          }),
+          Animated.timing(slideAnim, {
+            toValue: 0,
+            duration: 200,
+            useNativeDriver: true,
+          }),
+        ]).start();
+        
+        return newActive;
+      });
+    });
+  }, [fadeAnim, slideAnim]);
 
   // Show all sections or just the active one
   const sectionsToDisplay = useMemo(() => {
     return activeSection ? [activeSection] : sections;
   }, [activeSection, sections]);
 
-  // Rendering optimisations
+  // Référence aux valeurs animées pour chaque table
+  // Les rendus avec index * X peuvent causer des problèmes avec recomposition
+  const itemFadeAnims = useRef<{[id: string]: Animated.Value}>({}).current;
+  const itemSlideAnims = useRef<{[id: string]: Animated.Value}>({}).current;
+  
+  // Rendus optimisés avec animations
   const renderTableItem = useCallback(
-    (table: Table) => (
-      <Pressable
-        key={table.id}
-        style={[styles.table, { backgroundColor: getTableColor(table.status) }]}
-        onPress={() => openTable(table)}
-      >
-        <Text style={styles.tableNumber}>{table.name}</Text>
-        <View style={styles.tableInfo}>
-          <Users size={20} color="white" />
-          <Text style={styles.seats}>{table.guests || 0}</Text>
-        </View>
-        <Text style={styles.status}>{table.status}</Text>
-        {table.order?.items.length ? (
-          <Text style={styles.orderInfo}>
-            {table.order.items.length} items - {table.order.total.toFixed(2)}€
-          </Text>
-        ) : null}
-      </Pressable>
-    ),
-    [getTableColor, openTable]
+    (table: Table, index: number) => {
+      const colorGradient = getTableColors(table.status);
+      const tableStatusIcons = {
+        available: null,
+        occupied: <Coffee size={16} color="white" style={styles.statusIcon} />,
+        reserved: null,
+      };
+      
+      // Créer des animations individuelles pour chaque table si elles n'existent pas
+      if (!itemFadeAnims[table.id]) {
+        itemFadeAnims[table.id] = new Animated.Value(0);
+        itemSlideAnims[table.id] = new Animated.Value(20);
+        
+        // Décaler légèrement l'animation de chaque table
+        const delay = index * 50;
+        Animated.parallel([
+          Animated.timing(itemFadeAnims[table.id], {
+            toValue: 1,
+            duration: 300,
+            delay,
+            useNativeDriver: true,
+          }),
+          Animated.timing(itemSlideAnims[table.id], {
+            toValue: 0,
+            duration: 300,
+            delay,
+            useNativeDriver: true,
+          }),
+        ]).start();
+      }
+      
+      return (
+        <Animated.View
+          key={table.id}
+          style={[
+            {
+              opacity: itemFadeAnims[table.id],
+              transform: [{ translateY: itemSlideAnims[table.id] }],
+            },
+          ]}
+        >
+          <Pressable
+            style={({pressed}) => [
+              styles.table,
+              pressed && styles.tablePressed
+            ]}
+            onPress={() => openTable(table)}
+          >
+            <LinearGradient
+              colors={colorGradient}
+              style={styles.tableGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+            >
+              <View style={styles.tableHeader}>
+                <Text style={styles.tableNumber}>{table.name}</Text>
+                <View style={styles.tableInfo}>
+                  <Users size={16} color="white" />
+                  <Text style={styles.seats}>{table.guests || 0}</Text>
+                </View>
+              </View>
+              
+              <View style={styles.tableContent}>
+                {tableStatusIcons[table.status]}
+              </View>
+              
+              <View style={styles.tableFooter}>
+                <Text style={styles.status}>{table.status}</Text>
+                {table.order?.items.length ? (
+                  <Text style={styles.orderInfo}>
+                    {table.order.items.length} items - {table.order.total.toFixed(2)}€
+                  </Text>
+                ) : null}
+              </View>
+            </LinearGradient>
+          </Pressable>
+        </Animated.View>
+      );
+    },
+    [getTableColors, openTable, itemFadeAnims, itemSlideAnims]
   );
 
+  // Référence pour les animations des sections
+  const sectionAnims = useRef<{[section: string]: {fade: Animated.Value, slide: Animated.Value}}>({}).current;
+  
+  const resetTableAnimations = useCallback(() => {
+    // Réinitialiser toutes les animations de table lors d'un changement de section
+    Object.keys(itemFadeAnims).forEach(id => {
+      itemFadeAnims[id].setValue(0);
+      itemSlideAnims[id].setValue(20);
+    });
+  }, [itemFadeAnims, itemSlideAnims]);
+  
   const renderSectionContent = useCallback(
     (section: string) => {
       const sectionTables = tablesBySection[section] || [];
+      
+      // Créer des animations pour chaque section si elles n'existent pas
+      if (!sectionAnims[section]) {
+        sectionAnims[section] = {
+          fade: new Animated.Value(0),
+          slide: new Animated.Value(20)
+        };
+        
+        // Démarrer l'animation d'entrée de section
+        Animated.parallel([
+          Animated.timing(sectionAnims[section].fade, {
+            toValue: 1,
+            duration: 300,
+            useNativeDriver: true,
+          }),
+          Animated.timing(sectionAnims[section].slide, {
+            toValue: 0,
+            duration: 300,
+            useNativeDriver: true,
+          }),
+        ]).start();
+      }
 
       if (sectionTables.length === 0) {
         return (
-          <View style={styles.noTablesContainer}>
+          <Animated.View
+            style={[
+              styles.noTablesContainer,
+              {
+                opacity: sectionAnims[section].fade,
+                transform: [{ translateY: sectionAnims[section].slide }],
+              },
+            ]}
+          >
             <Text style={styles.noTablesText}>
               Aucune table dans cette section
             </Text>
@@ -318,38 +533,67 @@ export default function TablesScreen() {
               {section}
             </Text>
             <Pressable
-              style={styles.sectionResetButton}
+              style={({pressed}) => [
+                styles.sectionResetButton,
+                pressed && styles.buttonPressed
+              ]}
               onPress={handleResetAllTables}
             >
               <Text style={styles.sectionResetText}>
                 Réinitialiser Toutes les Tables
               </Text>
             </Pressable>
-          </View>
+          </Animated.View>
         );
       }
 
       return (
-        <View style={styles.tablesGrid}>
-          {sectionTables.map(renderTableItem)}
-        </View>
+        <Animated.View 
+          style={[
+            styles.tablesGrid,
+            {
+              opacity: sectionAnims[section].fade,
+              transform: [{ translateY: sectionAnims[section].slide }],
+            },
+          ]}
+        >
+          {sectionTables.map((table, index) => renderTableItem(table, index))}
+        </Animated.View>
       );
     },
-    [tablesBySection, tables.length, handleResetAllTables, renderTableItem]
+    [tablesBySection, tables.length, handleResetAllTables, renderTableItem, sectionAnims]
   );
 
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#4CAF50" />
-        <Text style={styles.loadingText}>Chargement des tables...</Text>
+        <Animated.Text 
+          style={[
+            styles.loadingText,
+            {
+              opacity: fadeAnim,
+              transform: [{ translateY: slideAnim }],
+            },
+          ]}
+        >
+          Chargement des tables...
+        </Animated.Text>
       </View>
     );
   }
 
   if (error || tables.length === 0) {
     return (
-      <View style={styles.loadingContainer}>
+      <Animated.View 
+        style={[
+          styles.loadingContainer,
+          {
+            opacity: fadeAnim,
+            transform: [{ translateY: slideAnim }],
+          },
+        ]}
+      >
         {error && <Text style={styles.errorText}>{error}</Text>}
         {tables.length === 0 && (
           <Text style={styles.errorText}>
@@ -357,18 +601,31 @@ export default function TablesScreen() {
           </Text>
         )}
 
-        <Pressable style={styles.resetButton} onPress={handleResetAllTables}>
+        <Pressable 
+          style={({pressed}) => [
+            styles.resetButton,
+            pressed && styles.buttonPressed
+          ]} 
+          onPress={handleResetAllTables}
+        >
           <RefreshCcw size={20} color="white" />
           <Text style={styles.resetButtonText}>
             Réinitialiser Toutes les Tables
           </Text>
         </Pressable>
-      </View>
+      </Animated.View>
     );
   }
 
   return (
-    <View style={styles.container}>
+    <Animated.View 
+      style={[
+        styles.container,
+        {
+          opacity: fadeAnim,
+        },
+      ]}
+    >
       {/* Modal pour le choix du nombre de couverts */}
       <CoversSelectionModal
         visible={coversSelectionModalVisible}
@@ -386,7 +643,10 @@ export default function TablesScreen() {
         tableName={selectedTable?.name || ''}
       />
 
-      <View style={styles.header}>
+      <LinearGradient
+        colors={['#FFFFFF', '#F5F5F5']}
+        style={styles.header}
+      >
         <Text style={styles.title}>Plan du Restaurant</Text>
         <View style={styles.headerButtons}>
           {refreshing && (
@@ -396,12 +656,24 @@ export default function TablesScreen() {
               style={{ marginRight: 10 }}
             />
           )}
-          <Pressable style={styles.refreshButton} onPress={handleRefreshTables}>
-            <RefreshCcw size={20} color="#2196F3" />
+          <Pressable 
+            style={({pressed}) => [
+              styles.refreshButton,
+              pressed && styles.buttonPressed
+            ]} 
+            onPress={handleRefreshTables}
+          >
+            <Animated.View style={{ transform: [{ rotate: spin }] }}>
+              <RefreshCcw size={20} color="#2196F3" />
+            </Animated.View>
             <Text style={styles.refreshButtonText}>Rafraîchir</Text>
           </Pressable>
           <Pressable
-            style={styles.filterButton}
+            style={({pressed}) => [
+              styles.filterButton,
+              activeSection && styles.filterButtonInactive,
+              pressed && styles.buttonPressed
+            ]}
             onPress={() => setActiveSection(null)}
           >
             <Filter size={20} color={activeSection ? '#666' : '#2196F3'} />
@@ -414,21 +686,28 @@ export default function TablesScreen() {
               Tout
             </Text>
           </Pressable>
-          <Pressable style={styles.resetButton} onPress={handleResetAllTables}>
+          <Pressable 
+            style={({pressed}) => [
+              styles.resetButton,
+              pressed && styles.buttonPressed
+            ]} 
+            onPress={handleResetAllTables}
+          >
             <RefreshCcw size={20} color="white" />
             <Text style={styles.resetButtonText}>Réinitialiser</Text>
           </Pressable>
         </View>
-      </View>
+      </LinearGradient>
 
       <View style={styles.mainContent}>
         <View style={styles.sectionTabs}>
           {sections.map((section) => (
             <Pressable
               key={section}
-              style={[
+              style={({pressed}) => [
                 styles.sectionTab,
                 activeSection === section && styles.activeTab,
+                pressed && styles.sectionTabPressed
               ]}
               onPress={() => toggleSection(section)}
             >
@@ -444,55 +723,81 @@ export default function TablesScreen() {
           ))}
         </View>
 
-        <ScrollView style={styles.scrollContainer}>
+        <Animated.ScrollView 
+          style={[
+            styles.scrollContainer,
+            {
+              transform: [{ translateY: slideAnim }],
+            },
+          ]}
+          showsVerticalScrollIndicator={false}
+        >
           <View style={styles.tablesContainer}>
             {sectionsToDisplay.map((section) => (
-              <View key={section} style={styles.sectionContainer}>
+              <Animated.View 
+                key={section} 
+                style={[
+                  styles.sectionContainer,
+                  {
+                    opacity: fadeAnim,
+                    transform: [{ translateY: slideAnim }],
+                  },
+                ]}
+              >
                 <Text style={styles.sectionTitle}>{section}</Text>
                 {renderSectionContent(section)}
-              </View>
+              </Animated.View>
             ))}
           </View>
-        </ScrollView>
+        </Animated.ScrollView>
       </View>
-    </View>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#f8f9fa',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
+    backgroundColor: '#f8f9fa',
   },
   loadingText: {
-    marginTop: 10,
+    marginTop: 16,
     fontSize: 16,
     color: '#666',
+    fontWeight: '500',
   },
   errorText: {
     fontSize: 16,
     color: '#F44336',
     textAlign: 'center',
     marginBottom: 20,
+    fontWeight: '500',
   },
   header: {
     padding: 16,
-    backgroundColor: 'white',
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    zIndex: 10,
   },
   title: {
     fontSize: 24,
     fontWeight: 'bold',
+    color: '#333',
   },
   mainContent: {
     flex: 1,
@@ -510,6 +815,11 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 8,
     gap: 8,
+    shadowColor: '#F44336',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
   },
   resetButtonText: {
     color: 'white',
@@ -536,11 +846,18 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     gap: 8,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: '#2196F3',
     backgroundColor: 'white',
+  },
+  filterButtonInactive: {
+    borderColor: '#ddd',
   },
   filterButtonText: {
     fontWeight: '600',
+  },
+  buttonPressed: {
+    opacity: 0.7,
+    transform: [{ scale: 0.98 }],
   },
   sectionTabs: {
     width: 160,
@@ -548,6 +865,11 @@ const styles = StyleSheet.create({
     borderRightWidth: 1,
     borderRightColor: '#e0e0e0',
     padding: 10,
+    elevation: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 1, height: 0 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
   },
   sectionTab: {
     padding: 12,
@@ -556,6 +878,10 @@ const styles = StyleSheet.create({
   },
   activeTab: {
     backgroundColor: '#e3f2fd',
+  },
+  sectionTabPressed: {
+    opacity: 0.7,
+    backgroundColor: '#f0f0f0',
   },
   sectionTabText: {
     fontSize: 16,
@@ -574,19 +900,29 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   sectionContainer: {
-    marginBottom: 20,
+    marginBottom: 24,
   },
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
-    marginBottom: 12,
+    marginBottom: 16,
+    color: '#333',
+    paddingLeft: 4,
+    borderLeftWidth: 3,
+    borderLeftColor: '#2196F3',
+    paddingVertical: 4,
   },
   noTablesContainer: {
     padding: 20,
     alignItems: 'center',
     backgroundColor: '#FFF3CD',
     margin: 10,
-    borderRadius: 8,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
   noTablesText: {
     textAlign: 'center',
@@ -607,6 +943,11 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderRadius: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
   },
   sectionResetText: {
     color: 'white',
@@ -619,45 +960,88 @@ const styles = StyleSheet.create({
     gap: 20,
   },
   table: {
-    width: 140,
-    height: 140,
-    borderRadius: 8,
-    padding: 12,
-    justifyContent: 'space-between',
+    width: 150,
+    height: 150,
+    borderRadius: 12,
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
-      height: 2,
+      height: 3,
     },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
+    shadowOpacity: 0.15,
+    shadowRadius: 5,
     elevation: 5,
+    overflow: 'hidden',
+  },
+  tablePressed: {
+    transform: [{ scale: 0.96 }],
+    opacity: 0.9,
+  },
+  tableGradient: {
+    flex: 1,
+    padding: 16,
+    justifyContent: 'space-between',
+  },
+  tableHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  tableContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tableFooter: {
+    marginTop: 'auto',
   },
   tableNumber: {
     color: 'white',
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: 'bold',
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
   },
   tableInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 6,
+    backgroundColor: 'rgba(0,0,0,0.15)',
+    padding: 4,
+    paddingHorizontal: 8,
+    borderRadius: 12,
   },
   seats: {
     color: 'white',
     fontSize: 14,
+    fontWeight: '500',
   },
   status: {
     color: 'white',
     fontSize: 12,
     textTransform: 'capitalize',
+    fontWeight: '500',
+    backgroundColor: 'rgba(0,0,0,0.1)',
+    alignSelf: 'flex-start',
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    overflow: 'hidden',
+  },
+  statusIcon: {
+    marginBottom: 10,
   },
   orderInfo: {
     color: 'white',
-    fontSize: 11,
+    fontSize: 13,
     backgroundColor: 'rgba(0,0,0,0.2)',
-    padding: 4,
-    borderRadius: 4,
-    marginTop: 4,
+    padding: 6,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    marginTop: 6,
+    fontWeight: '500',
+    overflow: 'hidden',
+    maxWidth: '100%',
   },
 });
