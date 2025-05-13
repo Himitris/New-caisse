@@ -219,15 +219,6 @@ export default function FullPaymentScreen() {
 
         <View style={styles.paymentMethods}>
           <Pressable
-            style={[styles.paymentButton, { backgroundColor: '#4CAF50' }]}
-            onPress={() => handlePayment('card')}
-            disabled={processing}
-          >
-            <CreditCard size={32} color="white" />
-            <Text style={styles.buttonText}>Paiement par carte</Text>
-          </Pressable>
-
-          <Pressable
             style={[styles.paymentButton, { backgroundColor: '#2196F3' }]}
             onPress={() => handlePayment('cash')}
             disabled={processing}

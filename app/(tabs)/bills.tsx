@@ -31,20 +31,9 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { getBills, saveBills } from '../../utils/storage';
+import { Bill, getBills, saveBills } from '../../utils/storage';
 import { useToast } from '../../utils/ToastContext';
 
-interface Bill {
-  id: number;
-  tableNumber: number;
-  tableName?: string;
-  section?: string;
-  amount: number;
-  items: number;
-  status: 'pending' | 'paid' | 'split';
-  timestamp: string;
-  paymentMethod?: 'card' | 'cash' | 'check';
-}
 
 interface ViewReceiptModalProps {
   visible: boolean;
@@ -129,6 +118,9 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
       ? PAYMENT_METHOD_LABELS[bill.paymentMethod]
       : '';
 
+    // Vérifier si nous avons des articles payés détaillés
+    const hasDetailedItems = bill.paidItems && bill.paidItems.length > 0;
+
     return (
       <Modal
         visible={visible}
@@ -176,11 +168,58 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
 
               <View style={styles.receiptDivider} />
 
+              {/* Affichage des articles détaillés si disponibles */}
+              {hasDetailedItems && (
+                <View style={styles.itemsContainer}>
+                  <Text style={styles.itemsHeader}>Détail des articles</Text>
+                  {(bill.paidItems ?? []).map((item, index) => (
+                    <View key={index} style={styles.itemRow}>
+                      <View style={styles.itemDetails}>
+                        <Text style={styles.itemQuantity}>
+                          {item.quantity}x
+                        </Text>
+                        <Text
+                          style={[
+                            styles.itemName,
+                            item.offered && styles.offeredItemText,
+                          ]}
+                        >
+                          {item.name} {item.offered ? '(Offert)' : ''}
+                        </Text>
+                      </View>
+                      <Text
+                        style={[
+                          styles.itemPrice,
+                          item.offered && styles.offeredItemPrice,
+                        ]}
+                      >
+                        {(item.price * item.quantity).toFixed(2)} €
+                      </Text>
+                    </View>
+                  ))}
+                  <View style={styles.receiptDivider} />
+                </View>
+              )}
+
               <View style={styles.billSummary}>
                 <View style={styles.billRow}>
                   <Text style={styles.billLabel}>Articles:</Text>
-                  <Text style={styles.billValue}>{bill.items}</Text>
+                  <Text style={styles.billValue}>
+                    {hasDetailedItems ? bill.paidItems?.length ?? 0 : bill.items}
+                  </Text>
                 </View>
+
+                {bill.offeredAmount && bill.offeredAmount > 0 && (
+                  <View style={styles.billRow}>
+                    <Text style={styles.billOfferedLabel}>
+                      Articles offerts:
+                    </Text>
+                    <Text style={styles.billOfferedValue}>
+                      {bill.offeredAmount.toFixed(2)} €
+                    </Text>
+                  </View>
+                )}
+
                 <View style={styles.billRow}>
                   <Text style={styles.billLabel}>Montant:</Text>
                   <Text style={styles.billAmount}>
@@ -715,15 +754,8 @@ export default function BillsScreen() {
       : '';
 
     const taxInfo = 'TVA non applicable - art.293B du CGI';
-    const restaurantInfo = {
-      name: 'Manjo Carn',
-      address: 'Route de la Corniche, 82140 Saint Antonin Noble Val',
-      siret: 'Siret N° 803 520 998 00011',
-      phone: 'Tel : 0563682585',
-      owner: 'Virginie',
-    };
 
-    // Formater la date pour économiser de l'espace
+    // Formater la date
     const dateObj = new Date(bill.timestamp);
     const dateFormatted = dateObj.toLocaleDateString('fr-FR', {
       day: '2-digit',
@@ -734,6 +766,53 @@ export default function BillsScreen() {
       hour: '2-digit',
       minute: '2-digit',
     });
+
+    // Vérifier si nous avons des articles détaillés
+    const hasDetailedItems = bill.paidItems && bill.paidItems.length > 0;
+
+    // Générer le HTML des articles si disponibles
+    let itemsHTML = '';
+    if (hasDetailedItems) {
+      itemsHTML = `
+        <div class="items-section">
+          <table style="width: 100%; border-collapse: collapse; margin: 5mm 0;">
+            <tr>
+              <th style="text-align: left;">Qté</th>
+              <th style="text-align: left;">Article</th>
+              <th style="text-align: right;">Prix</th>
+            </tr>
+            ${(bill.paidItems ?? [])
+              .map(
+                (item) => `
+              <tr ${
+                item.offered
+                  ? 'style="font-style: italic; color: #FF9800;"'
+                  : ''
+              }>
+                <td>${item.quantity}x</td>
+                <td>${item.name}${item.offered ? ' (Offert)' : ''}</td>
+                <td style="text-align: right;">${(
+                  item.price * item.quantity
+                ).toFixed(2)}€</td>
+              </tr>
+            `
+              )
+              .join('')}
+          </table>
+        </div>
+      `;
+    }
+
+    // Inclure les articles offerts si présents
+    let offeredHTML = '';
+    if (bill.offeredAmount && bill.offeredAmount > 0) {
+      offeredHTML = `
+        <div class="total-line" style="color: #FF9800; font-style: italic;">
+          <span>Articles offerts:</span>
+          <span>${bill.offeredAmount.toFixed(2)}€</span>
+        </div>
+      `;
+    }
 
     return `
       <html>
@@ -793,13 +872,17 @@ export default function BillsScreen() {
             .payment-info p {
               margin: 0 0 1mm 0;
             }
+            th, td {
+              padding: 1mm 0;
+              font-size: 9pt;
+            }
           </style>
         </head>
         <body>
           <div class="header">
-            <h1>${restaurantInfo.name}</h1>
-            <p>${restaurantInfo.address}</p>
-            <p>${restaurantInfo.phone}</p>
+            <h1>${RESTAURANT_INFO.name}</h1>
+            <p>${RESTAURANT_INFO.address}</p>
+            <p>${RESTAURANT_INFO.phone}</p>
           </div>
   
           <div class="divider"></div>
@@ -814,11 +897,16 @@ export default function BillsScreen() {
   
           <div class="divider"></div>
   
+          ${itemsHTML}
+  
           <div class="totals">
             <div class="total-line">
               <span>Articles:</span>
-              <span>${bill.items}</span>
+              <span>${
+                hasDetailedItems ? bill.paidItems?.length ?? 0 : bill.items
+              }</span>
             </div>
+            ${offeredHTML}
             <div class="total-amount">
               TOTAL: ${bill.amount.toFixed(2)}€
             </div>
@@ -842,7 +930,7 @@ export default function BillsScreen() {
           <div class="footer">
             <p>${taxInfo}</p>
             <p>Merci de votre visite!</p>
-            <p>À bientôt, ${restaurantInfo.owner}</p>
+            <p>À bientôt, ${RESTAURANT_INFO.owner}</p>
           </div>
         </body>
       </html>
@@ -888,6 +976,7 @@ export default function BillsScreen() {
         UTI: '.pdf',
         mimeType: 'application/pdf',
       });
+      toast.showToast('Reçu partagé avec succès.', 'success');
     } catch (error) {
       console.error('Erreur de partage:', error);
       toast.showToast('Impossible de partager le reçu.', 'error');
@@ -1622,5 +1711,58 @@ const styles = StyleSheet.create({
   paymentOptionText: {
     fontSize: 16,
     color: '#333',
+  },
+  itemsContainer: {
+    marginBottom: 16,
+  },
+  itemsHeader: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  itemRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  itemDetails: {
+    flexDirection: 'row',
+    flex: 1,
+    alignItems: 'center',
+  },
+  itemQuantity: {
+    fontSize: 14,
+    marginRight: 8,
+    width: 30,
+  },
+  itemName: {
+    fontSize: 14,
+    flex: 1,
+  },
+  itemPrice: {
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  offeredItemText: {
+    fontStyle: 'italic',
+    color: '#FF9800',
+  },
+  offeredItemPrice: {
+    textDecorationLine: 'line-through',
+    color: '#FF9800',
+  },
+  billOfferedLabel: {
+    fontSize: 14,
+    color: '#FF9800',
+    fontWeight: '500',
+  },
+  billOfferedValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FF9800',
   },
 });

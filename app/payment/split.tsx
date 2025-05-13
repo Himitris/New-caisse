@@ -295,13 +295,6 @@ export default function SplitBillScreen() {
             {!payment.paid ? (
               <View style={styles.paymentActions}>
                 <Pressable
-                  style={[styles.paymentButton, { backgroundColor: '#4CAF50' }]}
-                  onPress={() => handlePayment(payment.id, 'card')}
-                >
-                  <CreditCard size={24} color="white" />
-                  <Text style={styles.buttonText}>Paiement par carte</Text>
-                </Pressable>
-                <Pressable
                   style={[styles.paymentButton, { backgroundColor: '#2196F3' }]}
                   onPress={() => handlePayment(payment.id, 'cash')}
                 >

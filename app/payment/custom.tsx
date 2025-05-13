@@ -448,30 +448,7 @@ export default function CustomSplitScreen() {
                 </View>
 
                 <View style={styles.paymentMethodsRow}>
-                  <Pressable
-                    style={[
-                      styles.methodButton,
-                      paymentMethods[index] === 'card' &&
-                        styles.selectedMethodButton,
-                    ]}
-                    onPress={() => setPaymentMethod(index, 'card')}
-                  >
-                    <CreditCard
-                      size={20}
-                      color={
-                        paymentMethods[index] === 'card' ? 'white' : '#333'
-                      }
-                    />
-                    <Text
-                      style={[
-                        styles.methodText,
-                        paymentMethods[index] === 'card' &&
-                          styles.selectedMethodText,
-                      ]}
-                    >
-                      Carte
-                    </Text>
-                  </Pressable>
+                  
 
                   <Pressable
                     style={[

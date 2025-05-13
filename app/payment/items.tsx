@@ -902,14 +902,6 @@ export default function ItemsPaymentScreen() {
         <Text style={styles.paymentTitle}>Méthode de paiement</Text>
 
         <View style={styles.paymentButtons}>
-          <Pressable
-            style={[styles.paymentButton, { backgroundColor: '#4CAF50' }]}
-            onPress={() => handlePayment('card')}
-            disabled={processing || selectedItems.length === 0}
-          >
-            <CreditCard size={24} color="white" />
-            <Text style={styles.paymentButtonText}>Carte</Text>
-          </Pressable>
 
           <Pressable
             style={[styles.paymentButton, { backgroundColor: '#2196F3' }]}
