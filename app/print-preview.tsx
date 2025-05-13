@@ -64,6 +64,7 @@ export default function PrintPreviewScreen() {
     }),
   };
 
+  // Fonction modifiée generateHTML pour un format d'impression 80mm
   const generateHTML = () => {
     let totalPrice = 0;
     let offeredTotal = 0;
@@ -72,33 +73,27 @@ export default function PrintPreviewScreen() {
       name: string;
       quantity: number;
       price: number;
-      offered?: boolean; // Ajout de la propriété offered
+      offered?: boolean;
     }
 
     const itemsHTML: string = order.items
       .map((item: OrderItem) => {
         const itemTotal: number = item.quantity * item.price;
 
-        // Calculer séparément les totaux normaux et offerts
         if (!item.offered) {
           totalPrice += itemTotal;
         } else {
           offeredTotal += itemTotal;
         }
 
-        // Marquer visuellement les produits offerts
+        // Format simplifié en colonnes pour papier 80mm
         return `
-      <tr class="${item.offered ? 'offered-item' : ''}">
-        <td>${item.name}${
-          item.offered ? ' <span class="offered-label">(Offert)</span>' : ''
-        }</td>
-        <td>${item.quantity}</td>
-        <td>${item.price.toFixed(2)} €</td>
-        <td class="${item.offered ? 'offered-price' : ''}">${itemTotal.toFixed(
-          2
-        )} €</td>
-      </tr>
-      `;
+    <tr class="${item.offered ? 'offered-item' : ''}">
+      <td>${item.quantity}x</td>
+      <td>${item.name}${item.offered ? ' (Offert)' : ''}</td>
+      <td>${itemTotal.toFixed(2)}€</td>
+    </tr>
+    `;
       })
       .join('');
 
@@ -106,109 +101,172 @@ export default function PrintPreviewScreen() {
     const taxInfo = 'TVA non applicable - art.293B du CGI';
 
     return `
-    <html>
-      <head>
-        <style>
-          body { font-family: Arial, sans-serif; padding: 20px; }
-          .header, .footer { text-align: center; margin-bottom: 20px; }
-          .info { margin-bottom: 20px; text-align: center; }
-          .items { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
-          .items th, .items td { padding: 8px; text-align: center; border-bottom: 1px solid #ddd; }
-          .totals { text-align: right; font-weight: bold; }
-          .payment-info { text-align: center; margin-top: 20px; padding: 10px; border: 1px dashed #ccc; }
-          .partial { color: #f44336; font-weight: bold; }
-          .preview-notice { 
-            background-color: #9C27B0; 
-            color: white; 
-            text-align: center; 
-            padding: 10px; 
-            font-weight: bold; 
-            font-size: 18px; 
-            margin-bottom: 15px; 
-            border-radius: 5px;
-          }
-          .offered-item { background-color: #FFF8E1; } /* Fond jaune clair pour les articles offerts */
-          .offered-label { color: #FF9800; font-style: italic; }
-          .offered-price { text-decoration: line-through; color: #FF9800; }
-          .offered-total { color: #FF9800; border-top: 1px dashed #FFD54F; padding-top: 8px; }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <h1>${restaurantInfo.name}</h1>
-          <p>${restaurantInfo.address}</p>
-          <p>${restaurantInfo.siret}</p>
-          <p>${taxInfo}</p>
-        </div>
+  <html>
+    <head>
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <style>
+        @page { size: 80mm auto; margin: 0mm; }
+        body { 
+          font-family: 'Courier New', monospace; 
+          width: 80mm;
+          padding: 5mm;
+          margin: 0;
+          font-size: 10pt;
+        }
+        .header, .footer { 
+          text-align: center; 
+          margin-bottom: 5mm;
+        }
+        .header h1 {
+          font-size: 14pt;
+          margin: 0 0 2mm 0;
+        }
+        .header p, .footer p {
+          margin: 0 0 1mm 0;
+          font-size: 9pt;
+        }
+        .divider {
+          border-bottom: 1px dashed #000;
+          margin: 3mm 0;
+        }
+        table {
+          width: 100%;
+          border-collapse: collapse;
+        }
+        th, td {
+          text-align: left;
+          padding: 1mm 0;
+          font-size: 9pt;
+        }
+        th:last-child, td:last-child {
+          text-align: right;
+        }
+        td:first-child {
+          width: 15%;
+        }
+        td:nth-child(2) {
+          width: 60%;
+        }
+        td:last-child {
+          width: 25%;
+        }
+        .totals {
+          margin: 2mm 0;
+          text-align: right;
+        }
+        .total-line {
+          display: flex;
+          justify-content: space-between;
+          margin: 1mm 0;
+        }
+        .total-final {
+          font-weight: bold;
+          font-size: 12pt;
+          margin: 2mm 0;
+        }
+        .payment-info {
+          text-align: center;
+          margin: 3mm 0;
+        }
+        .offered-item { font-style: italic; }
+        .preview-notice {
+          text-align: center;
+          font-weight: bold;
+          border: 1px solid #000;
+          padding: 2mm;
+          margin: 2mm 0;
+        }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <h1>${restaurantInfo.name}</h1>
+        <p>${restaurantInfo.address}</p>
+        <p>${restaurantInfo.phone}</p>
+      </div>
 
-        <div class="info">
-          <p><strong>${order.tableName}</strong></p>
-          <p>Date: ${order.timestamp}</p>
-          ${
-            isPreviewMode
-              ? '<p class="partial">NOTE NON PAYÉE</p>'
-              : order.isPartial
-              ? `<p class="partial">PAIEMENT PARTIEL</p>`
-              : ''
-          }
-        </div>
-
-        <table class="items">
-          <tr>
-            <th>Description</th>
-            <th>Quantité</th>
-            <th>Prix</th>
-            <th>Total</th>
-          </tr>
-          ${itemsHTML}
-        </table>
-
-        <div class="totals">
-          ${
-            offeredTotal > 0
-              ? `<p class="offered-total">Articles offerts: ${offeredTotal.toFixed(
-                  2
-                )} €</p>`
-              : ''
-          }
-          <h2>Total: ${order.total.toFixed(2)} €</h2>
-          ${
-            order.isPartial && !isPreviewMode
-              ? `<p class="partial">Solde restant: ${order.remaining.toFixed(
-                  2
-                )} €</p>`
-              : ''
-          }
-        </div>
-
-        <div class="payment-info">
-          ${
-            isPreviewMode
-              ? `<p style="color: #9C27B0; font-weight: bold; font-size: 16px;">PRÉVISUALISATION - NOTE NON PAYÉE</p>`
-              : `<p>Méthode de paiement: ${
-                  order.paymentMethod === 'card'
-                    ? 'Carte bancaire'
-                    : order.paymentMethod === 'cash'
-                    ? 'Espèces'
-                    : 'Chèque'
-                }</p>
-            <p>Montant payé: ${order.total.toFixed(2)} €</p>
-            <p>Statut: ${
-              order.isPartial ? 'Paiement partiel' : 'Payé en totalité'
-            }</p>`
-          }
-        </div>
-
-        <div class="footer">
-          <p>${taxInfo}</p>
-          <p>Merci de votre visite !</p>
-          <p>À bientôt,<br>${restaurantInfo.owner}<br>${
-      restaurantInfo.phone
+      <div class="divider"></div>
+      
+      <p><strong>${order.tableName}</strong> - ${
+      order.timestamp.split(',')[0]
     }</p>
+      <p>${order.timestamp.split(',')[1]}</p>
+      
+      ${
+        isPreviewMode
+          ? '<div class="preview-notice">PRÉVISUALISATION</div>'
+          : order.isPartial
+          ? '<div class="preview-notice">PAIEMENT PARTIEL</div>'
+          : ''
+      }
+
+      <div class="divider"></div>
+
+      <table>
+        <tr>
+          <th>Qté</th>
+          <th>Article</th>
+          <th>Total</th>
+        </tr>
+        ${itemsHTML}
+      </table>
+
+      <div class="divider"></div>
+
+      <div class="totals">
+        ${
+          offeredTotal > 0
+            ? `<div class="total-line">
+                 <span>Offerts:</span>
+                 <span>${offeredTotal.toFixed(2)}€</span>
+               </div>`
+            : ''
+        }
+        <div class="total-line total-final">
+          <span>TOTAL:</span>
+          <span>${order.total.toFixed(2)}€</span>
         </div>
-      </body>
-    </html>
-  `;
+        ${
+          order.isPartial && !isPreviewMode
+            ? `<div class="total-line">
+                 <span>Reste à payer:</span>
+                 <span>${order.remaining.toFixed(2)}€</span>
+               </div>`
+            : ''
+        }
+      </div>
+
+      <div class="divider"></div>
+
+      <div class="payment-info">
+        ${
+          isPreviewMode
+            ? `<p><strong>NOTE NON PAYÉE</strong></p>`
+            : `<p>Paiement: ${
+                order.paymentMethod === 'card'
+                  ? 'Carte bancaire'
+                  : order.paymentMethod === 'cash'
+                  ? 'Espèces'
+                  : 'Chèque'
+              }</p>
+              ${
+                order.isPartial
+                  ? `<p>Payé: ${(order.total - order.remaining).toFixed(
+                      2
+                    )}€</p>`
+                  : ''
+              }`
+        }
+      </div>
+
+      <div class="footer">
+        <p>${taxInfo}</p>
+        <p>Merci de votre visite!</p>
+        <p>À bientôt, ${restaurantInfo.owner}</p>
+      </div>
+    </body>
+  </html>
+`;
   };
 
   const handlePrint = async () => {

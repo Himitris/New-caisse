@@ -16,7 +16,7 @@ import {
   Search,
   Share as ShareIcon,
   Trash2,
-  X
+  X,
 } from 'lucide-react-native';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -29,7 +29,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  View
+  View,
 } from 'react-native';
 import { getBills, saveBills } from '../../utils/storage';
 import { useToast } from '../../utils/ToastContext';
@@ -723,59 +723,126 @@ export default function BillsScreen() {
       owner: 'Virginie',
     };
 
+    // Formater la date pour économiser de l'espace
+    const dateObj = new Date(bill.timestamp);
+    const dateFormatted = dateObj.toLocaleDateString('fr-FR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    });
+    const timeFormatted = dateObj.toLocaleTimeString('fr-FR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
     return `
       <html>
         <head>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <style>
-            body { font-family: Arial, sans-serif; padding: 20px; }
-            .header, .footer { text-align: center; margin-bottom: 20px; }
-            .info { margin-bottom: 20px; text-align: center; }
-            .totals { text-align: right; font-weight: bold; }
-            .payment-info { text-align: center; margin-top: 20px; padding: 10px; border: 1px dashed #ccc; }
-            .partial { color: #f44336; font-weight: bold; }
+            @page { size: 80mm auto; margin: 0mm; }
+            body { 
+              font-family: 'Courier New', monospace; 
+              width: 80mm;
+              padding: 5mm;
+              margin: 0;
+              font-size: 10pt;
+            }
+            .header, .footer { 
+              text-align: center; 
+              margin-bottom: 5mm;
+            }
+            .header h1 {
+              font-size: 14pt;
+              margin: 0 0 2mm 0;
+            }
+            .header p, .footer p {
+              margin: 0 0 1mm 0;
+              font-size: 9pt;
+            }
+            .divider {
+              border-bottom: 1px dashed #000;
+              margin: 3mm 0;
+            }
+            .info {
+              margin-bottom: 3mm;
+            }
+            .info p {
+              margin: 0 0 1mm 0;
+            }
+            .totals {
+              margin: 2mm 0;
+            }
+            .total-line {
+              display: flex;
+              justify-content: space-between;
+              margin: 1mm 0;
+              font-size: 9pt;
+            }
+            .total-amount {
+              font-weight: bold;
+              font-size: 12pt;
+              text-align: right;
+              margin: 2mm 0;
+            }
+            .payment-info {
+              text-align: center;
+              margin: 3mm 0;
+              font-size: 9pt;
+            }
+            .payment-info p {
+              margin: 0 0 1mm 0;
+            }
           </style>
         </head>
         <body>
           <div class="header">
             <h1>${restaurantInfo.name}</h1>
             <p>${restaurantInfo.address}</p>
-            <p>${restaurantInfo.siret}</p>
-            <p>${taxInfo}</p>
+            <p>${restaurantInfo.phone}</p>
           </div>
-
+  
+          <div class="divider"></div>
+          
           <div class="info">
             <p><strong>${
               bill.tableName || `Table ${bill.tableNumber}`
             }</strong></p>
-            <p>Date: ${new Date(bill.timestamp).toLocaleString()}</p>
+            <p>Date: ${dateFormatted} ${timeFormatted}</p>
             ${bill.section ? `<p>Section: ${bill.section}</p>` : ''}
           </div>
-
+  
+          <div class="divider"></div>
+  
           <div class="totals">
-            <p>Articles: ${bill.items}</p>
-            <h2>Total: ${bill.amount.toFixed(2)} €</h2>
-            <p>Statut: ${bill.status}</p>
-            ${paymentLabel ? `<p>Paiement: ${paymentLabel}</p>` : ''}
+            <div class="total-line">
+              <span>Articles:</span>
+              <span>${bill.items}</span>
+            </div>
+            <div class="total-amount">
+              TOTAL: ${bill.amount.toFixed(2)}€
+            </div>
           </div>
-
+  
+          <div class="divider"></div>
+  
           <div class="payment-info">
-            <p>Méthode de paiement: ${
+            <p>Paiement: ${
               bill.paymentMethod === 'card'
                 ? 'Carte bancaire'
                 : bill.paymentMethod === 'cash'
                 ? 'Espèces'
                 : 'Chèque'
             }</p>
-            <p>Montant payé: ${bill.amount.toFixed(2)} €</p>
             <p>Statut: ${bill.status}</p>
           </div>
-
+  
+          <div class="divider"></div>
+  
           <div class="footer">
             <p>${taxInfo}</p>
-            <p>Merci de votre visite !</p>
-            <p>À bientôt,<br>${restaurantInfo.owner}<br>${
-      restaurantInfo.phone
-    }</p>
+            <p>Merci de votre visite!</p>
+            <p>À bientôt, ${restaurantInfo.owner}</p>
           </div>
         </body>
       </html>
@@ -1098,7 +1165,6 @@ export default function BillsScreen() {
           <Text style={styles.processingText}>Traitement en cours...</Text>
         </View>
       )}
-
     </View>
   );
 }
