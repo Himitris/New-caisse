@@ -1,4 +1,4 @@
-// utils/report-utils.ts
+// utils/report-utils.ts - Mise à jour avec fonctions pour la TVA
 import { Bill } from './storage';
 
 interface SalesByCategory {
@@ -147,6 +147,19 @@ export const generateZReportData = (bills: Bill[]): ZReportData => {
   report.averageTicket = report.totalSales / report.totalTransactions;
 
   return report;
+};
+
+/**
+ * Calcule les montants de TVA (pour le rapport Z)
+ * Note: Dans ce cas, nous sommes en régime non applicable pour la TVA
+ */
+export const calculateVATDetails = (totalAmount: number) => {
+  return {
+    exonerated: totalAmount, // Montant exonéré
+    vat55: 0, // Montant TVA 5.5%
+    vat10: 0, // Montant TVA 10%
+    vat20: 0, // Montant TVA 20%
+  };
 };
 
 /**
