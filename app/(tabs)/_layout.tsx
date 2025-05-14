@@ -8,6 +8,7 @@ import {
   Settings,
   BarChart3,
   FileText,
+  DollarSign,
 } from 'lucide-react-native';
 import { View, StyleSheet } from 'react-native';
 
@@ -64,6 +65,15 @@ export default function TabLayout() {
             title: 'Plan',
             tabBarIcon: ({ size, color }) => (
               <FileText size={size} color={color} />
+            ),
+          }}
+        />
+        <Tabs.Screen
+          name="z-report"
+          options={{
+            title: 'Z',
+            tabBarIcon: ({ size, color }) => (
+              <DollarSign size={size} color={color} />
             ),
           }}
         />
