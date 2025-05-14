@@ -1,4 +1,3 @@
-// app/components/PasswordModal.tsx
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -12,17 +11,17 @@ import {
 } from 'react-native';
 import { X, Lock, Eye, EyeOff } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { router } from 'expo-router';
 
 interface PasswordModalProps {
   visible: boolean;
-  onClose: () => void;
   onSuccess: () => void;
-  type: 'verify' | 'change'; // Type de modal: vérification ou changement
+  onCancel: () => void; 
+  type: 'verify' | 'change';
 }
 
-// Clé de stockage pour le mot de passe
 const PASSWORD_STORAGE_KEY = 'manjo_carn_admin_password';
-const DEFAULT_PASSWORD = 'tototo'; // Mot de passe par défaut
+const DEFAULT_PASSWORD = 'tototo';
 
 export const getStoredPassword = async (): Promise<string> => {
   try {
@@ -48,8 +47,8 @@ export const setStoredPassword = async (
 
 const PasswordModal: React.FC<PasswordModalProps> = ({
   visible,
-  onClose,
   onSuccess,
+  onCancel, // Utilisation de la nouvelle prop
   type,
 }) => {
   const [currentPassword, setCurrentPassword] = useState('');
@@ -63,7 +62,6 @@ const PasswordModal: React.FC<PasswordModalProps> = ({
 
   useEffect(() => {
     if (visible) {
-      // Réinitialiser les champs lorsque le modal s'ouvre
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
@@ -97,7 +95,6 @@ const PasswordModal: React.FC<PasswordModalProps> = ({
   };
 
   const handleChangePassword = async () => {
-    // Validation des champs
     if (!currentPassword) {
       setError('Veuillez entrer le mot de passe actuel');
       return;
@@ -128,7 +125,6 @@ const PasswordModal: React.FC<PasswordModalProps> = ({
         return;
       }
 
-      // Sauvegarder le nouveau mot de passe
       const success = await setStoredPassword(newPassword);
 
       if (success) {
@@ -155,12 +151,20 @@ const PasswordModal: React.FC<PasswordModalProps> = ({
     }
   };
 
+  const handleCancel = () => {
+    if (type === 'verify') {
+      router.push('/'); // Retour à l'accueil
+    } else if (type === 'change') {
+      onCancel(); // Ferme le modal
+    }
+  };
+
   return (
     <Modal
       visible={visible}
       transparent={true}
       animationType="fade"
-      onRequestClose={onClose}
+      onRequestClose={handleCancel}
     >
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
@@ -171,7 +175,7 @@ const PasswordModal: React.FC<PasswordModalProps> = ({
                 ? 'Accès sécurisé'
                 : 'Modifier le mot de passe'}
             </Text>
-            <Pressable onPress={onClose} style={styles.closeButton}>
+            <Pressable onPress={handleCancel} style={styles.closeButton}>
               <X size={24} color="#666" />
             </Pressable>
           </View>
@@ -257,7 +261,7 @@ const PasswordModal: React.FC<PasswordModalProps> = ({
           )}
 
           <View style={styles.buttonsContainer}>
-            <Pressable style={styles.cancelButton} onPress={onClose}>
+            <Pressable style={styles.cancelButton} onPress={handleCancel}>
               <Text style={styles.cancelButtonText}>Annuler</Text>
             </Pressable>
             <Pressable

@@ -1,5 +1,5 @@
-// app/(tabs)/z-report.tsx
-import { useState, useEffect, useCallback } from 'react';
+// app/(tabs)/z-report.tsx - Avec protection par mot de passe et informations de ticket améliorées
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -16,8 +16,6 @@ import {
   RefreshCw,
   Download,
   Archive,
-  Plus,
-  Minus,
   Receipt,
   PieChart,
   DollarSign,
@@ -25,6 +23,7 @@ import {
   Wallet,
   Edit3,
   Clock,
+  Lock,
 } from 'lucide-react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -38,6 +37,12 @@ import {
   getPaymentMethodLabel,
   getPaymentTypeLabel,
 } from '../../utils/report-utils';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import PasswordModal from '../components/PasswordModal';
+import { useFocusEffect } from 'expo-router';
+
+// Clé de stockage pour le compteur de Z
+const Z_COUNTER_KEY = 'manjo_carn_z_counter';
 
 export default function ZReportScreen() {
   const [loading, setLoading] = useState(true);
@@ -47,8 +52,35 @@ export default function ZReportScreen() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const toast = useToast();
 
+  // États pour le système de protection par mot de passe
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [passwordModalVisible, setPasswordModalVisible] = useState(true);
+
+  // Compteur de rapport Z
+  const [zCounter, setZCounter] = useState(0);
+
   // Rapport Z généré à partir des factures
   const [reportData, setReportData] = useState(generateZReportData([]));
+
+  // Charger le compteur Z au démarrage
+  useEffect(() => {
+    const loadZCounter = async () => {
+      try {
+        const counter = await AsyncStorage.getItem(Z_COUNTER_KEY);
+        if (counter) {
+          setZCounter(parseInt(counter));
+        } else {
+          // Initialiser à 1 si c'est le premier
+          setZCounter(1);
+          await AsyncStorage.setItem(Z_COUNTER_KEY, '1');
+        }
+      } catch (error) {
+        console.error('Erreur lors du chargement du compteur Z:', error);
+      }
+    };
+
+    loadZCounter();
+  }, []);
 
   // Load bills for the selected date
   const loadBills = useCallback(async () => {
@@ -81,8 +113,10 @@ export default function ZReportScreen() {
   }, [filterDate, toast]);
 
   useEffect(() => {
-    loadBills();
-  }, [loadBills]);
+    if (isAuthenticated) {
+      loadBills();
+    }
+  }, [loadBills, isAuthenticated]);
 
   const handleDateChange = (event: any, selectedDate?: Date) => {
     setShowDatePicker(false);
@@ -91,9 +125,26 @@ export default function ZReportScreen() {
     }
   };
 
-  // Function to generate the Z report HTML
-  const generateZReportHTML = () => {
+  // Fonction pour incrémenter le compteur Z après impression
+  const incrementZCounter = async () => {
+    try {
+      const newCounter = zCounter + 1;
+      await AsyncStorage.setItem(Z_COUNTER_KEY, newCounter.toString());
+      setZCounter(newCounter);
+      return zCounter; // Retourne la valeur actuelle (avant incrémentation)
+    } catch (error) {
+      console.error("Erreur lors de l'incrémentation du compteur Z:", error);
+      return zCounter;
+    }
+  };
+
+  // Function to generate the Z report HTML for 80mm format
+  const generateZReportHTML = (currentZNumber: number) => {
     const dateFormatted = formatDate(filterDate);
+    const currentTime = new Date().toLocaleTimeString('fr-FR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
 
     // Format payment methods section
     let paymentMethodsHTML = '';
@@ -117,16 +168,15 @@ export default function ZReportScreen() {
       `;
     });
 
-    // Format payment types section
-    let paymentTypesHTML = '';
-    Object.entries(reportData.salesByType).forEach(([type, amount]) => {
-      paymentTypesHTML += `
-        <tr>
-          <td>${getPaymentTypeLabel(type)}</td>
-          <td style="text-align: right;">${amount.toFixed(2)}€</td>
-        </tr>
-      `;
-    });
+    // Restaurant info constants
+    const RESTAURANT_INFO = {
+      name: 'Manjo Carn',
+      address: 'Route de la Corniche, 82140 Saint Antonin Noble Val',
+      siret: 'Siret N° 803 520 998 00011',
+      phone: 'Tel : 0563682585',
+      taxInfo: 'TVA non applicable - art.293B du CGI',
+      owner: 'Virginie',
+    };
 
     // Ajouter la plage horaire si disponible
     let timeRangeHTML = '';
@@ -141,15 +191,15 @@ export default function ZReportScreen() {
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <style>
             @page { size: 80mm auto; margin: 0mm; }
-            body { 
-              font-family: 'Courier New', monospace; 
+            body {
+              font-family: 'Courier New', monospace;
               width: 80mm;
               padding: 5mm;
               margin: 0;
               font-size: 10pt;
             }
-            .header, .footer { 
-              text-align: center; 
+            .header, .footer {
+              text-align: center;
               margin-bottom: 5mm;
             }
             .header h1 {
@@ -189,21 +239,35 @@ export default function ZReportScreen() {
               text-align: center;
               margin-top: 5mm;
             }
+            .z-report-number {
+              text-align: center;
+              font-weight: bold;
+              font-size: 12pt;
+              margin: 3mm 0;
+              border: 1px solid #000;
+              padding: 2mm;
+            }
           </style>
         </head>
         <body>
           <div class="header">
-            <h1>Manjo Carn</h1>
-            <p>Route de la Corniche, 82140 Saint Antonin Noble Val</p>
-            <p>Tel : 0563682585</p>
+            <h1>${RESTAURANT_INFO.name}</h1>
+            <p>${RESTAURANT_INFO.address}</p>
+            <p>${RESTAURANT_INFO.phone}</p>
+            <p>${RESTAURANT_INFO.siret}</p>
           </div>
-  
+
           <div class="section-title">RAPPORT Z JOURNALIER</div>
+          <div class="z-report-number">Z N° ${currentZNumber}</div>
+
           <p style="text-align: center; font-weight: bold;">Date: ${dateFormatted}</p>
+          <p style="text-align: center;">Édité le: ${new Date().toLocaleDateString(
+            'fr-FR'
+          )} à ${currentTime}</p>
           ${timeRangeHTML}
-          
+
           <div class="divider"></div>
-          
+
           <div class="section-title">RÉSUMÉ DES VENTES</div>
           <table>
             <tr>
@@ -232,7 +296,7 @@ export default function ZReportScreen() {
               reportData.offeredTotal > 0
                 ? `
             <tr>
-              <td>Articles offerts</td>
+              <td>Articles offerts (remises)</td>
               <td style="text-align: right;">${reportData.offeredTotal.toFixed(
                 2
               )}€</td>
@@ -241,9 +305,9 @@ export default function ZReportScreen() {
                 : ''
             }
           </table>
-          
+
           <div class="divider"></div>
-          
+
           <div class="section-title">VENTES PAR MOYEN DE PAIEMENT</div>
           <table>
             ${paymentMethodsHTML}
@@ -254,16 +318,226 @@ export default function ZReportScreen() {
               )}€</td>
             </tr>
           </table>
-          
+
           <div class="divider"></div>
-          
+
           <div class="footer">
-            <p>TVA non applicable - art.293B du CGI</p>
+            <p>${RESTAURANT_INFO.taxInfo}</p>
             <p>${reportData.totalTransactions} transactions</p>
           </div>
-          
+
           <div class="timestamp">
             Édité le ${new Date().toLocaleString('fr-FR')}
+            <p>Document à conserver</p>
+          </div>
+        </body>
+      </html>
+    `;
+  };
+
+  // Function to generate the Z report HTML for standard PDF format
+  const generateStandardPDFHTML = (currentZNumber: number) => {
+    const dateFormatted = formatDate(filterDate);
+    const currentTime = new Date().toLocaleTimeString('fr-FR', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    // Format payment methods section
+    let paymentMethodsHTML = '';
+    Object.entries(reportData.salesByMethod).forEach(([method, amount]) => {
+      paymentMethodsHTML += `
+        <tr>
+          <td>${getPaymentMethodLabel(method)}</td>
+          <td style="text-align: right;">${amount.toFixed(2)}€</td>
+        </tr>
+      `;
+    });
+
+    // Format sections sales
+    let sectionSalesHTML = '';
+    Object.entries(reportData.salesBySection).forEach(([section, amount]) => {
+      sectionSalesHTML += `
+        <tr>
+          <td>${section}</td>
+          <td style="text-align: right;">${amount.toFixed(2)}€</td>
+        </tr>
+      `;
+    });
+
+    // Restaurant info constants
+    const RESTAURANT_INFO = {
+      name: 'Manjo Carn',
+      address: 'Route de la Corniche, 82140 Saint Antonin Noble Val',
+      siret: 'Siret N° 803 520 998 00011',
+      phone: 'Tel : 0563682585',
+      taxInfo: 'TVA non applicable - art.293B du CGI',
+      owner: 'Virginie',
+    };
+
+    // Ajouter la plage horaire si disponible
+    let timeRangeHTML = '';
+    if (reportData.startTime && reportData.endTime) {
+      timeRangeHTML = `<p style="text-align: center;">Plage horaire: ${reportData.dateRange}</p>`;
+    }
+
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              width: 100%;
+              padding: 20mm;
+              margin: 0;
+              font-size: 12pt;
+            }
+            .header, .footer {
+              text-align: center;
+              margin-bottom: 10mm;
+            }
+            .header h1 {
+              font-size: 20pt;
+              margin: 0 0 5mm 0;
+            }
+            .header p, .footer p {
+              margin: 0 0 3mm 0;
+              font-size: 12pt;
+            }
+            .divider {
+              border-bottom: 1px dashed #000;
+              margin: 5mm 0;
+            }
+            .section-title {
+              font-weight: bold;
+              text-align: center;
+              margin: 5mm 0;
+              font-size: 14pt;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 5mm;
+            }
+            th, td {
+              padding: 3mm 0;
+              font-size: 12pt;
+            }
+            tr.total-row td {
+              border-top: 1px solid #000;
+              font-weight: bold;
+              padding-top: 3mm;
+            }
+            .timestamp {
+              font-size: 10pt;
+              text-align: center;
+              margin-top: 10mm;
+            }
+            .z-report-number {
+              text-align: center;
+              font-weight: bold;
+              font-size: 16pt;
+              margin: 5mm 0;
+              border: 1px solid #000;
+              padding: 3mm;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>${RESTAURANT_INFO.name}</h1>
+            <p>${RESTAURANT_INFO.address}</p>
+            <p>${RESTAURANT_INFO.phone}</p>
+            <p>${RESTAURANT_INFO.siret}</p>
+          </div>
+
+          <div class="section-title">RAPPORT Z JOURNALIER</div>
+          <div class="z-report-number">Z N° ${currentZNumber}</div>
+
+          <p style="text-align: center; font-weight: bold;">Date: ${dateFormatted}</p>
+          <p style="text-align: center;">Édité le: ${new Date().toLocaleDateString(
+            'fr-FR'
+          )} à ${currentTime}</p>
+          ${timeRangeHTML}
+
+          <div class="divider"></div>
+
+          <div class="section-title">RÉSUMÉ DES VENTES</div>
+          <table>
+            <tr>
+              <td>Total CA</td>
+              <td style="text-align: right;">${reportData.totalSales.toFixed(
+                2
+              )}€</td>
+            </tr>
+            <tr>
+              <td>Nombre de transactions</td>
+              <td style="text-align: right;">${
+                reportData.totalTransactions
+              }</td>
+            </tr>
+            <tr>
+              <td>Ticket moyen</td>
+              <td style="text-align: right;">${reportData.averageTicket.toFixed(
+                2
+              )}€</td>
+            </tr>
+            <tr>
+              <td>Articles vendus</td>
+              <td style="text-align: right;">${reportData.totalItems}</td>
+            </tr>
+            ${
+              reportData.offeredTotal > 0
+                ? `
+            <tr>
+              <td>Articles offerts (remises)</td>
+              <td style="text-align: right;">${reportData.offeredTotal.toFixed(
+                2
+              )}€</td>
+            </tr>
+            `
+                : ''
+            }
+          </table>
+
+          <div class="divider"></div>
+
+          <div class="section-title">VENTES PAR MOYEN DE PAIEMENT</div>
+          <table>
+            ${paymentMethodsHTML}
+            <tr class="total-row">
+              <td>Total</td>
+              <td style="text-align: right;">${reportData.totalSales.toFixed(
+                2
+              )}€</td>
+            </tr>
+          </table>
+
+          <div class="divider"></div>
+
+          <div class="section-title">VENTES PAR SECTION</div>
+          <table>
+            ${sectionSalesHTML}
+            <tr class="total-row">
+              <td>Total</td>
+              <td style="text-align: right;">${reportData.totalSales.toFixed(
+                2
+              )}€</td>
+            </tr>
+          </table>
+
+          <div class="divider"></div>
+
+          <div class="footer">
+            <p>${RESTAURANT_INFO.taxInfo}</p>
+            <p>${reportData.totalTransactions} transactions</p>
+          </div>
+
+          <div class="timestamp">
+            Édité le ${new Date().toLocaleString('fr-FR')}
+            <p>Document à conserver</p>
           </div>
         </body>
       </html>
@@ -273,10 +547,17 @@ export default function ZReportScreen() {
   const handlePrint = async () => {
     setProcessing(true);
     try {
+      // Obtenir le numéro Z actuel avant l'incrémentation
+      const currentZNumber = zCounter;
+
       await Print.printAsync({
-        html: generateZReportHTML(),
+        html: generateZReportHTML(currentZNumber),
         width: 80,
       });
+
+      // Incrémenter après impression réussie
+      await incrementZCounter();
+
       toast.showToast('Rapport Z imprimé avec succès', 'success');
     } catch (error) {
       console.error("Erreur lors de l'impression:", error);
@@ -289,9 +570,9 @@ export default function ZReportScreen() {
   const handleShare = async () => {
     setProcessing(true);
     try {
+      // Utilise le numéro actuel sans l'incrémenter pour le partage
       const { uri } = await Print.printToFileAsync({
-        html: generateZReportHTML(),
-        width: 80,
+        html: generateStandardPDFHTML(zCounter),
       });
       await Sharing.shareAsync(uri, {
         UTI: '.pdf',
@@ -309,9 +590,9 @@ export default function ZReportScreen() {
   const handleDownload = async () => {
     setProcessing(true);
     try {
+      // Utilise le numéro actuel sans l'incrémenter pour le téléchargement
       const { uri } = await Print.printToFileAsync({
-        html: generateZReportHTML(),
-        width: 80,
+        html: generateStandardPDFHTML(zCounter),
       });
       await Sharing.shareAsync(uri, {
         dialogTitle: 'Enregistrer le rapport Z',
@@ -327,6 +608,40 @@ export default function ZReportScreen() {
     }
   };
 
+  useFocusEffect(
+    useCallback(() => {
+      setIsAuthenticated(false);
+      setPasswordModalVisible(true);
+    }, [])
+  );
+
+  // Gérer l'authentification réussie
+  const handleAuthSuccess = () => {
+    setIsAuthenticated(true);
+    setPasswordModalVisible(false);
+    loadBills();
+  };
+
+  if (!isAuthenticated) {
+    return (
+      <View style={styles.container}>
+        <PasswordModal
+          visible={passwordModalVisible}
+          onSuccess={handleAuthSuccess}
+          onCancel={() => {}}
+          type="verify"
+        />
+        <View style={styles.lockScreenOverlay}>
+          <Lock size={48} color="#666" />
+          <Text style={styles.lockScreenText}>Zone sécurisée</Text>
+          <Text style={styles.lockScreenSubText}>
+            Authentification requise pour accéder aux rapports Z
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       {processing && (
@@ -337,6 +652,9 @@ export default function ZReportScreen() {
       )}
       <View style={styles.header}>
         <Text style={styles.title}>Rapport Z Journalier</Text>
+        <View style={styles.zCounter}>
+          <Text style={styles.zCounterText}>Z N° {zCounter}</Text>
+        </View>
         <View style={styles.dateSelector}>
           <Pressable
             style={styles.dateButton}
@@ -420,7 +738,9 @@ export default function ZReportScreen() {
 
             {reportData.offeredTotal > 0 && (
               <View style={styles.offeredContainer}>
-                <Text style={styles.offeredLabel}>Total articles offerts:</Text>
+                <Text style={styles.offeredLabel}>
+                  Total articles offerts (remises):
+                </Text>
                 <Text style={styles.offeredValue}>
                   {formatMoney(reportData.offeredTotal)}
                 </Text>
@@ -574,7 +894,7 @@ export default function ZReportScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
   },
   header: {
     padding: 16,
@@ -588,6 +908,19 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: 'bold',
+  },
+  zCounter: {
+    backgroundColor: '#e3f2fd',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2196F3',
+  },
+  zCounterText: {
+    color: '#2196F3',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
   dateSelector: {
     flexDirection: 'row',
@@ -840,5 +1173,27 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#FF9800',
+  },
+  lockScreenOverlay: {
+    position: 'absolute', // Ajoutez cette ligne pour positionner l'overlay de manière absolue
+    top: 0, // Positionnez en haut de l'écran
+    left: 0,
+    right: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    padding: 20,
+  },
+  lockScreenText: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#333',
+    marginTop: 16,
+  },
+  lockScreenSubText: {
+    fontSize: 16,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 8,
   },
 });

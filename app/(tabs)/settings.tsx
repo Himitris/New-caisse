@@ -1,35 +1,31 @@
 // app/(tabs)/settings.tsx - Paramètres complètement fonctionnels
 
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  Switch,
-  Alert,
-  Modal,
-  TextInput,
-  ActivityIndicator,
-} from 'react-native';
-import { useState, useEffect } from 'react';
-import {
-  Store,
-  Clock,
   DollarSign,
   Printer,
-  Bell,
-  Shield,
-  CircleHelp as HelpCircle,
-  Users,
-  LayoutGrid,
-  X,
   Save,
+  Shield,
+  Store,
   Trash2,
+  X
 } from 'lucide-react-native';
-import { StorageManager, BillManager, TableManager } from '../../utils/storage';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { BillManager, StorageManager, TableManager } from '../../utils/storage';
 import { useToast } from '../../utils/ToastContext';
+import PasswordModal from '../components/PasswordModal';
 
 const SETTINGS_STORAGE_KEY = 'restaurant_settings';
 const DAYS_OF_WEEK = [
@@ -49,7 +45,7 @@ interface Setting {
   type: 'toggle' | 'action';
   value?: boolean;
   icon: any;
-  category: 'general' | 'restaurant' | 'payment' | 'security';
+  category: 'general' | 'restaurant' | 'payment' | 'security' | 'data';
 }
 
 interface TimeRange {
@@ -208,122 +204,6 @@ const RestaurantInfoModal: React.FC<InfoModalProps> = ({
   );
 };
 
-// Modal pour configurer les heures d'ouverture
-const OpeningHoursModal: React.FC<HoursModalProps> = ({
-  visible,
-  onClose,
-  openingHours,
-  onSave,
-}) => {
-  const [hours, setHours] = useState<OpeningHours>(openingHours);
-
-  useEffect(() => {
-    setHours(openingHours);
-  }, [openingHours]);
-
-  const handleToggleDay = (day: string) => {
-    setHours((prev) => ({
-      ...prev,
-      [day]: {
-        ...prev[day],
-        isOpen: !prev[day].isOpen,
-      },
-    }));
-  };
-
-  const handleChangeHours = (
-    day: string,
-    field: 'open' | 'close',
-    value: string
-  ) => {
-    setHours((prev) => ({
-      ...prev,
-      [day]: {
-        ...prev[day],
-        hours: {
-          ...prev[day].hours,
-          [field]: value,
-        },
-      },
-    }));
-  };
-
-  const handleSave = () => {
-    onSave(hours);
-    onClose();
-  };
-
-  return (
-    <Modal
-      visible={visible}
-      transparent={true}
-      animationType="fade"
-      onRequestClose={onClose}
-    >
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Heures d'Ouverture</Text>
-            <Pressable onPress={onClose} style={styles.closeButton}>
-              <X size={24} color="#666" />
-            </Pressable>
-          </View>
-
-          <ScrollView style={styles.modalBody}>
-            {DAYS_OF_WEEK.map((day) => (
-              <View key={day} style={styles.dayRow}>
-                <View style={styles.dayHeader}>
-                  <Text style={styles.dayName}>{day}</Text>
-                  <Switch
-                    value={hours[day].isOpen}
-                    onValueChange={() => handleToggleDay(day)}
-                    trackColor={{ false: '#e0e0e0', true: '#4CAF50' }}
-                  />
-                </View>
-
-                {hours[day].isOpen && (
-                  <View style={styles.hoursInputs}>
-                    <View style={styles.timeInput}>
-                      <Text style={styles.timeLabel}>Ouverture:</Text>
-                      <TextInput
-                        style={styles.timeField}
-                        value={hours[day].hours.open}
-                        onChangeText={(value) =>
-                          handleChangeHours(day, 'open', value)
-                        }
-                        placeholder="09:00"
-                        keyboardType="numbers-and-punctuation"
-                      />
-                    </View>
-
-                    <View style={styles.timeInput}>
-                      <Text style={styles.timeLabel}>Fermeture:</Text>
-                      <TextInput
-                        style={styles.timeField}
-                        value={hours[day].hours.close}
-                        onChangeText={(value) =>
-                          handleChangeHours(day, 'close', value)
-                        }
-                        placeholder="22:00"
-                        keyboardType="numbers-and-punctuation"
-                      />
-                    </View>
-                  </View>
-                )}
-              </View>
-            ))}
-          </ScrollView>
-
-          <Pressable style={styles.saveButton} onPress={handleSave}>
-            <Save size={20} color="white" />
-            <Text style={styles.saveButtonText}>Enregistrer</Text>
-          </Pressable>
-        </View>
-      </View>
-    </Modal>
-  );
-};
-
 // Modal pour configurer les méthodes de paiement
 const PaymentMethodsModal: React.FC<PaymentModalProps> = ({
   visible,
@@ -415,6 +295,7 @@ export default function SettingsScreen() {
     useState(false);
   const [hoursModalVisible, setHoursModalVisible] = useState(false);
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
+  const [passwordModalVisible, setPasswordModalVisible] = useState(false);
 
   // Configuration par défaut
   const defaultConfig: ConfigData = {
@@ -457,16 +338,6 @@ export default function SettingsScreen() {
   const [settings, setSettings] = useState<Setting[]>([
     // Général
     {
-      id: 'notifications',
-      title: 'Notifications Push',
-      description:
-        'Recevoir des alertes pour les nouvelles commandes et les changements de statut des tables',
-      type: 'toggle',
-      value: true,
-      icon: Bell,
-      category: 'general',
-    },
-    {
       id: 'autoPrint',
       title: 'Impression automatique',
       description:
@@ -474,15 +345,6 @@ export default function SettingsScreen() {
       type: 'toggle',
       value: false,
       icon: Printer,
-      category: 'general',
-    },
-    {
-      id: 'darkMode',
-      title: 'Mode sombre',
-      description: "Utiliser un thème sombre pour l'application",
-      type: 'toggle',
-      value: false,
-      icon: LayoutGrid,
       category: 'general',
     },
 
@@ -494,22 +356,6 @@ export default function SettingsScreen() {
         'Mettre à jour les détails de votre restaurant et vos coordonnées',
       type: 'action',
       icon: Store,
-      category: 'restaurant',
-    },
-    {
-      id: 'hours',
-      title: "Heures d'ouverture",
-      description: "Définir les heures d'ouverture de votre restaurant",
-      type: 'action',
-      icon: Clock,
-      category: 'restaurant',
-    },
-    {
-      id: 'tables',
-      title: 'Configuration des tables',
-      description: 'Gérer la disposition et les noms des tables',
-      type: 'action',
-      icon: Users,
       category: 'restaurant',
     },
 
@@ -526,30 +372,22 @@ export default function SettingsScreen() {
 
     // Sécurité
     {
-      id: 'security',
-      title: 'Paramètres de sécurité',
-      description:
-        "Gérer les autorisations des utilisateurs et les contrôles d'accès",
+      id: 'changePassword',
+      title: 'Changer le mot de passe',
+      description: "Modifier le mot de passe pour sécuriser l'accès",
       type: 'action',
       icon: Shield,
       category: 'security',
     },
-    {
-      id: 'help',
-      title: 'Aide & Support',
-      description:
-        "Obtenir de l'aide pour utiliser le système de point de vente",
-      type: 'action',
-      icon: HelpCircle,
-      category: 'security',
-    },
   ]);
+  
 
   const categories = [
     { id: 'general', name: 'Général' },
     { id: 'restaurant', name: 'Restaurant' },
     { id: 'payment', name: 'Paiement' },
-    { id: 'security', name: 'Sécurité & Support' },
+    { id: 'security', name: 'Sécurité' },
+    { id: 'data', name: 'Données' },
   ];
 
   // Charger les paramètres sauvegardés
@@ -671,10 +509,7 @@ export default function SettingsScreen() {
       toast.showToast('Paramètres sauvegardés avec succès.', 'success');
     } catch (error) {
       console.error('Erreur lors de la sauvegarde des paramètres:', error);
-      toast.showToast(
-        'Impossible de sauvegarder les paramètres.',
-        'error'
-      );
+      toast.showToast('Impossible de sauvegarder les paramètres.', 'error');
     } finally {
       setSaving(false);
     }
@@ -702,23 +537,8 @@ export default function SettingsScreen() {
       case 'payment':
         setPaymentModalVisible(true);
         break;
-      case 'tables':
-        toast.showToast(
-          'Configuration des tables disponible dans une future mise à jour.',
-          'info'
-        );
-        break;
-      case 'security':
-        toast.showToast(
-          'Paramètres de sécurité disponibles dans une future mise à jour.',
-          'info'
-        );
-        break;
-      case 'help':
-        toast.showToast(
-          'Pour toute assistance, contactez le support technique au 01 23 45 67 89 ou consultez la documentation en ligne.',
-          'info'
-        );
+      case 'changePassword':
+        setPasswordModalVisible(true);
         break;
       default:
         break;
@@ -745,6 +565,10 @@ export default function SettingsScreen() {
     // Sauvegarder automatiquement
     setTimeout(saveSettings, 100);
   };
+
+  const handleCancel = () => {
+    setPasswordModalVisible(false);
+  };  
 
   const handleSavePaymentMethods = (methods: any) => {
     setConfig((prev) => ({
@@ -841,22 +665,27 @@ export default function SettingsScreen() {
               </Pressable>
             );
           })}
-          <View style={styles.resetSection}>
-            <Text style={styles.resetWarning}>
-              Zone dangereuse - Les actions ci-dessous sont irréversibles
-            </Text>
-            <Pressable style={styles.dangerButton} onPress={handleResetAppData}>
-              <Trash2 size={24} color="white" />
-              <Text style={styles.dangerButtonText}>
-                Réinitialiser toutes les données
+          {activeCategory === 'data' && (
+            <View style={styles.resetSection}>
+              <Text style={styles.resetWarning}>
+                Zone dangereuse - Les actions ci-dessous sont irréversibles
               </Text>
-            </Pressable>
-            <Text style={styles.resetDescription}>
-              Cette action supprimera tout l'historique des paiements,
-              réinitialisera les tables et videra les additions en cours. La
-              structure des tables et leurs noms seront conservés.
-            </Text>
-          </View>
+              <Pressable
+                style={styles.dangerButton}
+                onPress={handleResetAppData}
+              >
+                <Trash2 size={24} color="white" />
+                <Text style={styles.dangerButtonText}>
+                  Réinitialiser toutes les données
+                </Text>
+              </Pressable>
+              <Text style={styles.resetDescription}>
+                Cette action supprimera tout l'historique des paiements,
+                réinitialisera les tables et videra les additions en cours. La
+                structure des tables et leurs noms seront conservés.
+              </Text>
+            </View>
+          )}
         </ScrollView>
       </View>
 
@@ -868,18 +697,21 @@ export default function SettingsScreen() {
         onSave={handleSaveRestaurantInfo}
       />
 
-      <OpeningHoursModal
-        visible={hoursModalVisible}
-        onClose={() => setHoursModalVisible(false)}
-        openingHours={config.openingHours}
-        onSave={handleSaveOpeningHours}
-      />
-
       <PaymentMethodsModal
         visible={paymentModalVisible}
         onClose={() => setPaymentModalVisible(false)}
         paymentMethods={config.paymentMethods}
         onSave={handleSavePaymentMethods}
+      />
+
+      <PasswordModal
+        visible={passwordModalVisible}
+        onSuccess={() => {
+          setPasswordModalVisible(false);
+          toast.showToast('Mot de passe changé avec succès.', 'success');
+        }}
+        onCancel={handleCancel}
+        type="change"
       />
 
       {/* Indicateur de sauvegarde */}
@@ -1137,8 +969,6 @@ const styles = StyleSheet.create({
   },
   resetSection: {
     marginTop: 30,
-    borderTopWidth: 1,
-    borderTopColor: '#ffcccc',
     paddingTop: 20,
     paddingHorizontal: 20,
   },
