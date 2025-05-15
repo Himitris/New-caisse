@@ -16,7 +16,7 @@ import {
   RestaurantInfo,
   PaymentMethod,
   ConfigData,
-} from '../../utils/SettingsService';
+} from '../(tabs)/settings';
 
 interface TimeRange {
   open: string;

@@ -1,5 +1,5 @@
 // app/(tabs)/settings.tsx
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -14,12 +14,56 @@ import { Trash2 } from 'lucide-react-native';
 import { BillManager, StorageManager, TableManager } from '../../utils/storage';
 import { useToast } from '../../utils/ToastContext';
 import PasswordModal from '../components/PasswordModal';
-import { useSettings, settingsCategories } from '../../utils/useSettings';
+import { useSettingsContext } from '../../utils/SettingsContext';
 import {
   RestaurantInfoModal,
   PaymentMethodsModal,
   PrintSettingsModal,
 } from '../components/SettingsModals';
+
+// Définition des types exportés pour utilisation dans d'autres composants
+export interface RestaurantInfo {
+  name: string;
+  address: string;
+  phone: string;
+  email: string;
+  siret: string;
+  taxInfo: string;
+  owner: string;
+}
+
+export interface PaymentMethod {
+  id: string;
+  name: string;
+  enabled: boolean;
+  isDefault: boolean;
+}
+
+export interface ConfigData {
+  restaurantInfo: RestaurantInfo;
+  openingHours: any;
+  paymentMethods: PaymentMethod[];
+  printSettings: {
+    autoPrint: boolean;
+    printLogo: boolean;
+    printFooter: boolean;
+    footerText: string;
+  };
+}
+
+// Clés de stockage
+export const SETTINGS_STORAGE_KEY = 'manjo_carn_restaurant_settings';
+export const SETTINGS_VALUES_KEY = 'manjo_carn_restaurant_values';
+
+// Définition des catégories de paramètres
+export const settingsCategories = [
+  { id: 'general', name: 'Général' },
+  { id: 'payment', name: 'Paiement' },
+  { id: 'interface', name: 'Interface' },
+  { id: 'printing', name: 'Impression' },
+  { id: 'security', name: 'Sécurité' },
+  { id: 'data', name: 'Données' },
+];
 
 export default function SettingsScreen() {
   const [activeCategory, setActiveCategory] = useState<string>('general');
@@ -32,7 +76,7 @@ export default function SettingsScreen() {
     updateRestaurantInfo,
     updatePaymentMethods,
     updatePrintSettings,
-  } = useSettings();
+  } = useSettingsContext();
   const toast = useToast();
 
   // États pour les modals
@@ -44,7 +88,7 @@ export default function SettingsScreen() {
   const [printSettingsModalVisible, setPrintSettingsModalVisible] =
     useState(false);
 
-  const handleResetAppData = () => {
+  const handleResetAppData = useCallback(() => {
     Alert.alert(
       'Réinitialiser toutes les données',
       "Attention ! Cette action va supprimer tout l'historique des paiements, les tables ouvertes et les additions en cours. Cette action est irréversible.",
@@ -97,9 +141,9 @@ export default function SettingsScreen() {
         },
       ]
     );
-  };
+  }, [toast]);
 
-  const handleSettingAction = (id: string) => {
+  const handleSettingAction = useCallback((id: string) => {
     switch (id) {
       case 'restaurant':
         setRestaurantInfoModalVisible(true);
@@ -119,39 +163,48 @@ export default function SettingsScreen() {
       default:
         break;
     }
-  };
+  }, []);
 
   // Gestionnaires pour les modals
-  const handleSaveRestaurantInfo = (info) => {
-    updateRestaurantInfo(info);
-    setRestaurantInfoModalVisible(false);
-    toast.showToast(
-      'Informations du restaurant sauvegardées avec succès.',
-      'success'
-    );
-  };
+  const handleSaveRestaurantInfo = useCallback(
+    (info: RestaurantInfo) => {
+      updateRestaurantInfo(info);
+      setRestaurantInfoModalVisible(false);
+      toast.showToast(
+        'Informations du restaurant sauvegardées avec succès.',
+        'success'
+      );
+    },
+    [updateRestaurantInfo, toast]
+  );
 
-  const handleSavePaymentMethods = (methods) => {
-    updatePaymentMethods(methods);
-    setPaymentModalVisible(false);
-    toast.showToast(
-      'Méthodes de paiement sauvegardées avec succès.',
-      'success'
-    );
-  };
+  const handleSavePaymentMethods = useCallback(
+    (methods: PaymentMethod[]) => {
+      updatePaymentMethods(methods);
+      setPaymentModalVisible(false);
+      toast.showToast(
+        'Méthodes de paiement sauvegardées avec succès.',
+        'success'
+      );
+    },
+    [updatePaymentMethods, toast]
+  );
 
-  const handleSavePrintSettings = (settings) => {
-    updatePrintSettings(settings);
-    setPrintSettingsModalVisible(false);
-    toast.showToast(
-      "Paramètres d'impression sauvegardés avec succès.",
-      'success'
-    );
-  };
+  const handleSavePrintSettings = useCallback(
+    (settings: ConfigData['printSettings']) => {
+      updatePrintSettings(settings);
+      setPrintSettingsModalVisible(false);
+      toast.showToast(
+        "Paramètres d'impression sauvegardés avec succès.",
+        'success'
+      );
+    },
+    [updatePrintSettings, toast]
+  );
 
-  const handleCancel = () => {
+  const handleCancel = useCallback(() => {
     setPasswordModalVisible(false);
-  };
+  }, []);
 
   // Filtrer les paramètres par catégorie active
   const filteredSettings = settings.filter(
@@ -228,7 +281,7 @@ export default function SettingsScreen() {
                 </View>
                 {setting.type === 'toggle' ? (
                   <Switch
-                    value={setting.value}
+                    value={!!setting.value}
                     onValueChange={() => toggleSetting(setting.id)}
                     trackColor={{ false: '#e0e0e0', true: '#4CAF50' }}
                   />

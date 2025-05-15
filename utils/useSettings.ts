@@ -6,10 +6,13 @@ import {
   RestaurantInfo,
   PaymentMethod,
 } from '../app/(tabs)/settings';
+import { Setting } from './SettingsContext';
 
 export function useSettings() {
   const [config, setConfig] = useState<ConfigData>(settingsService.getConfig());
   const [isLoaded, setIsLoaded] = useState(settingsService.isSettingsLoaded());
+  const [settings, setSettings] = useState<Setting[]>([]); // Ajoutez l'état pour les paramètres
+  const [isSaving, setIsSaving] = useState<boolean>(false); // Ajoutez l'état pour isSaving
 
   useEffect(() => {
     // S'abonner aux changements de configuration
@@ -25,7 +28,19 @@ export function useSettings() {
     return unsubscribe;
   }, []);
 
+  // Ajoutez la fonction toggleSetting
+  const toggleSetting = (id: string) => {
+    setSettings((prevSettings) =>
+      prevSettings.map((setting) =>
+        setting.id === id ? { ...setting, value: !setting.value } : setting
+      )
+    );
+  };
+
   return {
+    settings, // Ajoutez settings
+    isSaving, // Ajoutez isSaving
+    toggleSetting, // Ajoutez toggleSetting
     config,
     isLoaded,
     restaurantInfo: config.restaurantInfo,
@@ -44,3 +59,4 @@ export function useSettings() {
       settingsService.updatePrintSettings.bind(settingsService),
   };
 }
+  
