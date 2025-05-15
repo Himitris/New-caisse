@@ -4,8 +4,13 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { View, Text, ActivityIndicator } from 'react-native';
-import { initializeTables, StorageManager, TableManager } from '../utils/storage';
+import {
+  initializeTables,
+  StorageManager,
+  TableManager,
+} from '../utils/storage';
 import { ToastProvider } from '../utils/ToastContext';
+import { SettingsProvider } from '../utils/SettingsContext';
 
 declare global {
   interface Window {
@@ -61,34 +66,39 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <ToastProvider>
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: 'white' },
-          }}
-        >
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="table/[id]" options={{ presentation: 'card' }} />
-          <Stack.Screen
-            name="payment/full"
-            options={{ presentation: 'card' }}
-          />
-          <Stack.Screen
-            name="payment/split"
-            options={{ presentation: 'card' }}
-          />
-          <Stack.Screen
-            name="payment/custom"
-            options={{ presentation: 'card' }}
-          />
-          <Stack.Screen
-            name="print-preview"
-            options={{ presentation: 'card' }}
-          />
-        </Stack>
-        <StatusBar style="auto" />
-      </ToastProvider>
+      <SettingsProvider>
+        <ToastProvider>
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: 'white' },
+            }}
+          >
+            <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack.Screen
+              name="table/[id]"
+              options={{ presentation: 'card' }}
+            />
+            <Stack.Screen
+              name="payment/full"
+              options={{ presentation: 'card' }}
+            />
+            <Stack.Screen
+              name="payment/split"
+              options={{ presentation: 'card' }}
+            />
+            <Stack.Screen
+              name="payment/custom"
+              options={{ presentation: 'card' }}
+            />
+            <Stack.Screen
+              name="print-preview"
+              options={{ presentation: 'card' }}
+            />
+          </Stack>
+          <StatusBar style="auto" />
+        </ToastProvider>
+      </SettingsProvider>
     </GestureHandlerRootView>
   );
 }
