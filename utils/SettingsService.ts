@@ -1,14 +1,6 @@
 // utils/SettingsService.ts
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {
-  SETTINGS_STORAGE_KEY,
-  SETTINGS_VALUES_KEY,
-} from '../app/(tabs)/settings';
-import {
-  ConfigData,
-  RestaurantInfo,
-  PaymentMethod,
-} from '../app/(tabs)/settings';
+import { SETTINGS_STORAGE_KEY, ConfigData, RestaurantInfo, PaymentMethod } from './settingsTypes';
 
 // Valeurs par défaut pour la configuration
 const defaultConfig: ConfigData = {
@@ -76,33 +68,68 @@ class SettingsService {
     this.loadSettings();
   }
 
-  // Charger les paramètres depuis AsyncStorage
   private async loadSettings() {
     try {
+      // D'abord, vérifions si la clé existe
+      const keys = await AsyncStorage.getAllKeys();
+      const keyExists = keys.includes(SETTINGS_STORAGE_KEY);
+
+      if (!keyExists) {
+        console.log(
+          'Première initialisation des paramètres avec les valeurs par défaut'
+        );
+        // Initialiser immédiatement avec les valeurs par défaut
+        await AsyncStorage.setItem(
+          SETTINGS_STORAGE_KEY,
+          JSON.stringify(defaultConfig)
+        );
+        this.config = defaultConfig;
+        this.isLoaded = true;
+        this.notifyListeners('config');
+        return;
+      }
+
+      // Maintenant, on peut essayer de récupérer la configuration
       const savedConfig = await AsyncStorage.getItem(SETTINGS_STORAGE_KEY);
 
       if (savedConfig) {
-        const parsedConfig = JSON.parse(savedConfig);
-
-        if (parsedConfig && typeof parsedConfig === 'object') {
-          this.config = {
-            restaurantInfo: {
-              ...defaultConfig.restaurantInfo,
-              ...(parsedConfig.restaurantInfo || {}),
-            },
-            openingHours:
-              parsedConfig.openingHours || defaultConfig.openingHours,
-            paymentMethods: Array.isArray(parsedConfig.paymentMethods)
-              ? parsedConfig.paymentMethods
-              : defaultConfig.paymentMethods,
-            printSettings: {
-              ...defaultConfig.printSettings,
-              ...(parsedConfig.printSettings || {}),
-            },
-          };
+        try {
+          const parsedConfig = JSON.parse(savedConfig);
+          if (parsedConfig && typeof parsedConfig === 'object') {
+            this.config = {
+              restaurantInfo: {
+                ...defaultConfig.restaurantInfo,
+                ...(parsedConfig.restaurantInfo || {}),
+              },
+              openingHours:
+                parsedConfig.openingHours || defaultConfig.openingHours,
+              paymentMethods: Array.isArray(parsedConfig.paymentMethods)
+                ? parsedConfig.paymentMethods
+                : defaultConfig.paymentMethods,
+              printSettings: {
+                ...defaultConfig.printSettings,
+                ...(parsedConfig.printSettings || {}),
+              },
+            };
+          }
+        } catch (parseError) {
+          console.error(
+            'Erreur lors du parsing de la configuration:',
+            parseError
+          );
+          // En cas d'erreur de parsing, revenir aux valeurs par défaut
+          this.config = defaultConfig;
+          await AsyncStorage.setItem(
+            SETTINGS_STORAGE_KEY,
+            JSON.stringify(defaultConfig)
+          );
         }
       } else {
-        // Première utilisation, sauvegarder les valeurs par défaut
+        // Cas qui ne devrait plus se produire grâce à la vérification initiale
+        console.log(
+          'Configuration non trouvée, utilisation des valeurs par défaut'
+        );
+        this.config = defaultConfig;
         await AsyncStorage.setItem(
           SETTINGS_STORAGE_KEY,
           JSON.stringify(defaultConfig)
@@ -114,6 +141,19 @@ class SettingsService {
     } catch (error) {
       console.error('Erreur lors du chargement des paramètres:', error);
       this.config = defaultConfig;
+
+      // Même en cas d'erreur, essayons de sauvegarder les valeurs par défaut
+      try {
+        await AsyncStorage.setItem(
+          SETTINGS_STORAGE_KEY,
+          JSON.stringify(defaultConfig)
+        );
+      } catch (saveError) {
+        console.error(
+          'Erreur lors de la sauvegarde des paramètres par défaut:',
+          saveError
+        );
+      }
     }
   }
 

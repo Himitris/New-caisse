@@ -12,23 +12,8 @@ import {
   View,
 } from 'react-native';
 import { Save, X, Plus } from 'lucide-react-native';
-import {
-  RestaurantInfo,
-  PaymentMethod,
-  ConfigData,
-} from '../(tabs)/settings';
+import { ConfigData, OpeningHours, PaymentMethod, RestaurantInfo } from '@/utils/settingsTypes';
 
-interface TimeRange {
-  open: string;
-  close: string;
-}
-
-interface OpeningHours {
-  [key: string]: {
-    isOpen: boolean;
-    hours: TimeRange;
-  };
-}
 
 // Props pour les différents modals
 interface InfoModalProps {
@@ -869,4 +854,10 @@ export const PaymentMethodsModal: React.FC<PaymentModalProps> = ({
       </View>
     </View>
   );
+};
+
+export default {
+  RestaurantInfoModal,
+  PrintSettingsModal,
+  PaymentMethodsModal,
 };

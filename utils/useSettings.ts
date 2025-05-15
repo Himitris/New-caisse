@@ -1,21 +1,93 @@
 // utils/useSettings.ts
-import { useState, useEffect } from 'react';
+import {
+    CreditCard,
+    Database,
+    Home,
+    Lock,
+    Printer
+} from 'lucide-react-native'; // Importez les icônes nécessaires
+import { useCallback, useEffect, useState } from 'react';
 import { settingsService } from './SettingsService';
 import {
-  ConfigData,
-  RestaurantInfo,
-  PaymentMethod,
-} from '../app/(tabs)/settings';
-import { Setting } from './SettingsContext';
+    ConfigData,
+    PaymentMethod,
+    RestaurantInfo,
+    Setting,
+} from './settingsTypes';
+
+// Fonction utilitaire pour transformer la config en tableau de settings
+const configToSettings = (config: ConfigData): Setting[] => {
+  return [
+    // Catégorie General
+    {
+      id: 'restaurant',
+      title: 'Informations du restaurant',
+      description: 'Modifier les informations du restaurant',
+      type: 'action',
+      category: 'general',
+      value: false,
+      icon: Home,
+    },
+
+    // Catégorie Payment
+    {
+      id: 'payment',
+      title: 'Méthodes de paiement',
+      description: 'Configurer les méthodes de paiement acceptées',
+      type: 'action',
+      category: 'payment',
+      value: false,
+      icon: CreditCard,
+    },
+
+    // Catégorie Impression
+    {
+      id: 'printSettings',
+      title: "Paramètres d'impression",
+      description: "Configurer les options d'impression",
+      type: 'action',
+      category: 'printing',
+      value: false,
+      icon: Printer,
+    },
+    {
+      id: 'autoPrint',
+      title: 'Impression automatique',
+      description: 'Imprimer automatiquement les reçus après paiement',
+      type: 'toggle',
+      category: 'printing',
+      value: config.printSettings.autoPrint,
+      icon: Printer,
+    },
+
+    // Catégorie Sécurité
+    {
+      id: 'changePassword',
+      title: 'Changer le mot de passe',
+      description: 'Modifier le mot de passe administrateur',
+      type: 'action',
+      category: 'security',
+      value: false,
+      icon: Lock,
+    },
+  ];
+};
 
 export function useSettings() {
   const [config, setConfig] = useState<ConfigData>(settingsService.getConfig());
   const [isLoaded, setIsLoaded] = useState(settingsService.isSettingsLoaded());
-  const [settings, setSettings] = useState<Setting[]>([]); // Ajoutez l'état pour les paramètres
-  const [isSaving, setIsSaving] = useState<boolean>(false); // Ajoutez l'état pour isSaving
+  const [settings, setSettings] = useState<Setting[]>([]);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
 
+  // Initialiser settings à partir de config
   useEffect(() => {
-    // S'abonner aux changements de configuration
+    if (config) {
+      setSettings(configToSettings(config));
+    }
+  }, [config]);
+
+  // S'abonner aux changements de configuration
+  useEffect(() => {
     const unsubscribe = settingsService.addListener(
       'config',
       (newConfig: ConfigData) => {
@@ -28,35 +100,133 @@ export function useSettings() {
     return unsubscribe;
   }, []);
 
-  // Ajoutez la fonction toggleSetting
-  const toggleSetting = (id: string) => {
-    setSettings((prevSettings) =>
-      prevSettings.map((setting) =>
-        setting.id === id ? { ...setting, value: !setting.value } : setting
-      )
-    );
-  };
+  // Fonction pour basculer l'état d'un paramètre toggle
+  const toggleSetting = useCallback(
+    async (id: string) => {
+      setIsSaving(true);
+      try {
+        // Mettre à jour l'état local
+        setSettings((prevSettings) =>
+          prevSettings.map((setting) =>
+            setting.id === id ? { ...setting, value: !setting.value } : setting
+          )
+        );
+
+        // Mettre à jour la configuration dans le service
+        const newValue = settings.find((s) => s.id === id)?.value;
+
+        // Gérer les cas spécifiques selon l'ID du paramètre
+        switch (id) {
+          case 'autoPrint':
+            await settingsService.updatePrintSettings({
+              ...config.printSettings,
+              autoPrint: !config.printSettings.autoPrint,
+            });
+            break;
+
+          case 'defaultCash':
+            if (!newValue) {
+              // Définir 'cash' comme méthode par défaut
+              const updatedMethods = config.paymentMethods.map((method) => ({
+                ...method,
+                isDefault: method.id === 'cash',
+              }));
+              await settingsService.updatePaymentMethods(updatedMethods);
+            }
+            break;
+
+          // Ajouter d'autres cas selon vos paramètres
+
+          default:
+            console.log(`Paramètre ${id} non géré pour la persistance`);
+        }
+      } catch (error) {
+        console.error('Erreur lors de la mise à jour du paramètre:', error);
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [settings, config]
+  );
+
+  // Fonction pour mettre à jour les informations du restaurant
+  const updateRestaurantInfo = useCallback(async (info: RestaurantInfo) => {
+    setIsSaving(true);
+    try {
+      await settingsService.updateRestaurantInfo(info);
+    } catch (error) {
+      console.error(
+        'Erreur lors de la mise à jour des informations du restaurant:',
+        error
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  }, []);
+
+  // Fonction pour mettre à jour les méthodes de paiement
+  const updatePaymentMethods = useCallback(async (methods: PaymentMethod[]) => {
+    setIsSaving(true);
+    try {
+      await settingsService.updatePaymentMethods(methods);
+    } catch (error) {
+      console.error(
+        'Erreur lors de la mise à jour des méthodes de paiement:',
+        error
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  }, []);
+
+  // Fonction pour mettre à jour les paramètres d'impression
+  const updatePrintSettings = useCallback(
+    async (printSettings: ConfigData['printSettings']) => {
+      setIsSaving(true);
+      try {
+        await settingsService.updatePrintSettings(printSettings);
+      } catch (error) {
+        console.error(
+          "Erreur lors de la mise à jour des paramètres d'impression:",
+          error
+        );
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    []
+  );
+
+  // Fonction pour mettre à jour les heures d'ouverture
+  const updateOpeningHours = useCallback(async (hours: any) => {
+    setIsSaving(true);
+    try {
+      await settingsService.updateOpeningHours(hours);
+    } catch (error) {
+      console.error(
+        "Erreur lors de la mise à jour des heures d'ouverture:",
+        error
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  }, []);
 
   return {
-    settings, // Ajoutez settings
-    isSaving, // Ajoutez isSaving
-    toggleSetting, // Ajoutez toggleSetting
+    settings,
     config,
     isLoaded,
+    isSaving,
+    toggleSetting,
     restaurantInfo: config.restaurantInfo,
     openingHours: config.openingHours,
     paymentMethods: config.paymentMethods,
     enabledPaymentMethods: settingsService.getEnabledPaymentMethods(),
     defaultPaymentMethod: settingsService.getDefaultPaymentMethod(),
     printSettings: config.printSettings,
-    updateRestaurantInfo:
-      settingsService.updateRestaurantInfo.bind(settingsService),
-    updateOpeningHours:
-      settingsService.updateOpeningHours.bind(settingsService),
-    updatePaymentMethods:
-      settingsService.updatePaymentMethods.bind(settingsService),
-    updatePrintSettings:
-      settingsService.updatePrintSettings.bind(settingsService),
+    updateRestaurantInfo,
+    updateOpeningHours,
+    updatePaymentMethods,
+    updatePrintSettings,
   };
 }
-  

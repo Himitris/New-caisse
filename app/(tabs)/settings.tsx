@@ -20,50 +20,17 @@ import {
   PaymentMethodsModal,
   PrintSettingsModal,
 } from '../components/SettingsModals';
-
-// Définition des types exportés pour utilisation dans d'autres composants
-export interface RestaurantInfo {
-  name: string;
-  address: string;
-  phone: string;
-  email: string;
-  siret: string;
-  taxInfo: string;
-  owner: string;
-}
-
-export interface PaymentMethod {
-  id: string;
-  name: string;
-  enabled: boolean;
-  isDefault: boolean;
-}
-
-export interface ConfigData {
-  restaurantInfo: RestaurantInfo;
-  openingHours: any;
-  paymentMethods: PaymentMethod[];
-  printSettings: {
-    autoPrint: boolean;
-    printLogo: boolean;
-    printFooter: boolean;
-    footerText: string;
-  };
-}
+import {
+  Setting,
+  RestaurantInfo,
+  PaymentMethod,
+  ConfigData,
+  settingsCategories,
+} from '../../utils/settingsTypes';
 
 // Clés de stockage
 export const SETTINGS_STORAGE_KEY = 'manjo_carn_restaurant_settings';
 export const SETTINGS_VALUES_KEY = 'manjo_carn_restaurant_values';
-
-// Définition des catégories de paramètres
-export const settingsCategories = [
-  { id: 'general', name: 'Général' },
-  { id: 'payment', name: 'Paiement' },
-  { id: 'interface', name: 'Interface' },
-  { id: 'printing', name: 'Impression' },
-  { id: 'security', name: 'Sécurité' },
-  { id: 'data', name: 'Données' },
-];
 
 export default function SettingsScreen() {
   const [activeCategory, setActiveCategory] = useState<string>('general');
@@ -281,7 +248,7 @@ export default function SettingsScreen() {
                 </View>
                 {setting.type === 'toggle' ? (
                   <Switch
-                    value={!!setting.value}
+                    value={typeof setting.value === 'boolean' ? setting.value : false}
                     onValueChange={() => toggleSetting(setting.id)}
                     trackColor={{ false: '#e0e0e0', true: '#4CAF50' }}
                   />
