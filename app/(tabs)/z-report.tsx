@@ -40,6 +40,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import PasswordModal from '../components/PasswordModal';
 import { useFocusEffect } from 'expo-router';
+import { useSettings } from '@/utils/useSettings';
 
 // Clé de stockage pour le compteur de Z
 const Z_COUNTER_KEY = 'manjo_carn_z_counter';
@@ -51,6 +52,7 @@ export default function ZReportScreen() {
   const [filterDate, setFilterDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const toast = useToast();
+  const { restaurantInfo } = useSettings();
 
   // États pour le système de protection par mot de passe
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -168,16 +170,6 @@ export default function ZReportScreen() {
       `;
     });
 
-    // Restaurant info constants
-    const RESTAURANT_INFO = {
-      name: 'Manjo Carn',
-      address: 'Route de la Corniche, 82140 Saint Antonin Noble Val',
-      siret: 'Siret N° 803 520 998 00011',
-      phone: 'Tel : 0563682585',
-      taxInfo: 'TVA non applicable - art.293B du CGI',
-      owner: 'Virginie',
-    };
-
     // Ajouter la plage horaire si disponible
     let timeRangeHTML = '';
     if (reportData.startTime && reportData.endTime) {
@@ -251,10 +243,10 @@ export default function ZReportScreen() {
         </head>
         <body>
           <div class="header">
-            <h1>${RESTAURANT_INFO.name}</h1>
-            <p>${RESTAURANT_INFO.address}</p>
-            <p>${RESTAURANT_INFO.phone}</p>
-            <p>${RESTAURANT_INFO.siret}</p>
+            <h1>${restaurantInfo.name}</h1>
+            <p>${restaurantInfo.address}</p>
+            <p>${restaurantInfo.phone}</p>
+            <p>${restaurantInfo.siret}</p>
           </div>
 
           <div class="section-title">RAPPORT Z JOURNALIER</div>
@@ -322,7 +314,7 @@ export default function ZReportScreen() {
           <div class="divider"></div>
 
           <div class="footer">
-            <p>${RESTAURANT_INFO.taxInfo}</p>
+            <p>${restaurantInfo.taxInfo}</p>
             <p>${reportData.totalTransactions} transactions</p>
           </div>
 
@@ -364,16 +356,6 @@ export default function ZReportScreen() {
         </tr>
       `;
     });
-
-    // Restaurant info constants
-    const RESTAURANT_INFO = {
-      name: 'Manjo Carn',
-      address: 'Route de la Corniche, 82140 Saint Antonin Noble Val',
-      siret: 'Siret N° 803 520 998 00011',
-      phone: 'Tel : 0563682585',
-      taxInfo: 'TVA non applicable - art.293B du CGI',
-      owner: 'Virginie',
-    };
 
     // Ajouter la plage horaire si disponible
     let timeRangeHTML = '';
@@ -447,10 +429,10 @@ export default function ZReportScreen() {
         </head>
         <body>
           <div class="header">
-            <h1>${RESTAURANT_INFO.name}</h1>
-            <p>${RESTAURANT_INFO.address}</p>
-            <p>${RESTAURANT_INFO.phone}</p>
-            <p>${RESTAURANT_INFO.siret}</p>
+            <h1>${restaurantInfo.name}</h1>
+            <p>${restaurantInfo.address}</p>
+            <p>${restaurantInfo.phone}</p>
+            <p>${restaurantInfo.siret}</p>
           </div>
 
           <div class="section-title">RAPPORT Z JOURNALIER</div>
@@ -531,7 +513,7 @@ export default function ZReportScreen() {
           <div class="divider"></div>
 
           <div class="footer">
-            <p>${RESTAURANT_INFO.taxInfo}</p>
+            <p>${restaurantInfo.taxInfo}</p>
             <p>${reportData.totalTransactions} transactions</p>
           </div>
 

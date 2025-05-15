@@ -18,7 +18,6 @@ import { useSettingsContext } from '../../utils/SettingsContext';
 import {
   RestaurantInfoModal,
   PaymentMethodsModal,
-  PrintSettingsModal,
 } from '../components/SettingsModals';
 import {
   Setting,
@@ -156,19 +155,6 @@ export default function SettingsScreen() {
     },
     [updatePaymentMethods, toast]
   );
-
-  const handleSavePrintSettings = useCallback(
-    (settings: ConfigData['printSettings']) => {
-      updatePrintSettings(settings);
-      setPrintSettingsModalVisible(false);
-      toast.showToast(
-        "Paramètres d'impression sauvegardés avec succès.",
-        'success'
-      );
-    },
-    [updatePrintSettings, toast]
-  );
-
   const handleCancel = useCallback(() => {
     setPasswordModalVisible(false);
   }, []);
@@ -295,13 +281,6 @@ export default function SettingsScreen() {
         onClose={() => setPaymentModalVisible(false)}
         paymentMethods={config.paymentMethods}
         onSave={handleSavePaymentMethods}
-      />
-
-      <PrintSettingsModal
-        visible={printSettingsModalVisible}
-        onClose={() => setPrintSettingsModalVisible(false)}
-        printSettings={config.printSettings}
-        onSave={handleSavePrintSettings}
       />
 
       <PasswordModal

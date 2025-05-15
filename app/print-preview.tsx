@@ -6,6 +6,7 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Printer, Share, Home, Gift } from 'lucide-react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
+import { useSettings } from '@/utils/useSettings';
 
 export default function PrintPreviewScreen() {
   const {
@@ -30,14 +31,7 @@ export default function PrintPreviewScreen() {
   const displayName = tableName || `Table ${tableIdNum}`;
   const isPreviewMode = isPreview === 'true';
 
-  const restaurantInfo = {
-    name: 'Manjo Carn',
-    address: 'Route de la Corniche, 82140 Saint Antonin Noble Val',
-    siret: 'Siret N° 803 520 998 00011',
-    phone: 'Tel : 0563682585',
-    taxInfo: 'TVA non applicable - art.293B du CGI', // Toujours cette valeur maintenant
-    owner: 'Virginie',
-  };
+  const { restaurantInfo } = useSettings();
 
   // Suppression du chargement des paramètres de TVA
 

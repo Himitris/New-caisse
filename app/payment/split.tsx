@@ -1,4 +1,4 @@
-// app/payment/split.tsx - Écran de paiement partagé corrigé
+// app/payment/split.tsx - Écran de paiement partagé avec SettingsContext
 
 import {
   View,
@@ -21,6 +21,7 @@ import {
 import { useToast } from '../../utils/ToastContext';
 import { EVENT_TYPES, events } from '@/utils/events';
 import { processPartialPayment } from '@/utils/payment-utils';
+import { useSettings } from '@/utils/useSettings';
 
 export default function SplitBillScreen() {
   const { tableId, total, guests, items } = useLocalSearchParams();
@@ -35,6 +36,10 @@ export default function SplitBillScreen() {
   const [processing, setProcessing] = useState(false);
   const [totalOffered, setTotalOffered] = useState(0);
   const [tableFullyPaid, setTableFullyPaid] = useState(false);
+
+  // Utiliser le SettingsContext pour accéder aux méthodes de paiement configurées
+  const { paymentMethods, restaurantInfo } = useSettings();
+  const enabledPaymentMethods = paymentMethods.filter(method => method.enabled);
 
   // Montant partagé par invité (partage égal)
   // Utiliser toFixed pour éviter les problèmes d'arrondis
@@ -70,9 +75,10 @@ export default function SplitBillScreen() {
       id: number;
       amount: number;
       paid: boolean;
-      method?: 'cash' | 'card' | 'check';
+      methodId?: string;
     }>
   >([]);
+  
 
   // Initialiser les paiements une fois que totalAmount est disponible
   useEffect(() => {
@@ -98,7 +104,7 @@ export default function SplitBillScreen() {
   // Mettre à jour le total restant lorsque les paiements changent
   useEffect(() => {
     const paidTotal = payments.reduce(
-      (sum, payment) => (payment.paid ? sum + payment.amount : sum),
+      (sum: any, payment: { paid: any; amount: any; }) => (payment.paid ? sum + payment.amount : sum),
       0
     );
 
@@ -112,7 +118,7 @@ export default function SplitBillScreen() {
     if (
       remaining < 0.01 &&
       payments.length > 0 &&
-      payments.every((p) => p.paid)
+      payments.every((p: { paid: any; }) => p.paid)
     ) {
       setTableFullyPaid(true);
     }
@@ -120,18 +126,18 @@ export default function SplitBillScreen() {
 
   const handlePayment = async (
     id: number,
-    method: 'card' | 'cash' | 'check'
+    methodId: string
   ) => {
     try {
       setProcessing(true);
       // Trouver le paiement
-      const payment = payments.find((p) => p.id === id);
+      const payment = payments.find((p: { id: number; }) => p.id === id);
       if (!payment) return;
 
       // Marquer comme payé avec la méthode
       setPayments((prev) =>
         prev.map((payment) =>
-          payment.id === id ? { ...payment, paid: true, method } : payment
+          payment.id === id ? { ...payment, paid: true, methodId } : { ...payment }
         )
       );
 
@@ -170,6 +176,10 @@ export default function SplitBillScreen() {
         setTableFullyPaid(true);
       }
 
+      // Trouver le nom de la méthode pour l'affichage
+      const method = paymentMethods.find(m => m.id === methodId);
+      const methodName = method ? method.name : methodId;
+
       // Créer la facture pour ce paiement
       const bill = {
         id: Date.now() + Math.random(),
@@ -180,7 +190,7 @@ export default function SplitBillScreen() {
         items: orderItems.length,
         status: 'split' as 'split',
         timestamp: new Date().toISOString(),
-        paymentMethod: method,
+        paymentMethod: methodId as 'card' | 'cash' | 'check',
         paymentType: 'split' as 'split',
         paidItems: orderItems.map((item: any) => ({
           ...item,
@@ -196,10 +206,10 @@ export default function SplitBillScreen() {
       await addBill(bill);
 
       // Si c'était le dernier paiement (vérifié avec le nouveau état)
-      const updatedPayments = payments.map((p) =>
-        p.id === id ? { ...p, paid: true, method } : p
+      const updatedPayments = payments.map((p: { id: number; }) =>
+        p.id === id ? { ...p, paid: true, methodId } : p
       );
-      const allPaid = updatedPayments.every((p) => p.paid);
+      const allPaid = updatedPayments.every((p) => 'paid' in p && p.paid);
 
       if (allPaid || result.tableClosed) {
         // Fermer la table explicitement, même si c'est potentiellement redondant
@@ -222,7 +232,7 @@ export default function SplitBillScreen() {
         setTableFullyPaid(true);
       }
 
-      toast.showToast(`Paiement ${method} traité avec succès`, 'success');
+      toast.showToast(`Paiement ${methodName} traité avec succès`, 'success');
     } catch (error) {
       console.error('Erreur de traitement du paiement:', error);
       toast.showToast('Échec du traitement du paiement', 'error');
@@ -231,7 +241,7 @@ export default function SplitBillScreen() {
     }
   };
 
-  const allPaid = payments.every((payment) => payment.paid);
+  const allPaid = payments.every((payment: { paid: any; }) => payment.paid);
 
   const handleComplete = () => {
     if (tableFullyPaid || allPaid) {
@@ -256,6 +266,32 @@ export default function SplitBillScreen() {
         ]
       );
     }
+  };
+
+  // Fonction utilitaire pour obtenir l'icône en fonction du type de méthode
+  const getMethodIcon = (methodId: string) => {
+    switch (methodId) {
+      case 'card': return <CreditCard size={24} color="white" />;
+      case 'cash': return <Wallet size={24} color="white" />;
+      case 'check': return <Edit3 size={24} color="white" />;
+      default: return <Wallet size={24} color="white" />;
+    }
+  };
+
+  // Fonction utilitaire pour obtenir la couleur en fonction du type de méthode
+  const getMethodColor = (methodId: string) => {
+    switch (methodId) {
+      case 'card': return '#673AB7';
+      case 'cash': return '#2196F3';
+      case 'check': return '#9C27B0';
+      default: return '#757575';
+    }
+  };
+
+  // Fonction utilitaire pour obtenir le nom de la méthode de paiement
+  const getMethodName = (methodId: string) => {
+    const method = paymentMethods.find(m => m.id === methodId);
+    return method ? method.name : methodId;
   };
 
   return (
@@ -286,7 +322,7 @@ export default function SplitBillScreen() {
       </View>
 
       <ScrollView style={styles.content}>
-        {payments.map((payment) => (
+        {payments.map((payment: any) => (
           <View key={payment.id} style={styles.paymentCard}>
             <View style={styles.paymentHeader}>
               <Text style={styles.guestTitle}>Invité {payment.id}</Text>
@@ -294,30 +330,21 @@ export default function SplitBillScreen() {
             </View>
             {!payment.paid ? (
               <View style={styles.paymentActions}>
-                <Pressable
-                  style={[styles.paymentButton, { backgroundColor: '#2196F3' }]}
-                  onPress={() => handlePayment(payment.id, 'cash')}
-                >
-                  <Wallet size={24} color="white" />
-                  <Text style={styles.buttonText}>Paiement en espèces</Text>
-                </Pressable>
-                <Pressable
-                  style={[styles.paymentButton, { backgroundColor: '#9C27B0' }]}
-                  onPress={() => handlePayment(payment.id, 'check')}
-                >
-                  <Edit3 size={24} color="white" />
-                  <Text style={styles.buttonText}>Paiement par chèque</Text>
-                </Pressable>
+                {enabledPaymentMethods.map(method => (
+                  <Pressable
+                    key={method.id}
+                    style={[styles.paymentButton, { backgroundColor: getMethodColor(method.id) }]}
+                    onPress={() => handlePayment(payment.id, method.id)}
+                  >
+                    {getMethodIcon(method.id)}
+                    <Text style={styles.buttonText}>{method.name}</Text>
+                  </Pressable>
+                ))}
               </View>
             ) : (
               <View style={styles.paidStatus}>
                 <Text style={styles.paidText}>
-                  Payé avec{' '}
-                  {payment.method === 'card'
-                    ? 'Carte'
-                    : payment.method === 'cash'
-                    ? 'Espèces'
-                    : 'Chèque'}
+                  Payé avec {payment.methodId ? getMethodName(payment.methodId) : 'Paiement'}
                 </Text>
               </View>
             )}
@@ -416,6 +443,7 @@ const styles = StyleSheet.create({
   paymentActions: {
     flexDirection: 'row',
     gap: 12,
+    flexWrap: 'wrap',
   },
   paymentButton: {
     flex: 1,
@@ -425,6 +453,7 @@ const styles = StyleSheet.create({
     padding: 12,
     borderRadius: 8,
     gap: 8,
+    minWidth: 140,
   },
   buttonText: {
     color: 'white',

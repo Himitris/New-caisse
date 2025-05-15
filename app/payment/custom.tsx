@@ -1,4 +1,4 @@
-// app/payment/custom.tsx - Fonctionnalité de partage personnalisé corrigée
+// app/payment/custom.tsx - Fonctionnalité de partage personnalisé avec SettingsContext
 
 import {
   View,
@@ -29,6 +29,7 @@ import {
 import { useToast } from '../../utils/ToastContext';
 import { EVENT_TYPES, events } from '@/utils/events';
 import { processPartialPayment } from '@/utils/payment-utils';
+import { useSettings } from '@/utils/useSettings';
 
 export default function CustomSplitScreen() {
   const { tableId, total, items } = useLocalSearchParams();
@@ -40,6 +41,10 @@ export default function CustomSplitScreen() {
   const [processing, setProcessing] = useState(false);
   const [totalOffered, setTotalOffered] = useState(0);
   const [tableFullyPaid, setTableFullyPaid] = useState(false);
+
+  // Utiliser le SettingsContext pour accéder aux méthodes de paiement configurées
+  const { paymentMethods, restaurantInfo } = useSettings();
+  const enabledPaymentMethods = paymentMethods.filter(method => method.enabled);
 
   // Ajouter un état pour le nom et la section de la table
   const [tableName, setTableName] = useState('');
@@ -78,9 +83,10 @@ export default function CustomSplitScreen() {
   const [currentTotal, setCurrentTotal] = useState(0);
 
   // État pour la méthode de paiement sélectionnée pour chaque partage
-  const [paymentMethods, setPaymentMethods] = useState<
-    ('card' | 'cash' | 'check' | null)[]
-  >([null]);
+  const [paymentMethodIds, setPaymentMethodIds] = useState<(string | null)[]>([
+    null,
+  ]);
+
 
   useEffect(() => {
     // Calculer le total actuel de tous les montants saisis
@@ -107,7 +113,7 @@ export default function CustomSplitScreen() {
   // Ajouter un nouveau champ de montant de partage
   const addSplitAmount = () => {
     setSplitAmounts([...splitAmounts, '']);
-    setPaymentMethods([...paymentMethods, null]);
+    setPaymentMethodIds([...paymentMethodIds, null]);
   };
 
   // Supprimer un champ de montant de partage
@@ -116,9 +122,9 @@ export default function CustomSplitScreen() {
     newAmounts.splice(index, 1);
     setSplitAmounts(newAmounts);
 
-    const newMethods = [...paymentMethods];
+    const newMethods = [...paymentMethodIds];
     newMethods.splice(index, 1);
-    setPaymentMethods(newMethods);
+    setPaymentMethodIds(newMethods);
   };
 
   // Mettre à jour la valeur d'un montant de partage
@@ -159,10 +165,10 @@ export default function CustomSplitScreen() {
       } else {
         // Créer un nouveau partage avec le montant restant
         const newAmounts = [...splitAmounts, remaining.toFixed(2)];
-        const newMethods = [...paymentMethods, null];
+        const newMethods = [...paymentMethodIds, null];
 
         setSplitAmounts(newAmounts);
-        setPaymentMethods(newMethods);
+        setPaymentMethodIds(newMethods);
       }
     }
   };
@@ -170,11 +176,11 @@ export default function CustomSplitScreen() {
   // Définir la méthode de paiement pour un partage spécifique
   const setPaymentMethod = (
     index: number,
-    method: 'card' | 'cash' | 'check'
+    methodId: string
   ) => {
-    const newMethods = [...paymentMethods];
-    newMethods[index] = method;
-    setPaymentMethods(newMethods);
+    const newMethods = [...paymentMethodIds];
+    newMethods[index] = methodId;
+    setPaymentMethodIds(newMethods);
   };
 
   // Traiter le paiement pour tous les partages
@@ -185,7 +191,7 @@ export default function CustomSplitScreen() {
       return (
         !isNaN(parsedAmount) &&
         parsedAmount > 0 &&
-        paymentMethods[index] !== null
+        paymentMethodIds[index] !== null
       );
     });
 
@@ -245,9 +251,9 @@ export default function CustomSplitScreen() {
       const validPayments = splitAmounts
         .map((amount, index) => ({
           amount: parseFloat(amount),
-          method: paymentMethods[index],
+          methodId: paymentMethodIds[index],
         }))
-        .filter((p) => !isNaN(p.amount) && p.amount > 0 && p.method !== null);
+        .filter((p) => !isNaN(p.amount) && p.amount > 0 && p.methodId !== null);
 
       // Calculer le total de tous les paiements valides
       const totalValidPayments = validPayments.reduce(
@@ -299,7 +305,7 @@ export default function CustomSplitScreen() {
           items: orderItems.length,
           status: 'split' as 'split',
           timestamp: new Date().toISOString(),
-          paymentMethod: payment.method as 'card' | 'cash' | 'check',
+          paymentMethod: payment.methodId as 'card' | 'cash' | 'check',
           paymentType: 'custom' as 'custom',
           paidItems: orderItems.map((item: any) => ({
             ...item,
@@ -312,7 +318,7 @@ export default function CustomSplitScreen() {
         };
 
         // Si vous avez toujours des problèmes, vous pouvez ajouter une vérification supplémentaire
-        if (payment.method) {
+        if (payment.methodId) {
           // Assurez-vous que la méthode n'est pas null
           await addBill(bill);
         }
@@ -396,6 +402,16 @@ export default function CustomSplitScreen() {
     }
   };
 
+  // Fonction utilitaire pour obtenir l'icône en fonction du type de méthode
+  const getMethodIcon = (methodId: string) => {
+    switch (methodId) {
+      case 'card': return <CreditCard size={20} color="white" />;
+      case 'cash': return <Wallet size={20} color="white" />;
+      case 'check': return <Edit3 size={20} color="white" />;
+      default: return <Wallet size={20} color="white" />;
+    }
+  };
+
   return (
     <View style={styles.container}>
       {processing && (
@@ -448,57 +464,28 @@ export default function CustomSplitScreen() {
                 </View>
 
                 <View style={styles.paymentMethodsRow}>
-                  
-
-                  <Pressable
-                    style={[
-                      styles.methodButton,
-                      paymentMethods[index] === 'cash' &&
-                        styles.selectedMethodButton,
-                    ]}
-                    onPress={() => setPaymentMethod(index, 'cash')}
-                  >
-                    <Wallet
-                      size={20}
-                      color={
-                        paymentMethods[index] === 'cash' ? 'white' : '#333'
-                      }
-                    />
-                    <Text
+                  {enabledPaymentMethods.map((method) => (
+                    <Pressable
+                      key={method.id}
                       style={[
-                        styles.methodText,
-                        paymentMethods[index] === 'cash' &&
-                          styles.selectedMethodText,
+                        styles.methodButton,
+                        paymentMethodIds[index] === method.id &&
+                          styles.selectedMethodButton,
                       ]}
+                      onPress={() => setPaymentMethod(index, method.id)}
                     >
-                      Espèces
-                    </Text>
-                  </Pressable>
-
-                  <Pressable
-                    style={[
-                      styles.methodButton,
-                      paymentMethods[index] === 'check' &&
-                        styles.selectedMethodButton,
-                    ]}
-                    onPress={() => setPaymentMethod(index, 'check')}
-                  >
-                    <Edit3
-                      size={20}
-                      color={
-                        paymentMethods[index] === 'check' ? 'white' : '#333'
-                      }
-                    />
-                    <Text
-                      style={[
-                        styles.methodText,
-                        paymentMethods[index] === 'check' &&
-                          styles.selectedMethodText,
-                      ]}
-                    >
-                      Chèque
-                    </Text>
-                  </Pressable>
+                      {getMethodIcon(method.id)}
+                      <Text
+                        style={[
+                          styles.methodText,
+                          paymentMethodIds[index] === method.id &&
+                            styles.selectedMethodText,
+                        ]}
+                      >
+                        {method.name}
+                      </Text>
+                    </Pressable>
+                  ))}
 
                   {splitAmounts.length > 1 && (
                     <Pressable

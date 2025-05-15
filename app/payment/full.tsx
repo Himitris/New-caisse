@@ -18,11 +18,13 @@ import {
 } from '../../utils/storage';
 import { useToast } from '../../utils/ToastContext';
 import { EVENT_TYPES, events } from '@/utils/events';
+import { useSettings } from '@/utils/useSettings';
 
 export default function FullPaymentScreen() {
   const { tableId, total, items } = useLocalSearchParams();
+  const { paymentMethods, restaurantInfo, printSettings } = useSettings();
   const router = useRouter();
-  const [printReceipt, setPrintReceipt] = useState(false);
+  const [printReceipt, setPrintReceipt] = useState(printSettings.autoPrint);
   const [processing, setProcessing] = useState(false);
   const [tableName, setTableName] = useState('');
   const toast = useToast();
@@ -31,6 +33,7 @@ export default function FullPaymentScreen() {
   const tableIdNum = parseInt(tableId as string, 10);
   const totalAmount = parseFloat(total as string);
   const orderItems = items ? JSON.parse(items as string) : [];
+  const availableMethods = paymentMethods.filter((method) => method.enabled);
 
   // Get table name on load
   useEffect(() => {
@@ -55,6 +58,34 @@ export default function FullPaymentScreen() {
 
     fetchTableData();
   }, [tableIdNum]);
+
+  // Fonction utilitaire pour obtenir l'icône en fonction du type de méthode
+  function getMethodIcon(methodId: string) {
+    switch (methodId) {
+      case 'card':
+        return <CreditCard size={32} color="white" />;
+      case 'cash':
+        return <Wallet size={32} color="white" />;
+      case 'check':
+        return <Edit3 size={32} color="white" />;
+      default:
+        return <CreditCard size={32} color="white" />;
+    }
+  }
+
+  // Fonction utilitaire pour les couleurs
+  function getMethodColor(methodId: string) {
+    switch (methodId) {
+      case 'card':
+        return '#673AB7';
+      case 'cash':
+        return '#2196F3';
+      case 'check':
+        return '#9C27B0';
+      default:
+        return '#757575';
+    }
+  }
 
   // Rest of the payment handling code...
   const handlePayment = async (method: 'card' | 'cash' | 'check') => {
@@ -217,24 +248,28 @@ export default function FullPaymentScreen() {
           </View>
         </View>
 
-        <View style={styles.paymentMethods}>
-          <Pressable
-            style={[styles.paymentButton, { backgroundColor: '#2196F3' }]}
-            onPress={() => handlePayment('cash')}
-            disabled={processing}
-          >
-            <Wallet size={32} color="white" />
-            <Text style={styles.buttonText}>Paiement en espèces</Text>
-          </Pressable>
+        <View style={styles.restaurantInfo}>
+          <Text style={styles.restaurantName}>{restaurantInfo.name}</Text>
+        </View>
 
-          <Pressable
-            style={[styles.paymentButton, { backgroundColor: '#9C27B0' }]}
-            onPress={() => handlePayment('check')}
-            disabled={processing}
-          >
-            <Edit3 size={32} color="white" />
-            <Text style={styles.buttonText}>Paiement par chèque</Text>
-          </Pressable>
+        <View style={styles.paymentMethods}>
+          {/* Afficher uniquement les méthodes de paiement activées */}
+          {availableMethods.map((method) => (
+            <Pressable
+              key={method.id}
+              style={[
+                styles.paymentButton,
+                { backgroundColor: getMethodColor(method.id) },
+              ]}
+              onPress={() =>
+                handlePayment(method.id as 'card' | 'cash' | 'check')
+              }
+              disabled={processing}
+            >
+              {getMethodIcon(method.id)}
+              <Text style={styles.buttonText}>{method.name}</Text>
+            </Pressable>
+          ))}
         </View>
       </View>
     </View>
@@ -339,5 +374,14 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#FF9800',
+  },
+  restaurantInfo: {
+    alignItems: 'center',
+    marginBottom: 32,
+  },
+  restaurantName: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
   },
 });

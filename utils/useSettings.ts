@@ -1,18 +1,20 @@
 // utils/useSettings.ts
 import {
-    CreditCard,
-    Database,
-    Home,
-    Lock,
-    Printer
+  CreditCard,
+  Database,
+  Home,
+  Lock,
+  Printer,
+  Wallet,
+  Edit3,
 } from 'lucide-react-native'; // Importez les icônes nécessaires
 import { useCallback, useEffect, useState } from 'react';
 import { settingsService } from './SettingsService';
 import {
-    ConfigData,
-    PaymentMethod,
-    RestaurantInfo,
-    Setting,
+  ConfigData,
+  PaymentMethod,
+  RestaurantInfo,
+  Setting,
 } from './settingsTypes';
 
 // Fonction utilitaire pour transformer la config en tableau de settings
@@ -41,15 +43,6 @@ const configToSettings = (config: ConfigData): Setting[] => {
     },
 
     // Catégorie Impression
-    {
-      id: 'printSettings',
-      title: "Paramètres d'impression",
-      description: "Configurer les options d'impression",
-      type: 'action',
-      category: 'printing',
-      value: false,
-      icon: Printer,
-    },
     {
       id: 'autoPrint',
       title: 'Impression automatique',
@@ -179,24 +172,6 @@ export function useSettings() {
     }
   }, []);
 
-  // Fonction pour mettre à jour les paramètres d'impression
-  const updatePrintSettings = useCallback(
-    async (printSettings: ConfigData['printSettings']) => {
-      setIsSaving(true);
-      try {
-        await settingsService.updatePrintSettings(printSettings);
-      } catch (error) {
-        console.error(
-          "Erreur lors de la mise à jour des paramètres d'impression:",
-          error
-        );
-      } finally {
-        setIsSaving(false);
-      }
-    },
-    []
-  );
-
   // Fonction pour mettre à jour les heures d'ouverture
   const updateOpeningHours = useCallback(async (hours: any) => {
     setIsSaving(true);
@@ -210,7 +185,7 @@ export function useSettings() {
     } finally {
       setIsSaving(false);
     }
-  }, []);
+  }, [])
 
   return {
     settings,
@@ -227,6 +202,6 @@ export function useSettings() {
     updateRestaurantInfo,
     updateOpeningHours,
     updatePaymentMethods,
-    updatePrintSettings,
   };
 }
+

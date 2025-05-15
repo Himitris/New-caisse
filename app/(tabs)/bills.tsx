@@ -33,7 +33,7 @@ import {
 } from 'react-native';
 import { Bill, getBills, saveBills } from '../../utils/storage';
 import { useToast } from '../../utils/ToastContext';
-
+import { useSettings } from '@/utils/useSettings';
 
 interface ViewReceiptModalProps {
   visible: boolean;
@@ -65,14 +65,6 @@ const PAYMENT_METHOD_LABELS = {
   check: 'Chèque',
 } as const;
 
-const RESTAURANT_INFO = {
-  name: 'Manjo Carn',
-  address: 'Route de la Corniche, 82140 Saint Antonin Noble Val',
-  siret: 'Siret N° 803 520 998 00011',
-  phone: 'Tel : 0563682585',
-  owner: 'Virginie',
-} as const;
-
 const ITEM_HEIGHT = 80;
 const PAGE_SIZE = 20;
 const MAX_BILLS_IN_STORAGE = 1000; // Limite pour éviter les problèmes de mémoire
@@ -101,7 +93,7 @@ const cleanupOldBills = async (currentBills: Bill[]): Promise<Bill[]> => {
 const ViewReceiptModal = memo<ViewReceiptModalProps>(
   ({ visible, bill, onClose, onPrint, onShare, onDelete }) => {
     if (!bill) return null;
-
+    const { restaurantInfo } = useSettings();
     const handleDelete = useCallback(() => {
       Alert.alert(
         'Supprimer la facture',
@@ -139,14 +131,12 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
 
             <ScrollView style={styles.receiptContent}>
               <View style={styles.restaurantInfo}>
-                <Text style={styles.restaurantName}>
-                  {RESTAURANT_INFO.name}
-                </Text>
+                <Text style={styles.restaurantName}>{restaurantInfo.name}</Text>
                 <Text style={styles.restaurantAddress}>
-                  {RESTAURANT_INFO.address}
+                  {restaurantInfo.address}
                 </Text>
                 <Text style={styles.restaurantPhone}>
-                  {RESTAURANT_INFO.phone}
+                  {restaurantInfo.phone}
                 </Text>
               </View>
 
@@ -205,7 +195,9 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
                 <View style={styles.billRow}>
                   <Text style={styles.billLabel}>Articles:</Text>
                   <Text style={styles.billValue}>
-                    {hasDetailedItems ? bill.paidItems?.length ?? 0 : bill.items}
+                    {hasDetailedItems
+                      ? bill.paidItems?.length ?? 0
+                      : bill.items}
                   </Text>
                 </View>
 
@@ -285,6 +277,7 @@ interface FilterBarProps {
   onPaymentMethodChange: (method: Bill['paymentMethod'] | null) => void;
   selectedPaymentMethod: Bill['paymentMethod'] | null;
   onResetFilters: () => void;
+  onDeleteFiltered: () => void;
 }
 
 const FilterBar = memo<FilterBarProps>(
@@ -295,6 +288,7 @@ const FilterBar = memo<FilterBarProps>(
     sortOrder,
     onSortChange,
     onDeleteAll,
+    onDeleteFiltered,
     searchText,
     selectedDate,
     onPaymentMethodChange,
@@ -396,21 +390,58 @@ const FilterBar = memo<FilterBarProps>(
             )}
           </Pressable>
 
-          <Pressable
-            style={styles.filterButton}
-            onPress={() => setShowPaymentPicker(!showPaymentPicker)}
-          >
-            <CreditCard size={20} color="#2196F3" />
-            <Text style={styles.filterButtonText}>{paymentMethodLabel}</Text>
-            {selectedPaymentMethod && (
-              <Pressable
-                onPress={() => onPaymentMethodChange(null)}
-                style={styles.clearButton}
-              >
-                <X size={16} color="#F44336" />
-              </Pressable>
+          <View style={styles.paymentButtonContainer}>
+            <Pressable
+              style={styles.filterButton}
+              onPress={() => setShowPaymentPicker(!showPaymentPicker)}
+            >
+              <CreditCard size={20} color="#2196F3" />
+              <Text style={styles.filterButtonText}>{paymentMethodLabel}</Text>
+              {selectedPaymentMethod && (
+                <Pressable
+                  onPress={() => onPaymentMethodChange(null)}
+                  style={styles.clearButton}
+                >
+                  <X size={16} color="#F44336" />
+                </Pressable>
+              )}
+            </Pressable>
+
+            {showPaymentPicker && (
+              <View style={styles.paymentPickerContainer}>
+                <Pressable
+                  style={[
+                    styles.paymentOption,
+                    !selectedPaymentMethod && styles.selectedPaymentOption,
+                  ]}
+                  onPress={() => {
+                    onPaymentMethodChange(null);
+                    setShowPaymentPicker(false);
+                  }}
+                >
+                  <Text style={styles.paymentOptionText}>Tous les modes</Text>
+                </Pressable>
+                {Object.entries(PAYMENT_METHOD_LABELS).map(
+                  ([method, label]) => (
+                    <Pressable
+                      key={method}
+                      style={[
+                        styles.paymentOption,
+                        selectedPaymentMethod === method &&
+                          styles.selectedPaymentOption,
+                      ]}
+                      onPress={() => {
+                        onPaymentMethodChange(method as Bill['paymentMethod']);
+                        setShowPaymentPicker(false);
+                      }}
+                    >
+                      <Text style={styles.paymentOptionText}>{label}</Text>
+                    </Pressable>
+                  )
+                )}
+              </View>
             )}
-          </Pressable>
+          </View>
 
           <Pressable style={styles.filterButton} onPress={handleSortToggle}>
             {sortIcon}
@@ -421,6 +452,13 @@ const FilterBar = memo<FilterBarProps>(
             <Filter size={20} color="#F44336" />
             <Text style={[styles.filterButtonText, { color: '#F44336' }]}>
               Supprimer toutes les notes
+            </Text>
+          </Pressable>
+
+          <Pressable style={styles.filterButton} onPress={onDeleteFiltered}>
+            <Trash2 size={20} color="#FF9800" />
+            <Text style={[styles.filterButtonText, { color: '#FF9800' }]}>
+              Supprimer la sélection
             </Text>
           </Pressable>
 
@@ -439,39 +477,6 @@ const FilterBar = memo<FilterBarProps>(
             display="default"
             onChange={handleDateChange}
           />
-        )}
-
-        {showPaymentPicker && (
-          <View style={styles.paymentPickerContainer}>
-            <Pressable
-              style={[
-                styles.paymentOption,
-                !selectedPaymentMethod && styles.selectedPaymentOption,
-              ]}
-              onPress={() => {
-                onPaymentMethodChange(null);
-                setShowPaymentPicker(false);
-              }}
-            >
-              <Text style={styles.paymentOptionText}>Tous les modes</Text>
-            </Pressable>
-            {Object.entries(PAYMENT_METHOD_LABELS).map(([method, label]) => (
-              <Pressable
-                key={method}
-                style={[
-                  styles.paymentOption,
-                  selectedPaymentMethod === method &&
-                    styles.selectedPaymentOption,
-                ]}
-                onPress={() => {
-                  onPaymentMethodChange(method as Bill['paymentMethod']);
-                  setShowPaymentPicker(false);
-                }}
-              >
-                <Text style={styles.paymentOptionText}>{label}</Text>
-              </Pressable>
-            ))}
-          </View>
         )}
       </View>
     );
@@ -528,7 +533,7 @@ export default function BillsScreen() {
   const [viewModalVisible, setViewModalVisible] = useState(false);
   const [processingAction, setProcessingAction] = useState(false);
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc' | 'none'>('desc');
-  const [statsModalVisible, setStatsModalVisible] = useState(false);
+  const { restaurantInfo } = useSettings();
   const [page, setPage] = useState(0);
   const [hasMorePages, setHasMorePages] = useState(true);
   const [searchText, setSearchText] = useState('');
@@ -587,6 +592,60 @@ export default function BillsScreen() {
     },
     []
   );
+
+  const handleDeleteFiltered = useCallback(() => {
+    if (filteredBills.length === 0) {
+      toast.showToast('Aucune facture à supprimer.', 'info');
+      return;
+    }
+
+    Alert.alert(
+      'Supprimer les factures filtrées',
+      `Êtes-vous sûr de vouloir supprimer ${filteredBills.length} facture(s) filtrée(s) ?`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        {
+          text: 'Supprimer',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setProcessingAction(true);
+              // On garde les factures qui ne font pas partie des factures filtrées
+              const billIdsToDelete = new Set(
+                filteredBills.map((bill) => bill.id)
+              );
+              const remainingBills = bills.filter(
+                (bill) => !billIdsToDelete.has(bill.id)
+              );
+
+              await saveBills(remainingBills);
+              setBills(remainingBills);
+              setFilteredBills([]);
+
+              if (remainingBills.length > 0) {
+                setSelectedBill(remainingBills[0]);
+              } else {
+                setSelectedBill(null);
+              }
+
+              toast.showToast(
+                `${billIdsToDelete.size} facture(s) supprimée(s) avec succès.`,
+                'success'
+              );
+            } catch (error) {
+              console.error('Erreur lors de la suppression:', error);
+              toast.showToast(
+                'Impossible de supprimer les factures filtrées.',
+                'error'
+              );
+            } finally {
+              setProcessingAction(false);
+            }
+          },
+        },
+      ]
+    );
+  }, [filteredBills, bills]);
 
   // Filtrage optimisé avec useMemo
   const appliedFilters = useMemo(() => {
@@ -880,9 +939,9 @@ export default function BillsScreen() {
         </head>
         <body>
           <div class="header">
-            <h1>${RESTAURANT_INFO.name}</h1>
-            <p>${RESTAURANT_INFO.address}</p>
-            <p>${RESTAURANT_INFO.phone}</p>
+            <h1>${restaurantInfo.name}</h1>
+            <p>${restaurantInfo.address}</p>
+            <p>${restaurantInfo.phone}</p>
           </div>
   
           <div class="divider"></div>
@@ -930,7 +989,7 @@ export default function BillsScreen() {
           <div class="footer">
             <p>${taxInfo}</p>
             <p>Merci de votre visite!</p>
-            <p>À bientôt, ${RESTAURANT_INFO.owner}</p>
+            <p>À bientôt, ${restaurantInfo.owner}</p>
           </div>
         </body>
       </html>
@@ -1094,6 +1153,7 @@ export default function BillsScreen() {
             sortOrder={sortOrder}
             onSortChange={handleSortChange}
             onDeleteAll={handleDeleteAll}
+            onDeleteFiltered={handleDeleteFiltered} // Nouvelle prop
             searchText={searchText}
             selectedDate={dateFilter}
             onPaymentMethodChange={handlePaymentMethodFilter}
@@ -1684,7 +1744,7 @@ const styles = StyleSheet.create({
   paymentPickerContainer: {
     position: 'absolute',
     top: '100%',
-    right: 0,
+    left: 0,
     backgroundColor: 'white',
     borderRadius: 8,
     borderWidth: 1,
@@ -1699,6 +1759,10 @@ const styles = StyleSheet.create({
     elevation: 5,
     zIndex: 1000,
     minWidth: 200,
+  },
+  paymentButtonContainer: {
+    position: 'relative', // Élément parent avec position relative
+    marginRight: 8, // Marge pour l'alignement cohérent avec les autres boutons
   },
   paymentOption: {
     padding: 12,

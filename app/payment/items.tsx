@@ -1,3 +1,4 @@
+import { useSettings } from '@/utils/useSettings';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ArrowLeft,
@@ -41,6 +42,34 @@ interface MenuItem {
 interface SelectedMenuItem extends MenuItem {
   selectedQuantity: number;
   offered?: boolean; // Ajout de la propriété offered
+}
+
+// Fonction utilitaire pour obtenir l'icône en fonction du type de méthode
+function getMethodIcon(methodId: string) {
+  switch (methodId) {
+    case 'card':
+      return <CreditCard size={32} color="white" />;
+    case 'cash':
+      return <Wallet size={32} color="white" />;
+    case 'check':
+      return <Edit3 size={32} color="white" />;
+    default:
+      return <CreditCard size={32} color="white" />;
+  }
+}
+
+// Fonction utilitaire pour les couleurs
+function getMethodColor(methodId: string) {
+  switch (methodId) {
+    case 'card':
+      return '#673AB7';
+    case 'cash':
+      return '#2196F3';
+    case 'check':
+      return '#9C27B0';
+    default:
+      return '#757575';
+  }
 }
 
 // Fonction pour catégoriser les items
@@ -247,6 +276,8 @@ export default function ItemsPaymentScreen() {
   const [processing, setProcessing] = useState(false);
   const [allOriginalItems, setAllOriginalItems] = useState<MenuItem[]>([]);
   const [totalOffered, setTotalOffered] = useState(0); // Ajout de l'état pour les articles offerts
+  const { paymentMethods } = useSettings();
+  const enabledMethods = paymentMethods.filter((method) => method.enabled);
 
   // Mémoïzation des calculs de total
   const totalOrder = useMemo(() => {
@@ -902,24 +933,22 @@ export default function ItemsPaymentScreen() {
         <Text style={styles.paymentTitle}>Méthode de paiement</Text>
 
         <View style={styles.paymentButtons}>
-
-          <Pressable
-            style={[styles.paymentButton, { backgroundColor: '#2196F3' }]}
-            onPress={() => handlePayment('cash')}
-            disabled={processing || selectedItems.length === 0}
-          >
-            <Wallet size={24} color="white" />
-            <Text style={styles.paymentButtonText}>Espèces</Text>
-          </Pressable>
-
-          <Pressable
-            style={[styles.paymentButton, { backgroundColor: '#9C27B0' }]}
-            onPress={() => handlePayment('check')}
-            disabled={processing || selectedItems.length === 0}
-          >
-            <Edit3 size={24} color="white" />
-            <Text style={styles.paymentButtonText}>Chèque</Text>
-          </Pressable>
+          {enabledMethods.map((method) => (
+            <Pressable
+              key={method.id}
+              style={[
+                styles.paymentButton,
+                { backgroundColor: getMethodColor(method.id) },
+              ]}
+              onPress={() =>
+                handlePayment(method.id as 'cash' | 'check' | 'card')
+              }
+              disabled={processing || selectedItems.length === 0}
+            >
+              {getMethodIcon(method.id)}
+              <Text style={styles.paymentButtonText}>{method.name}</Text>
+            </Pressable>
+          ))}
         </View>
       </View>
     </View>
