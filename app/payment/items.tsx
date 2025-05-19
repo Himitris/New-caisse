@@ -1144,6 +1144,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+    flex: 1,
+    minWidth: '60%',
   },
   itemName: {
     fontSize: 13,
