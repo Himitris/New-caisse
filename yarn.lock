@@ -3447,6 +3447,11 @@ lucide-react-native@^0.358.0:
   resolved "https://registry.yarnpkg.com/lucide-react-native/-/lucide-react-native-0.358.0.tgz#03e33d7089405c65a7279f541aae76cdbba6ce75"
   integrity sha512-qdLINwX23K3SPmu4w0DzHJri7bk0sro/HNzZZbBD1hdzCqSpj6JVayolk36veSZDUpjkQ6e8kuBqomC1h7jECg==
 
+lz-string@^1.5.0:
+  version "1.5.0"
+  resolved "https://registry.yarnpkg.com/lz-string/-/lz-string-1.5.0.tgz#c1ab50f77887b712621201ba9fd4e3a6ed099941"
+  integrity sha512-h5bgJWpxJNswbU7qCrV0tIKQCaS3blPDrqKWx+QxzuzL1zGUzij9XCWLrSLsJPu5t+eWA/ycetzYAO5IOMcWAQ==
+
 makeerror@1.0.12:
   version "1.0.12"
   resolved "https://registry.yarnpkg.com/makeerror/-/makeerror-1.0.12.tgz#3e5dd2079a82e812e983cc6610c4a2cb0eaa801a"

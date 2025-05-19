@@ -3,6 +3,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 import { events, EVENT_TYPES } from './events';
+import LZString from 'lz-string';
 
 // Types d'entités
 export interface Table {
@@ -106,7 +107,8 @@ const CONFIG = {
   MAX_ARCHIVE_AGE_DAYS: 90,
   CACHE_EXPIRY_MS: 5 * 60 * 1000, // 5 minutes
   MAX_STORAGE_SIZE_MB: 5,
-  COMPRESSION_ENABLED: false,
+  COMPRESSION_ENABLED: true,
+  COMPRESSION_THRESHOLD: 1024, // Compresser seulement si > 1KB
   BATCH_SIZE: 100,
 } as const;
 
@@ -140,14 +142,22 @@ class MemoryCache {
 
 // Système de compression simple
 class CompressionManager {
+  // Marqueur pour identifier les données compressées
+  private static COMPRESSION_MARKER = 'LZS_V1:';
+
   static compress(data: any): string {
     try {
+      if (!CONFIG.COMPRESSION_ENABLED) {
+        return JSON.stringify(data);
+      }
+
       const jsonStr = JSON.stringify(data);
-      // Implémentation d'une compression basique (peut être améliorée avec LZ-string)
-      const compressed = jsonStr.replace(/(.)\1+/g, (match, char) => {
-        return char + match.length;
-      });
-      return compressed;
+
+      // Compresser avec lz-string (format UTF16 pour compatibilité)
+      const compressed = LZString.compressToUTF16(jsonStr);
+
+      // Ajouter le marqueur pour identifier les données compressées
+      return this.COMPRESSION_MARKER + compressed;
     } catch (error) {
       console.error('Compression error:', error);
       return JSON.stringify(data);
@@ -156,15 +166,68 @@ class CompressionManager {
 
   static decompress(data: string): any {
     try {
-      // Décompresser
-      const decompressed = data.replace(/(.)\d+/g, (match, char) => {
-        const count = parseInt(match.substring(1), 10);
-        return char.repeat(count);
-      });
-      return JSON.parse(decompressed);
+      // Vérifier si les données sont compressées avec notre nouveau format
+      if (data.startsWith(this.COMPRESSION_MARKER)) {
+        // Extraire les données compressées sans le marqueur
+        const compressedData = data.substring(this.COMPRESSION_MARKER.length);
+
+        // Décompresser avec lz-string
+        const decompressed = LZString.decompressFromUTF16(compressedData);
+
+        if (decompressed === null) {
+          throw new Error('LZ-String decompression failed');
+        }
+
+        return JSON.parse(decompressed);
+      }
+
+      // Compatibilité avec l'ancien format de compression (COMP_V1)
+      if (data.startsWith('COMP_V1:')) {
+        // Essayer de décompresser avec l'ancienne méthode
+        const compressedData = data.substring('COMP_V1:'.length);
+
+        try {
+          // Décompresser avec l'ancienne méthode (pour la migration)
+          const decompressed = compressedData.replace(
+            /(.)(#)(\d+)(#)/g,
+            (match, char, sep1, count, sep2) => {
+              const repetitions = parseInt(count, 10);
+              if (repetitions > 10000) {
+                throw new Error('Decompression count exceeds safety limit');
+              }
+              return char.repeat(repetitions);
+            }
+          );
+
+          return JSON.parse(decompressed);
+        } catch (oldFormatError) {
+          log.error('Error decompressing with old format:', oldFormatError);
+          // En cas d'échec, essayer le format JSON brut
+          return JSON.parse(data);
+        }
+      }
+
+      // Essayer comme JSON normal non compressé
+      return JSON.parse(data);
     } catch (error) {
       console.error('Decompression error:', error);
-      return JSON.parse(data);
+
+      // Tentative de récupération
+      try {
+        // Si c'est une erreur de décompression mais que les données pourraient être du JSON valide
+        if (data.startsWith('{') || data.startsWith('[')) {
+          return JSON.parse(data);
+        }
+      } catch (e) {
+        // Ne rien faire, on laissera l'erreur se propager
+      }
+
+      // Lever une erreur explicite
+      if (error instanceof Error) {
+        throw new Error(`Failed to parse data: ${error.message}`);
+      } else {
+        throw new Error('Failed to parse data: Unknown error');
+      }
     }
   }
 }
@@ -195,6 +258,15 @@ class StorageManager {
     string,
     { reads: number; writes: number }
   >();
+
+  static async resetCorruptedData(key: string): Promise<void> {
+    try {
+      await AsyncStorage.removeItem(key);
+      log.info(`Reset corrupted data for ${key}`);
+    } catch (error) {
+      log.error(`Error resetting corrupted data for ${key}:`, error);
+    }
+  }
 
   static async resetApplicationData(): Promise<void> {
     try {
@@ -264,10 +336,19 @@ class StorageManager {
 
       let parsedData: T;
       try {
+        // Essayer d'abord comme JSON normal
         parsedData = JSON.parse(jsonValue) as T;
       } catch (parseError) {
-        // Tenter de décompresser si parse échoue
-        parsedData = CompressionManager.decompress(jsonValue) as T;
+        try {
+          // Essayer comme données compressées
+          parsedData = CompressionManager.decompress(jsonValue) as T;
+        } catch (decompressError) {
+          // Journaliser l'erreur mais retourner la valeur par défaut
+          log.error(`Failed to parse data from ${key}:`, decompressError);
+          // Sauvegarder la donnée corrompue pour analyse ultérieure
+          await AsyncStorage.setItem(`${key}_corrupted`, jsonValue);
+          return defaultValue;
+        }
       }
 
       this.memoryCache.set(key, parsedData);

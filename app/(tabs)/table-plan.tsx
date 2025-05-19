@@ -127,7 +127,7 @@ export default function TablePlanScreen() {
     }
   };
 
-  // Fonction pour générer le HTML du ticket d'impression
+  // Fonction modifiée pour générer le HTML du ticket d'impression avec section "redresse" conditionnelle
   const generateTablePlanHTML = () => {
     const activeTableOrder = getActiveTableOrder();
 
@@ -140,7 +140,7 @@ export default function TablePlanScreen() {
       // Trouver la table dans notre liste complète
       const table = tables.find((t) => t.name === tableName);
       if (table) {
-        const rowHtml = `<tr><td>${tableName}</td></tr>`;
+        const rowHtml = `<tr><td class="table-name">${tableName}</td></tr>`;
         // Déterminer la section et ajouter la ligne dans la section appropriée
         if (table.section === 'Eau') {
           sectionHautRows += rowHtml;
@@ -150,67 +150,121 @@ export default function TablePlanScreen() {
       }
     });
 
+    // En-têtes de section avec style amélioré
+    const sectionEauHeader = `<tr><td class="section-header">SECTION EAU</td></tr>`;
+    const sectionBuisHeader = `<tr><td class="section-header">SECTION BUIS</td></tr>`;
+
     // Combiner les sections avec des titres distincts
     const tableRows = `
-      ${
-        sectionHautRows
-          ? `
-        <tr><td style="font-weight: bold; text-align: center; padding: 8px; border-bottom: 1px solid #000;">SECTION EAU</td></tr>
-        ${sectionHautRows}
-      `
-          : ''
-      }
-      
-      ${
-        sectionBasRows
-          ? `
-        <tr><td style="font-weight: bold; text-align: center; padding: 8px; border-bottom: 1px solid #000;">SECTION BUIS</td></tr>
-        ${sectionBasRows}
-      `
-          : ''
-      }
-    `;
+    ${sectionHautRows ? `${sectionEauHeader}${sectionHautRows}` : ''}
+    ${sectionBasRows ? `${sectionBuisHeader}${sectionBasRows}` : ''}
+  `;
 
-    // Format pour le ticket avec sections distinctes
+    // Date et heure actuelles
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('fr-FR', {
+      weekday: 'long',
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+    });
+    const timeStr = now.toLocaleTimeString('fr-FR', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+
+    // Section REDRESSE - uniquement en mode service complet
+    const redresseSection = !smallService
+      ? `
+    <div class="redresse-section">
+      <div class="redresse-title">REDRESSE</div>
+      <div class="note-space"></div>
+    </div>
+  `
+      : '';
+
+    // Format pour le ticket avec sections distinctes et liste agrandie
     return `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="utf-8">
-          <style>
-            @page {
-              size: portrait;
-              margin: 1mm;
-            }
-            body {
-              font-family: Arial, sans-serif;
-              margin: 0;
-              padding: 0;
-              width: 80mm;
-              font-size: 12px;
-            }
-            table {
-              width: 100%;
-              border-collapse: collapse;
-            }
-            td {
-              padding: 5px;
-              border-bottom: 1px dotted #ccc;
-            }
-          </style>
-        </head>
-        <body>
-          <p style="margin-bottom: 50px; margin-top: 50px;">
-            <table style="width: 100%;">
-              <tbody>
-                <tr><td></td></tr>
-                ${tableRows}
-              </tbody>
-            </table>
-          </p>
-        </body>
-      </html>
-    `;
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          @page {
+            size: portrait;
+            margin: 3mm; /* Marge légèrement augmentée */
+          }
+          body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            width: 74mm; 
+            font-size: 12pt; 
+          }
+          .header {
+            text-align: center;
+            margin-bottom: 6mm;
+            border-bottom: 1px solid #000;
+            padding-bottom: 4mm;
+          }
+          .title {
+            font-size: 16pt;
+            font-weight: bold;
+            margin-bottom: 2mm;
+          }
+          .date-time {
+            font-size: 10pt;
+            color: #333;
+          }
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 4mm;
+          }
+          .section-header {
+            font-size: 14pt;
+            font-weight: bold;
+            text-align: center;
+            padding: 4mm 0;
+            border-bottom: 2px solid #000;
+          }
+          .table-name {
+            font-size: 13pt; /* Taille augmentée */
+            padding: 3mm 2mm; /* Plus d'espace vertical */
+            border-bottom: 1px dotted #999;
+          }
+          .redresse-section {
+            margin-top: 6mm;
+            padding-top: 4mm;
+          }
+          .redresse-title {
+            font-size: 13pt;
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 3mm;
+          }
+          .note-space {
+            height: 50mm; /* Espace agrandi pour les notes manuscrites */
+            margin: 3mm 0;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div class="title">PLAN DES TABLES</div>
+          <div class="date-time">${dateStr} à ${timeStr}</div>
+        </div>
+        
+        <table>
+          <tbody>
+            ${tableRows}
+          </tbody>
+        </table>
+        ${redresseSection}
+      </body>
+    </html>
+  `;
   };
 
   const handlePrint = async () => {

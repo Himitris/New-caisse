@@ -1,4 +1,4 @@
-// app/print-preview.tsx - Mis à jour pour enlever la TVA
+// app/print-preview.tsx - Amélioré pour une meilleure lisibilité
 
 import { View, Text, StyleSheet, ScrollView, Pressable } from 'react-native';
 import { useEffect, useState } from 'react';
@@ -45,6 +45,21 @@ export default function PrintPreviewScreen() {
     remaining: remainingAmount,
     isPartial: isPartialPayment,
     paymentMethod: paymentMethod || 'Carte',
+    // Séparation explicite de la date et de l'heure
+    date: new Date().toLocaleDateString('fr-FR', {
+      weekday: 'long',
+      day: '2-digit',
+      month: 'long',
+      year: 'numeric',
+    }),
+    time: new Date().toLocaleTimeString('fr-FR', {
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+      timeZone: 'Europe/Paris',
+    }),
+    // Conservation du timestamp complet pour compatibilité
     timestamp: new Date().toLocaleString('fr-FR', {
       weekday: 'long',
       day: '2-digit',
@@ -58,7 +73,7 @@ export default function PrintPreviewScreen() {
     }),
   };
 
-  // Fonction modifiée generateHTML pour un format d'impression 80mm
+  // Fonction modifiée generateHTML pour un format d'impression 80mm avec meilleure lisibilité
   const generateHTML = () => {
     let totalPrice = 0;
     let offeredTotal = 0;
@@ -105,23 +120,28 @@ export default function PrintPreviewScreen() {
           width: 80mm;
           padding: 5mm;
           margin: 0;
-          font-size: 10pt;
+          font-size: 14pt; /* Augmentation de la taille de base du texte */
         }
         .header, .footer { 
           text-align: center; 
           margin-bottom: 5mm;
         }
         .header h1 {
-          font-size: 14pt;
+          font-size: 18pt; /* Titre principal plus grand */
           margin: 0 0 2mm 0;
+          font-weight: bold;
         }
         .header p, .footer p {
           margin: 0 0 1mm 0;
-          font-size: 9pt;
+          font-size: 15pt; /* Informations d'entête plus lisibles */
+        }
+        .footer .tax{
+          font-size: 12pt; /* Information de TVA plus petite */
+          margin-bottom: 4mm;
         }
         .divider {
           border-bottom: 1px dashed #000;
-          margin: 3mm 0;
+          margin: 4mm 0; /* Plus d'espace autour des séparateurs */
         }
         table {
           width: 100%;
@@ -129,8 +149,8 @@ export default function PrintPreviewScreen() {
         }
         th, td {
           text-align: left;
-          padding: 1mm 0;
-          font-size: 9pt;
+          padding: 2mm 0; /* Plus d'espace entre les lignes */
+          font-size: 14pt; /* Articles plus lisibles */
         }
         th:last-child, td:last-child {
           text-align: right;
@@ -145,30 +165,42 @@ export default function PrintPreviewScreen() {
           width: 25%;
         }
         .totals {
-          margin: 2mm 0;
+          margin: 3mm 0;
           text-align: right;
         }
         .total-line {
           display: flex;
           justify-content: space-between;
-          margin: 1mm 0;
+          margin: 2mm 0;
+          font-size: 12pt; /* Totaux intermédiaires plus lisibles */
         }
         .total-final {
           font-weight: bold;
-          font-size: 12pt;
-          margin: 2mm 0;
+          font-size: 16pt; /* Total final encore plus visible */
+          margin: 3mm 0;
         }
         .payment-info {
           text-align: center;
-          margin: 3mm 0;
+          margin: 4mm 0;
+          font-size: 14pt; /* Information de paiement plus lisible */
         }
-        .offered-item { font-style: italic; }
+        .offered-item { 
+          font-style: italic; 
+        }
         .preview-notice {
           text-align: center;
           font-weight: bold;
           border: 1px solid #000;
-          padding: 2mm;
-          margin: 2mm 0;
+          padding: 3mm;
+          margin: 3mm 0;
+          font-size: 15pt; /* Notice de prévisualisation plus visible */
+        }
+        .table-info {
+          font-size: 15pt; /* Information de table plus visible */
+          font-weight: bold;
+        }
+        .timestamp {
+          font-size: 13pt;
         }
       </style>
     </head>
@@ -181,10 +213,10 @@ export default function PrintPreviewScreen() {
 
       <div class="divider"></div>
       
-      <p><strong>${order.tableName}</strong> - ${
-      order.timestamp.split(',')[0]
-    }</p>
-      <p>${order.timestamp.split(',')[1]}</p>
+      <p class="table-info"><strong>${order.tableName}</strong> - ${
+      order.date
+    } </p>
+      <p class="timestamp">${order.time}</p>
       
       ${
         isPreviewMode
@@ -254,7 +286,7 @@ export default function PrintPreviewScreen() {
       </div>
 
       <div class="footer">
-        <p>${taxInfo}</p>
+        <p class="tax">${taxInfo}</p>
         <p>Merci de votre visite!</p>
         <p>À bientôt, ${restaurantInfo.owner}</p>
       </div>
