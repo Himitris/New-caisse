@@ -15,12 +15,14 @@ import {
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { Users, RefreshCcw, Filter, Coffee } from 'lucide-react-native';
+import { useTableContext } from '../../utils/TableContext';
 import {
   getTables,
   saveTables,
   Table,
   resetAllTables,
   TABLE_SECTIONS,
+  updateTable,
 } from '../../utils/storage';
 import CustomCoversModal from '../components/CustomCoversModal';
 import CoversSelectionModal from '../components/CoversSelectionModal';
@@ -65,8 +67,8 @@ const tableCache = {
 
 export default function TablesScreen() {
   const router = useRouter();
-  const [tables, setTables] = useState<Table[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { tables, isLoading: tablesLoading, refreshTables } = useTableContext(); // Utiliser le context
+  const [loading, setLoading] = useState(true); // Garder cette variable pour compatibilité
   const [refreshing, setRefreshing] = useState(false);
   const [activeSection, setActiveSection] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -131,63 +133,10 @@ export default function TablesScreen() {
     ]).start();
   }, [fadeAnim, slideAnim]);
 
-  // Fonction pour charger les tables - SIMPLIFIÉE
-  const loadTables = useCallback(async (forceReload = false) => {
-    // Si on force le rechargement ou si le cache n'est pas valide
-    if (forceReload || !tableCache.isValid()) {
-      setLoading(true);
-      setError(null);
-
-      try {
-        console.log('Chargement des tables depuis le stockage...');
-        const loadedTables = await getTables();
-        console.log(`${loadedTables.length} tables chargées`);
-
-        // Mettre à jour le cache
-        tableCache.set(loadedTables);
-
-        // Mettre à jour l'état
-        setTables(loadedTables);
-        setLastRefresh(new Date());
-      } catch (error) {
-        console.error('Error loading tables:', error);
-        setError(
-          'Erreur lors du chargement des tables. Essayez de les réinitialiser.'
-        );
-      } finally {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    } else {
-      console.log('Utilisation du cache pour les tables');
-      // Utiliser le cache
-      const cachedTables = tableCache.get();
-      if (cachedTables) {
-        setTables(cachedTables);
-      }
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, []);
-
-  // Chargement initial
   useEffect(() => {
-    loadTables(true);
-  }, []);
+    setLoading(tablesLoading);
+  }, [tablesLoading]);
 
-  // Écouteur d'événements pour les mises à jour de table
-  useEffect(() => {
-    const unsubscribe = events.on(EVENT_TYPES.TABLE_UPDATED, () => {
-      tableCache.invalidate();
-      loadTables(true);
-    });
-
-    return () => {
-      unsubscribe();
-    };
-  }, [loadTables]);
-
-  // Rafraîchir les tables à chaque focus
   useFocusEffect(
     useCallback(() => {
       console.log('Plan du restaurant en focus');
@@ -209,22 +158,25 @@ export default function TablesScreen() {
         }),
       ]).start();
 
-      // Toujours recharger les tables quand on revient sur cette page
-      loadTables(true);
+      // Rafraîchir les tables via le context
+      refreshTables();
 
       return () => {
         // Fonction de nettoyage
       };
-    }, [loadTables, fadeAnim, slideAnim])
+    }, [refreshTables, fadeAnim, slideAnim])
   );
 
   // Fonction de rafraîchissement
   const handleRefreshTables = useCallback(() => {
     setRefreshing(true);
     spinRefreshIcon();
-    loadTables(true);
+    refreshTables().finally(() => {
+      setRefreshing(false);
+      setLastRefresh(new Date());
+    });
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  }, [loadTables, spinRefreshIcon]);
+  }, [refreshTables, spinRefreshIcon]);
 
   const handleResetAllTables = useCallback(() => {
     Alert.alert(
@@ -241,8 +193,7 @@ export default function TablesScreen() {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             try {
               await resetAllTables();
-              tableCache.invalidate();
-              await loadTables(true);
+              await refreshTables(); // Au lieu de tableCache.invalidate() et loadTables(true)
               toast.showToast(
                 'Toutes les tables ont été réinitialisées.',
                 'success'
@@ -260,7 +211,7 @@ export default function TablesScreen() {
         },
       ]
     );
-  }, [loadTables, toast]);
+  }, [refreshTables, toast]);
 
   const openTable = useCallback(
     (table: Table) => {
@@ -282,11 +233,8 @@ export default function TablesScreen() {
               text: 'Rendre Disponible',
               onPress: async () => {
                 const updatedTable = { ...table, status: 'available' as const };
-                const updatedTables = tables.map((t) =>
-                  t.id === table.id ? updatedTable : t
-                );
-                setTables(updatedTables);
-                await saveTables(updatedTables);
+                await updateTable(updatedTable);
+                refreshTables(); // Rafraîchir les tables via le context
               },
             },
             {
@@ -297,7 +245,7 @@ export default function TablesScreen() {
         );
       }
     },
-    [router, tables]
+    [router, refreshTables]
   );
 
   // Gérer le nombre de couverts personnalisé
@@ -349,14 +297,13 @@ export default function TablesScreen() {
           },
         };
 
-        // Mise à jour optimiste de l'UI
-        const updatedTables = tables.map((t) =>
-          t.id === table.id ? updatedTable : t
-        );
+        // Mise à jour dans le stockage
+        await saveTables([
+          ...tables.map((t) => (t.id === table.id ? updatedTable : t)),
+        ]);
 
-        setTables(updatedTables);
-        tableCache.set(updatedTables);
-        await saveTables(updatedTables);
+        // Rafraîchir les tables via le context
+        await refreshTables();
 
         // Naviguer vers la page de détail de la table
         router.push(`/table/${table.id}`);
@@ -368,7 +315,7 @@ export default function TablesScreen() {
         );
       }
     },
-    [tables, router, toast]
+    [tables, router, toast, refreshTables]
   );
 
   const getTableColors = useCallback((status: Table['status']) => {

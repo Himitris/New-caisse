@@ -12,6 +12,7 @@ import {
   X,
 } from 'lucide-react-native';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTableContext } from '../../utils/TableContext';
 import {
   ActivityIndicator,
   Alert,
@@ -127,11 +128,14 @@ export default function TableScreen() {
   const tableId = parseInt(id as string, 10);
   const router = useRouter();
   const toast = useToast();
+  const { getTableById, updateTableInContext } = useTableContext();
 
   const [unavailableItems, setUnavailableItems] = useState<number[]>([]);
   const [guestCount, setGuestCount] = useState(1);
-  const [table, setTable] = useState<Table | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [table, setTable] = useState<Table | null>(
+    getTableById(tableId) || null
+  );
+  const [loading, setLoading] = useState(!table);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [activeType, setActiveType] = useState<'resto' | 'boisson' | null>(
     'resto'
@@ -144,6 +148,19 @@ export default function TableScreen() {
   // Refs pour le debouncing et le batching
   const updateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const batchedUpdates = useRef<Table | null>(null);
+
+  useEffect(() => {
+    if (!table) {
+      setLoading(true);
+      getTable(tableId).then((freshTable) => {
+        if (freshTable) {
+          setTable(freshTable);
+          setGuestCount(freshTable.guests || 1);
+        }
+        setLoading(false);
+      });
+    }
+  }, [tableId, table]);
 
   // Nettoyage des listeners et timeouts
   useEffect(() => {
@@ -474,12 +491,9 @@ export default function TableScreen() {
   // Handler pour ajouter un item à la commande (useCallback)
   const addItemToOrder = useCallback(
     async (item: MenuItem) => {
-      // Récupérer l'état le plus récent de la table directement depuis le stockage
-      const freshTable = await getTable(tableId);
+      if (!table) return;
 
-      if (!freshTable) return;
-
-      const updatedTable = { ...freshTable };
+      const updatedTable = { ...table };
 
       if (!updatedTable.order) {
         updatedTable.order = {
@@ -510,11 +524,11 @@ export default function TableScreen() {
 
       updatedTable.order.total = calculateTotal(updatedTable.order.items);
 
-      // Mettre à jour à la fois l'état local et le stockage
-      setTable(updatedTable);
-      await updateTable(updatedTable);
+      // Utiliser les deux:
+      setTable(updatedTable); // Mise à jour instantanée de l'UI
+      await updateTableInContext(updatedTable); // Mise à jour dans le context et le stockage
     },
-    [tableId, guestCount, calculateTotal]
+    [table, guestCount, calculateTotal, updateTableInContext]
   );
 
   // Mise à jour de la quantité avec batching
