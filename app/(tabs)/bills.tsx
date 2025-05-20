@@ -31,7 +31,13 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { Bill, getBills, saveBills } from '../../utils/storage';
+import {
+  Bill,
+  getBills,
+  saveBills,
+  getPaginatedBills,
+  getFilteredPaginatedBills,
+} from '../../utils/storage';
 import { useToast } from '../../utils/ToastContext';
 import { useSettings } from '@/utils/useSettings';
 
@@ -68,26 +74,6 @@ const PAYMENT_METHOD_LABELS = {
 const ITEM_HEIGHT = 80;
 const PAGE_SIZE = 20;
 const MAX_BILLS_IN_STORAGE = 1000; // Limite pour éviter les problèmes de mémoire
-
-// Fonction de nettoyage optimisée
-const cleanupOldBills = async (currentBills: Bill[]): Promise<Bill[]> => {
-  if (currentBills.length <= MAX_BILLS_IN_STORAGE) {
-    return currentBills;
-  }
-
-  // Trier par date et garder les plus récents
-  const sortedBills = [...currentBills].sort(
-    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-  );
-
-  // Garder les 1000 plus récents
-  const cleanedBills = sortedBills.slice(0, MAX_BILLS_IN_STORAGE);
-
-  await saveBills(cleanedBills);
-  console.log(`Cleaned ${currentBills.length - cleanedBills.length} old bills`);
-
-  return cleanedBills;
-};
 
 // Modal pour voir le reçu - Mémoïzé
 const ViewReceiptModal = memo<ViewReceiptModalProps>(
@@ -534,49 +520,102 @@ export default function BillsScreen() {
   const [processingAction, setProcessingAction] = useState(false);
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc' | 'none'>('desc');
   const { restaurantInfo } = useSettings();
-  const [page, setPage] = useState(0);
-  const [hasMorePages, setHasMorePages] = useState(true);
   const [searchText, setSearchText] = useState('');
   const [dateFilter, setDateFilter] = useState<Date | null>(null);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(10); 
+  const [totalPages, setTotalPages] = useState(0);
+  const [totalBills, setTotalBills] = useState(0);
+  const [hasMorePages, setHasMorePages] = useState(false);
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<
     Bill['paymentMethod'] | null
   >(null);
   const toast = useToast();
 
-  // Chargement des factures avec nettoyage automatique
-  useEffect(() => {
-    let mounted = true;
+  const loadBills = useCallback(async () => {
+    setLoading(true);
+    try {
+      // Si des filtres sont actifs, utilisez la version filtrée
+      if (searchText || dateFilter || paymentMethodFilter) {
+        const filters = {
+          searchText: searchText.trim() || undefined,
+          dateRange: dateFilter
+            ? {
+                start: new Date(dateFilter.setHours(0, 0, 0, 0)),
+                end: new Date(dateFilter.setHours(23, 59, 59, 999)),
+              }
+            : undefined,
+          paymentMethod: paymentMethodFilter || undefined,
+        };
 
-    const loadBills = async () => {
-      try {
-        setLoading(true);
-        const loadedBills = await getBills();
+        const result = await getFilteredPaginatedBills(filters, page, pageSize);
 
-        // Nettoyer les anciennes factures si nécessaire
-        const cleanedBills = await cleanupOldBills(loadedBills);
+        setFilteredBills(result.bills);
+        setTotalPages(result.totalPages);
+        setTotalBills(result.total);
+        setHasMorePages(result.hasMore);
+      } else {
+        // Sinon, utilisez la pagination simple
+        const result = await getPaginatedBills(page, pageSize);
 
-        if (mounted) {
-          const sortedBills = sortBillsByDate(cleanedBills, 'desc');
-          setBills(sortedBills);
-          setFilteredBills(sortedBills);
-          if (sortedBills.length > 0) {
-            setSelectedBill(sortedBills[0]);
-          }
-        }
-      } catch (error) {
-        console.error('Error loading bills:', error);
-      } finally {
-        if (mounted) {
-          setLoading(false);
-        }
+        setFilteredBills(result.bills);
+        setTotalPages(result.totalPages);
+        setTotalBills(result.total);
+        setHasMorePages(result.hasMore);
       }
-    };
+    } catch (error) {
+      console.error('Error loading bills:', error);
+      toast.showToast('Impossible de charger les factures.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  }, [page, pageSize, searchText, dateFilter, paymentMethodFilter, toast]);
 
+  // Fonction pour charger la page suivante
+  const loadNextPage = useCallback(() => {
+    if (hasMorePages) {
+      setPage((prevPage) => prevPage + 1);
+    }
+  }, [hasMorePages]);
+
+  // Fonction pour charger la page précédente
+  const loadPreviousPage = useCallback(() => {
+    if (page > 0) {
+      setPage((prevPage) => prevPage - 1);
+    }
+  }, [page]);
+
+  // Fonction pour aller à une page spécifique
+  const goToPage = useCallback(
+    (pageNum: number) => {
+      if (pageNum >= 0 && pageNum < totalPages) {
+        setPage(pageNum);
+      }
+    },
+    [totalPages]
+  );
+
+  // Réinitialiser la pagination lors d'un changement de filtre
+  useEffect(() => {
+    setPage(0);
+  }, [searchText, dateFilter, paymentMethodFilter]);
+
+  // Charger les factures quand la page change
+  useEffect(() => {
     loadBills();
+  }, [loadBills, page]);
 
-    return () => {
-      mounted = false;
-    };
+  useEffect(() => {
+    async function loadAllBills() {
+      try {
+        const allBills = await getBills();
+        setBills(allBills);
+      } catch (error) {
+        console.error('Error loading all bills:', error);
+      }
+    }
+
+    loadAllBills();
   }, []);
 
   // Tri des factures par date - Mémoïzé
@@ -996,6 +1035,75 @@ export default function BillsScreen() {
     `;
   }, []);
 
+  const renderPagination = () => (
+    <View style={styles.paginationContainer}>
+      <Text style={styles.paginationInfo}>
+        {totalBills > 0
+          ? `Affichage de ${page * pageSize + 1}-${Math.min(
+              (page + 1) * pageSize,
+              totalBills
+            )} sur ${totalBills}`
+          : 'Aucune facture'}
+      </Text>
+
+      <View style={styles.paginationControls}>
+        <Pressable
+          style={[styles.paginationButton, page === 0 && styles.disabledButton]}
+          onPress={loadPreviousPage}
+          disabled={page === 0}
+        >
+          <Text style={styles.paginationButtonText}>Précédent</Text>
+        </Pressable>
+
+        {/* Afficher les numéros de page */}
+        {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+          // Logique pour afficher les pages autour de la page courante
+          let pageNum;
+          if (totalPages <= 5) {
+            pageNum = i;
+          } else if (page < 3) {
+            pageNum = i;
+          } else if (page > totalPages - 3) {
+            pageNum = totalPages - 5 + i;
+          } else {
+            pageNum = page - 2 + i;
+          }
+
+          return (
+            <Pressable
+              key={pageNum}
+              style={[
+                styles.pageNumberButton,
+                pageNum === page && styles.currentPageButton,
+              ]}
+              onPress={() => goToPage(pageNum)}
+            >
+              <Text
+                style={[
+                  styles.pageNumberText,
+                  pageNum === page && styles.currentPageText,
+                ]}
+              >
+                {pageNum + 1}
+              </Text>
+            </Pressable>
+          );
+        })}
+
+        <Pressable
+          style={[
+            styles.paginationButton,
+            !hasMorePages && styles.disabledButton,
+          ]}
+          onPress={loadNextPage}
+          disabled={!hasMorePages}
+        >
+          <Text style={styles.paginationButtonText}>Suivant</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+
   const handlePrint = useCallback(async () => {
     if (!selectedBill) {
       toast.showToast('Veuillez sélectionner une facture à imprimer.', 'info');
@@ -1184,6 +1292,7 @@ export default function BillsScreen() {
                 windowSize={10}
                 initialNumToRender={10}
               />
+              {renderPagination()}
             </View>
 
             {/* Détails de la facture sélectionnée */}
@@ -1828,5 +1937,55 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#FF9800',
+  },
+  paginationContainer: {
+    padding: 16,
+    backgroundColor: 'white',
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+  },
+  paginationInfo: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  paginationControls: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+  },
+  paginationButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: '#2196F3',
+    borderRadius: 8,
+  },
+  disabledButton: {
+    backgroundColor: '#bdbdbd',
+    opacity: 0.7,
+  },
+  paginationButtonText: {
+    color: 'white',
+    fontWeight: '600',
+  },
+  pageNumberButton: {
+    width: 36,
+    height: 36,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 18,
+    backgroundColor: '#f5f5f5',
+  },
+  currentPageButton: {
+    backgroundColor: '#2196F3',
+  },
+  pageNumberText: {
+    fontWeight: '600',
+    color: '#666',
+  },
+  currentPageText: {
+    color: 'white',
   },
 });

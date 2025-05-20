@@ -981,6 +981,185 @@ class BillManager {
     return archive.filter((bill) => new Date(bill.timestamp) > maxDate);
   }
 
+  /**
+   * Récupère les factures de manière paginée
+   * @param page Numéro de page (commence à 0)
+   * @param pageSize Nombre d'éléments par page
+   * @param sortByDate Tri par date (défaut: true)
+   * @returns Objet contenant les factures paginées et les métadonnées
+   */
+  static async getPaginatedBills(
+    page: number = 0,
+    pageSize: number = 20,
+    sortByDate: boolean = true
+  ): Promise<{
+    bills: Bill[];
+    total: number;
+    currentPage: number;
+    totalPages: number;
+    hasMore: boolean;
+  }> {
+    try {
+      // Récupérer toutes les factures
+      const allBills = await BillManager.getBills();
+
+      // Trier si nécessaire
+      const sortedBills = sortByDate
+        ? [...allBills].sort(
+            (a, b) =>
+              new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+          )
+        : allBills;
+
+      // Calculer les indices de début et de fin
+      const startIndex = page * pageSize;
+      const endIndex = startIndex + pageSize;
+
+      // Extraire les factures de la page demandée
+      const paginatedBills = sortedBills.slice(startIndex, endIndex);
+
+      // Calculer les métadonnées de pagination
+      const total = sortedBills.length;
+      const totalPages = Math.ceil(total / pageSize);
+      const hasMore = endIndex < total;
+
+      return {
+        bills: paginatedBills,
+        total,
+        currentPage: page,
+        totalPages,
+        hasMore,
+      };
+    } catch (error) {
+      console.error('Error getting paginated bills:', error);
+      return {
+        bills: [],
+        total: 0,
+        currentPage: page,
+        totalPages: 0,
+        hasMore: false,
+      };
+    }
+  }
+
+  /**
+   * Récupère les factures filtrées et paginées
+   * @param filters Critères de filtrage
+   * @param page Numéro de page
+   * @param pageSize Nombre d'éléments par page
+   * @returns Factures filtrées et paginées avec métadonnées
+   */
+  static async getFilteredPaginatedBills(
+    filters: {
+      dateRange?: { start: Date; end: Date };
+      paymentMethod?: string;
+      status?: string;
+      tableNumber?: number;
+      minAmount?: number;
+      maxAmount?: number;
+      searchText?: string;
+    },
+    page: number = 0,
+    pageSize: number = 20
+  ): Promise<{
+    bills: Bill[];
+    total: number;
+    currentPage: number;
+    totalPages: number;
+    hasMore: boolean;
+  }> {
+    try {
+      // Récupérer toutes les factures
+      const allBills = await BillManager.getBills();
+
+      // Appliquer les filtres
+      const filteredBills = allBills.filter((bill) => {
+        // Date range filter
+        if (filters.dateRange) {
+          const billDate = new Date(bill.timestamp);
+          if (
+            billDate < filters.dateRange.start ||
+            billDate > filters.dateRange.end
+          ) {
+            return false;
+          }
+        }
+
+        // Payment method filter
+        if (
+          filters.paymentMethod &&
+          bill.paymentMethod !== filters.paymentMethod
+        ) {
+          return false;
+        }
+
+        // Status filter
+        if (filters.status && bill.status !== filters.status) {
+          return false;
+        }
+
+        // Table number filter
+        if (filters.tableNumber && bill.tableNumber !== filters.tableNumber) {
+          return false;
+        }
+
+        // Amount range filter
+        if (filters.minAmount && bill.amount < filters.minAmount) {
+          return false;
+        }
+        if (filters.maxAmount && bill.amount > filters.maxAmount) {
+          return false;
+        }
+
+        // Search text filter
+        if (filters.searchText) {
+          const searchLower = filters.searchText.toLowerCase();
+          const tableName = bill.tableName || `Table ${bill.tableNumber}`;
+          return (
+            tableName.toLowerCase().includes(searchLower) ||
+            bill.amount.toString().includes(searchLower) ||
+            (bill.section && bill.section.toLowerCase().includes(searchLower))
+          );
+        }
+
+        return true;
+      });
+
+      // Trier par date (du plus récent au plus ancien)
+      const sortedBills = [...filteredBills].sort(
+        (a, b) =>
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      );
+
+      // Paginer les résultats
+      const startIndex = page * pageSize;
+      const endIndex = startIndex + pageSize;
+      const paginatedBills = sortedBills.slice(startIndex, endIndex);
+
+      // Métadonnées
+      const total = sortedBills.length;
+      const totalPages = Math.ceil(total / pageSize);
+      const hasMore = endIndex < total;
+
+      return {
+        bills: paginatedBills,
+        total,
+        currentPage: page,
+        totalPages,
+        hasMore,
+      };
+    } catch (error) {
+      console.error('Error getting filtered paginated bills:', error);
+      return {
+        bills: [],
+        total: 0,
+        currentPage: page,
+        totalPages: 0,
+        hasMore: false,
+      };
+    }
+  }
+
   static async clearAllBills(): Promise<void> {
     try {
       await StorageManager.save(STORAGE_KEYS.BILLS, []);
@@ -1192,6 +1371,8 @@ export const resetAllTables = TableManager.resetAllTables;
 export const getBills = BillManager.getBills;
 export const saveBills = BillManager.saveBills;
 export const addBill = BillManager.addBill;
+export const getPaginatedBills = BillManager.getPaginatedBills;
+export const getFilteredPaginatedBills = BillManager.getFilteredPaginatedBills;
 export const getMenuAvailability = MenuManager.getMenuAvailability;
 export const saveMenuAvailability = MenuManager.saveMenuAvailability;
 export const getCustomMenuItems = CustomMenuManager.getCustomMenuItems;

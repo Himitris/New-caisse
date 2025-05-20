@@ -1,3 +1,5 @@
+// app/(tabs)/index.tsx - Version optimisée et corrigée
+
 import {
   View,
   Text,
@@ -25,6 +27,7 @@ import CoversSelectionModal from '../components/CoversSelectionModal';
 import { useToast } from '../../utils/ToastContext';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
+import { events, EVENT_TYPES } from '../../utils/events';
 
 // Mise en cache des couleurs et gradients des tables
 const TABLE_COLORS = {
@@ -39,6 +42,26 @@ const LOADING_DELAY = 200; // ms
 const REFRESH_DEBOUNCE = 300; // ms
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const ANIMATION_DURATION = 300; // ms
+
+// Système de cache mémoire pour les tables (version corrigée et simplifiée)
+const tableCache = {
+  data: null as Table[] | null,
+  timestamp: 0,
+  expiry: 10000, // 10 secondes
+  isValid: function () {
+    return this.data !== null && Date.now() - this.timestamp < this.expiry;
+  },
+  set: function (data: Table[]) {
+    this.data = [...data]; // Copie profonde pour éviter les références
+    this.timestamp = Date.now();
+  },
+  get: function (): Table[] | null {
+    return this.isValid() ? this.data : null;
+  },
+  invalidate: function () {
+    this.timestamp = 0;
+  },
+};
 
 export default function TablesScreen() {
   const router = useRouter();
@@ -108,37 +131,71 @@ export default function TablesScreen() {
     ]).start();
   }, [fadeAnim, slideAnim]);
 
-  // Chargement initial des tables avec buffer optionnel
-  useEffect(() => {
-    let mounted = true;
-    let timeoutId: ReturnType<typeof setTimeout>;
+  // Fonction pour charger les tables - SIMPLIFIÉE
+  const loadTables = useCallback(async (forceReload = false) => {
+    // Si on force le rechargement ou si le cache n'est pas valide
+    if (forceReload || !tableCache.isValid()) {
+      setLoading(true);
+      setError(null);
 
-    const initialize = async () => {
-      // Delay initial loading slightly to allow UI to render
-      timeoutId = setTimeout(() => {
-        if (mounted) {
-          loadTables(true);
-        }
-      }, LOADING_DELAY);
-    };
+      try {
+        console.log('Chargement des tables depuis le stockage...');
+        const loadedTables = await getTables();
+        console.log(`${loadedTables.length} tables chargées`);
 
-    initialize();
+        // Mettre à jour le cache
+        tableCache.set(loadedTables);
 
-    return () => {
-      mounted = false;
-      clearTimeout(timeoutId);
-    };
+        // Mettre à jour l'état
+        setTables(loadedTables);
+        setLastRefresh(new Date());
+      } catch (error) {
+        console.error('Error loading tables:', error);
+        setError(
+          'Erreur lors du chargement des tables. Essayez de les réinitialiser.'
+        );
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    } else {
+      console.log('Utilisation du cache pour les tables');
+      // Utiliser le cache
+      const cachedTables = tableCache.get();
+      if (cachedTables) {
+        setTables(cachedTables);
+      }
+      setLoading(false);
+      setRefreshing(false);
+    }
   }, []);
 
-  // Rafraîchir les tables à chaque fois que l'écran redevient actif
+  // Chargement initial
+  useEffect(() => {
+    loadTables(true);
+  }, []);
+
+  // Écouteur d'événements pour les mises à jour de table
+  useEffect(() => {
+    const unsubscribe = events.on(EVENT_TYPES.TABLE_UPDATED, () => {
+      tableCache.invalidate();
+      loadTables(true);
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [loadTables]);
+
+  // Rafraîchir les tables à chaque focus
   useFocusEffect(
     useCallback(() => {
-      console.log('Plan du restaurant en focus - rafraîchissement des données');
-      
+      console.log('Plan du restaurant en focus');
+
       // Animation d'entrée à chaque focus
-      fadeAnim.setValue(0.7);
-      slideAnim.setValue(20);
-      
+      fadeAnim.setValue(0.8);
+      slideAnim.setValue(10);
+
       Animated.parallel([
         Animated.timing(fadeAnim, {
           toValue: 1,
@@ -151,49 +208,23 @@ export default function TablesScreen() {
           useNativeDriver: true,
         }),
       ]).start();
-      
-      loadTables(false);
+
+      // Toujours recharger les tables quand on revient sur cette page
+      loadTables(true);
+
       return () => {
-        // Fonction de nettoyage si nécessaire
+        // Fonction de nettoyage
       };
-    }, [])
+    }, [loadTables, fadeAnim, slideAnim])
   );
 
-  const loadTables = useCallback(async (showLoading = true) => {
-    if (showLoading) {
-      setLoading(true);
-      setError(null);
-    } else {
-      setRefreshing(true);
-      spinRefreshIcon();
-    }
-
-    try {
-      // Récupérer les tables depuis le stockage
-      const loadedTables = await getTables();
-
-      setTables(loadedTables);
-      setLastRefresh(new Date());
-    } catch (error) {
-      console.error('Error loading tables:', error);
-      setError(
-        'Erreur lors du chargement des tables. Essayez de les réinitialiser.'
-      );
-    } finally {
-      if (showLoading) {
-        setLoading(false);
-      } else {
-        setRefreshing(false);
-      }
-    }
-  }, [spinRefreshIcon]);
-
-  // Fonction de rafraîchissement avec debounce
+  // Fonction de rafraîchissement
   const handleRefreshTables = useCallback(() => {
-    loadTables(false);
-    // Retour haptique sur rafraîchissement
+    setRefreshing(true);
+    spinRefreshIcon();
+    loadTables(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  }, [loadTables]);
+  }, [loadTables, spinRefreshIcon]);
 
   const handleResetAllTables = useCallback(() => {
     Alert.alert(
@@ -210,10 +241,11 @@ export default function TablesScreen() {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             try {
               await resetAllTables();
+              tableCache.invalidate();
               await loadTables(true);
               toast.showToast(
                 'Toutes les tables ont été réinitialisées.',
-                'success',
+                'success'
               );
             } catch (error) {
               console.error('Error resetting tables:', error);
@@ -234,7 +266,7 @@ export default function TablesScreen() {
     (table: Table) => {
       // Retour haptique léger lorsqu'on touche une table
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-      
+
       if (table.status === 'available') {
         setSelectedTable(table);
         setCoversSelectionModalVisible(true);
@@ -301,7 +333,7 @@ export default function TablesScreen() {
       try {
         // Retour haptique de succès
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-        
+
         // Mettre à jour le statut de la table
         const updatedTable: Table = {
           ...table,
@@ -317,11 +349,13 @@ export default function TablesScreen() {
           },
         };
 
-        // Mettre à jour les tables dans l'état et le stockage
+        // Mise à jour optimiste de l'UI
         const updatedTables = tables.map((t) =>
           t.id === table.id ? updatedTable : t
         );
+
         setTables(updatedTables);
+        tableCache.set(updatedTables);
         await saveTables(updatedTables);
 
         // Naviguer vers la page de détail de la table
@@ -345,186 +379,76 @@ export default function TablesScreen() {
   const toggleSection = useCallback((section: string) => {
     // Retour haptique léger sur changement de section
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    
-    // Réinitialiser les animations avant de changer de section
-    // Cela garantit que les animations ne s'accumulent pas entre les transitions
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 0.5,
-        duration: 100,
-        useNativeDriver: true,
-      }),
-      Animated.timing(slideAnim, {
-        toValue: 10,
-        duration: 100,
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      // Changer la section dans le callback d'animation
-      setActiveSection((current) => {
-        const newActive = current === section ? null : section;
-        
-        // Réanimer pour entrer la nouvelle section
-        Animated.parallel([
-          Animated.timing(fadeAnim, {
-            toValue: 1,
-            duration: 200,
-            useNativeDriver: true,
-          }),
-          Animated.timing(slideAnim, {
-            toValue: 0,
-            duration: 200,
-            useNativeDriver: true,
-          }),
-        ]).start();
-        
-        return newActive;
-      });
-    });
-  }, [fadeAnim, slideAnim]);
+
+    // Animation simplifiée
+    setActiveSection((current) => (current === section ? null : section));
+  }, []);
 
   // Show all sections or just the active one
   const sectionsToDisplay = useMemo(() => {
     return activeSection ? [activeSection] : sections;
   }, [activeSection, sections]);
 
-  // Référence aux valeurs animées pour chaque table
-  // Les rendus avec index * X peuvent causer des problèmes avec recomposition
-  const itemFadeAnims = useRef<{[id: string]: Animated.Value}>({}).current;
-  const itemSlideAnims = useRef<{[id: string]: Animated.Value}>({}).current;
-  
-  // Rendus optimisés avec animations
+  // Rendu simplifié des tables
   const renderTableItem = useCallback(
-    (table: Table, index: number) => {
+    (table: Table) => {
       const colorGradient = getTableColors(table.status);
       const tableStatusIcons = {
         available: null,
         occupied: <Coffee size={16} color="white" style={styles.statusIcon} />,
         reserved: null,
       };
-      
-      // Créer des animations individuelles pour chaque table si elles n'existent pas
-      if (!itemFadeAnims[table.id]) {
-        itemFadeAnims[table.id] = new Animated.Value(0);
-        itemSlideAnims[table.id] = new Animated.Value(20);
-        
-        // Décaler légèrement l'animation de chaque table
-        const delay = index * 50;
-        Animated.parallel([
-          Animated.timing(itemFadeAnims[table.id], {
-            toValue: 1,
-            duration: 300,
-            delay,
-            useNativeDriver: true,
-          }),
-          Animated.timing(itemSlideAnims[table.id], {
-            toValue: 0,
-            duration: 300,
-            delay,
-            useNativeDriver: true,
-          }),
-        ]).start();
-      }
-      
+
       return (
-        <Animated.View
-          key={table.id}
-          style={[
-            {
-              opacity: itemFadeAnims[table.id],
-              transform: [{ translateY: itemSlideAnims[table.id] }],
-            },
+        <Pressable
+          key={`table-${table.id}`}
+          style={({ pressed }) => [
+            styles.table,
+            pressed && styles.tablePressed,
           ]}
+          onPress={() => openTable(table)}
         >
-          <Pressable
-            style={({pressed}) => [
-              styles.table,
-              pressed && styles.tablePressed
-            ]}
-            onPress={() => openTable(table)}
+          <LinearGradient
+            colors={colorGradient}
+            style={styles.tableGradient}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
           >
-            <LinearGradient
-              colors={colorGradient}
-              style={styles.tableGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-            >
-              <View style={styles.tableHeader}>
-                <Text style={styles.tableNumber}>{table.name}</Text>
-                <View style={styles.tableInfo}>
-                  <Users size={16} color="white" />
-                  <Text style={styles.seats}>{table.guests || 0}</Text>
-                </View>
+            <View style={styles.tableHeader}>
+              <Text style={styles.tableNumber}>{table.name}</Text>
+              <View style={styles.tableInfo}>
+                <Users size={16} color="white" />
+                <Text style={styles.seats}>{table.guests || 0}</Text>
               </View>
-              
-              <View style={styles.tableContent}>
-                {tableStatusIcons[table.status]}
-              </View>
-              
-              <View style={styles.tableFooter}>
-                <Text style={styles.status}>{table.status}</Text>
-                {table.order?.items.length ? (
-                  <Text style={styles.orderInfo}>
-                    {table.order.items.length} items - {table.order.total.toFixed(2)}€
-                  </Text>
-                ) : null}
-              </View>
-            </LinearGradient>
-          </Pressable>
-        </Animated.View>
+            </View>
+
+            <View style={styles.tableContent}>
+              {tableStatusIcons[table.status]}
+            </View>
+
+            <View style={styles.tableFooter}>
+              <Text style={styles.status}>{table.status}</Text>
+              {table.order?.items.length ? (
+                <Text style={styles.orderInfo}>
+                  {table.order.items.length} items -{' '}
+                  {table.order.total.toFixed(2)}€
+                </Text>
+              ) : null}
+            </View>
+          </LinearGradient>
+        </Pressable>
       );
     },
-    [getTableColors, openTable, itemFadeAnims, itemSlideAnims]
+    [getTableColors, openTable]
   );
 
-  // Référence pour les animations des sections
-  const sectionAnims = useRef<{[section: string]: {fade: Animated.Value, slide: Animated.Value}}>({}).current;
-  
-  const resetTableAnimations = useCallback(() => {
-    // Réinitialiser toutes les animations de table lors d'un changement de section
-    Object.keys(itemFadeAnims).forEach(id => {
-      itemFadeAnims[id].setValue(0);
-      itemSlideAnims[id].setValue(20);
-    });
-  }, [itemFadeAnims, itemSlideAnims]);
-  
   const renderSectionContent = useCallback(
     (section: string) => {
       const sectionTables = tablesBySection[section] || [];
-      
-      // Créer des animations pour chaque section si elles n'existent pas
-      if (!sectionAnims[section]) {
-        sectionAnims[section] = {
-          fade: new Animated.Value(0),
-          slide: new Animated.Value(20)
-        };
-        
-        // Démarrer l'animation d'entrée de section
-        Animated.parallel([
-          Animated.timing(sectionAnims[section].fade, {
-            toValue: 1,
-            duration: 300,
-            useNativeDriver: true,
-          }),
-          Animated.timing(sectionAnims[section].slide, {
-            toValue: 0,
-            duration: 300,
-            useNativeDriver: true,
-          }),
-        ]).start();
-      }
 
       if (sectionTables.length === 0) {
         return (
-          <Animated.View
-            style={[
-              styles.noTablesContainer,
-              {
-                opacity: sectionAnims[section].fade,
-                transform: [{ translateY: sectionAnims[section].slide }],
-              },
-            ]}
-          >
+          <View style={styles.noTablesContainer}>
             <Text style={styles.noTablesText}>
               Aucune table dans cette section
             </Text>
@@ -533,9 +457,9 @@ export default function TablesScreen() {
               {section}
             </Text>
             <Pressable
-              style={({pressed}) => [
+              style={({ pressed }) => [
                 styles.sectionResetButton,
-                pressed && styles.buttonPressed
+                pressed && styles.buttonPressed,
               ]}
               onPress={handleResetAllTables}
             >
@@ -543,57 +467,31 @@ export default function TablesScreen() {
                 Réinitialiser Toutes les Tables
               </Text>
             </Pressable>
-          </Animated.View>
+          </View>
         );
       }
 
       return (
-        <Animated.View 
-          style={[
-            styles.tablesGrid,
-            {
-              opacity: sectionAnims[section].fade,
-              transform: [{ translateY: sectionAnims[section].slide }],
-            },
-          ]}
-        >
-          {sectionTables.map((table, index) => renderTableItem(table, index))}
-        </Animated.View>
+        <View style={styles.tablesGrid}>
+          {sectionTables.map((table) => renderTableItem(table))}
+        </View>
       );
     },
-    [tablesBySection, tables.length, handleResetAllTables, renderTableItem, sectionAnims]
+    [tablesBySection, tables.length, handleResetAllTables, renderTableItem]
   );
 
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#4CAF50" />
-        <Animated.Text 
-          style={[
-            styles.loadingText,
-            {
-              opacity: fadeAnim,
-              transform: [{ translateY: slideAnim }],
-            },
-          ]}
-        >
-          Chargement des tables...
-        </Animated.Text>
+        <Text style={styles.loadingText}>Chargement des tables...</Text>
       </View>
     );
   }
 
   if (error || tables.length === 0) {
     return (
-      <Animated.View 
-        style={[
-          styles.loadingContainer,
-          {
-            opacity: fadeAnim,
-            transform: [{ translateY: slideAnim }],
-          },
-        ]}
-      >
+      <View style={styles.loadingContainer}>
         {error && <Text style={styles.errorText}>{error}</Text>}
         {tables.length === 0 && (
           <Text style={styles.errorText}>
@@ -601,11 +499,11 @@ export default function TablesScreen() {
           </Text>
         )}
 
-        <Pressable 
-          style={({pressed}) => [
+        <Pressable
+          style={({ pressed }) => [
             styles.resetButton,
-            pressed && styles.buttonPressed
-          ]} 
+            pressed && styles.buttonPressed,
+          ]}
           onPress={handleResetAllTables}
         >
           <RefreshCcw size={20} color="white" />
@@ -613,19 +511,12 @@ export default function TablesScreen() {
             Réinitialiser Toutes les Tables
           </Text>
         </Pressable>
-      </Animated.View>
+      </View>
     );
   }
 
   return (
-    <Animated.View 
-      style={[
-        styles.container,
-        {
-          opacity: fadeAnim,
-        },
-      ]}
-    >
+    <View style={styles.container}>
       {/* Modal pour le choix du nombre de couverts */}
       <CoversSelectionModal
         visible={coversSelectionModalVisible}
@@ -643,10 +534,7 @@ export default function TablesScreen() {
         tableName={selectedTable?.name || ''}
       />
 
-      <LinearGradient
-        colors={['#FFFFFF', '#F5F5F5']}
-        style={styles.header}
-      >
+      <LinearGradient colors={['#FFFFFF', '#F5F5F5']} style={styles.header}>
         <Text style={styles.title}>Plan du Restaurant</Text>
         <View style={styles.headerButtons}>
           {refreshing && (
@@ -656,11 +544,11 @@ export default function TablesScreen() {
               style={{ marginRight: 10 }}
             />
           )}
-          <Pressable 
-            style={({pressed}) => [
+          <Pressable
+            style={({ pressed }) => [
               styles.refreshButton,
-              pressed && styles.buttonPressed
-            ]} 
+              pressed && styles.buttonPressed,
+            ]}
             onPress={handleRefreshTables}
           >
             <Animated.View style={{ transform: [{ rotate: spin }] }}>
@@ -669,10 +557,10 @@ export default function TablesScreen() {
             <Text style={styles.refreshButtonText}>Rafraîchir</Text>
           </Pressable>
           <Pressable
-            style={({pressed}) => [
+            style={({ pressed }) => [
               styles.filterButton,
               activeSection && styles.filterButtonInactive,
-              pressed && styles.buttonPressed
+              pressed && styles.buttonPressed,
             ]}
             onPress={() => setActiveSection(null)}
           >
@@ -686,11 +574,11 @@ export default function TablesScreen() {
               Tout
             </Text>
           </Pressable>
-          <Pressable 
-            style={({pressed}) => [
+          <Pressable
+            style={({ pressed }) => [
               styles.resetButton,
-              pressed && styles.buttonPressed
-            ]} 
+              pressed && styles.buttonPressed,
+            ]}
             onPress={handleResetAllTables}
           >
             <RefreshCcw size={20} color="white" />
@@ -704,10 +592,10 @@ export default function TablesScreen() {
           {sections.map((section) => (
             <Pressable
               key={section}
-              style={({pressed}) => [
+              style={({ pressed }) => [
                 styles.sectionTab,
                 activeSection === section && styles.activeTab,
-                pressed && styles.sectionTabPressed
+                pressed && styles.sectionTabPressed,
               ]}
               onPress={() => toggleSection(section)}
             >
@@ -723,35 +611,21 @@ export default function TablesScreen() {
           ))}
         </View>
 
-        <Animated.ScrollView 
-          style={[
-            styles.scrollContainer,
-            {
-              transform: [{ translateY: slideAnim }],
-            },
-          ]}
+        <ScrollView
+          style={styles.scrollContainer}
           showsVerticalScrollIndicator={false}
         >
           <View style={styles.tablesContainer}>
             {sectionsToDisplay.map((section) => (
-              <Animated.View 
-                key={section} 
-                style={[
-                  styles.sectionContainer,
-                  {
-                    opacity: fadeAnim,
-                    transform: [{ translateY: slideAnim }],
-                  },
-                ]}
-              >
+              <View key={section} style={styles.sectionContainer}>
                 <Text style={styles.sectionTitle}>{section}</Text>
                 {renderSectionContent(section)}
-              </Animated.View>
+              </View>
             ))}
           </View>
-        </Animated.ScrollView>
+        </ScrollView>
       </View>
-    </Animated.View>
+    </View>
   );
 }
 
