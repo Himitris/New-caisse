@@ -3,7 +3,7 @@
     "name": "Caisse",
     "slug": "Caisse",
     "version": "1.0.0",
-    "orientation": "landscape",
+    "orientation": "landscape-left-landscape-right",
     "icon": "./assets/images/icon.png",
     "scheme": "myapp",
     "userInterfaceStyle": "automatic",
@@ -16,10 +16,7 @@
       "output": "single",
       "favicon": "./assets/images/favicon.png"
     },
-    "plugins": [
-      "expo-router",
-      "expo-font"
-    ],
+    "plugins": ["expo-router", "expo-font"],
     "experiments": {
       "typedRoutes": true
     },
