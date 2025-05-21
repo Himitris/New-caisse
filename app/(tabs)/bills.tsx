@@ -947,19 +947,19 @@ export default function BillsScreen() {
               width: 80mm;
               padding: 5mm;
               margin: 0;
-              font-size: 10pt;
+              font-size: 14pt;
             }
             .header, .footer { 
               text-align: center; 
               margin-bottom: 5mm;
             }
             .header h1 {
-              font-size: 14pt;
+              font-size: 18pt;
               margin: 0 0 2mm 0;
             }
             .header p, .footer p {
               margin: 0 0 1mm 0;
-              font-size: 9pt;
+              font-size: 14pt;
             }
             .divider {
               border-bottom: 1px dashed #000;
@@ -978,25 +978,25 @@ export default function BillsScreen() {
               display: flex;
               justify-content: space-between;
               margin: 1mm 0;
-              font-size: 9pt;
+              font-size: 16pt;
             }
             .total-amount {
               font-weight: bold;
-              font-size: 12pt;
+              font-size: 16pt;
               text-align: right;
               margin: 2mm 0;
             }
             .payment-info {
               text-align: center;
               margin: 3mm 0;
-              font-size: 9pt;
+              font-size: 14pt;
             }
             .payment-info p {
               margin: 0 0 1mm 0;
             }
             th, td {
               padding: 1mm 0;
-              font-size: 9pt;
+              font-size: 14pt;
             }
           </style>
         </head>
