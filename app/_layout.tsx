@@ -88,6 +88,10 @@ export default function RootLayout() {
               screenOptions={{
                 headerShown: false,
                 contentStyle: { backgroundColor: 'white' },
+                animation: 'fade_from_bottom',
+                presentation: 'card',
+                gestureEnabled: true,
+                gestureDirection: 'horizontal',
               }}
             >
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />

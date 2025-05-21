@@ -261,7 +261,6 @@ class StorageManager {
 
   static async performMaintenance(): Promise<void> {
     try {
-
       // 1. Nettoyer tout le cache en mémoire
       StorageManager.memoryCache.clear();
 
@@ -283,6 +282,31 @@ class StorageManager {
     } catch (error) {
       log.error(`Error resetting corrupted data for ${key}:`, error);
     }
+  }
+
+  static async batchSave(
+    operations: Array<{ key: string; data: any }>
+  ): Promise<void> {
+    const pairs: [string, string][] = operations.map((op) => {
+      const jsonValue = this.shouldCompress(op.data)
+        ? CompressionManager.compress(op.data)
+        : JSON.stringify(op.data);
+
+      // Créer un tuple correctement typé
+      return [op.key, jsonValue];
+    });
+
+    // Mise à jour du cache mémoire
+    operations.forEach((op) => {
+      this.memoryCache.set(op.key, op.data);
+    });
+
+    // Vérifier si nous avons des paires à enregistrer
+    if (pairs.length > 0) {
+      return AsyncStorage.multiSet(pairs);
+    }
+
+    return Promise.resolve();
   }
 
   static async resetApplicationData(): Promise<void> {
@@ -309,30 +333,35 @@ class StorageManager {
     }
   }
 
+  private static isDataChanged(oldData: any, newData: any): boolean {
+    if (oldData === newData) return false;
+
+    // Comparaison simple pour les objets et tableaux
+    try {
+      return JSON.stringify(oldData) !== JSON.stringify(newData);
+    } catch (e) {
+      // En cas d'erreur, considérer les données comme modifiées
+      return true;
+    }
+  }
+
   static async save<T>(
     key: string,
     data: T,
     compress: boolean = CONFIG.COMPRESSION_ENABLED
   ): Promise<void> {
-    const startTime = Date.now();
-    try {
-      let jsonValue: string;
-
-      if (compress && this.shouldCompress(data)) {
-        jsonValue = CompressionManager.compress(data);
-      } else {
-        jsonValue = JSON.stringify(data);
-      }
-
-      await AsyncStorage.setItem(key, jsonValue);
-      this.memoryCache.set(key, data);
-
-      this.trackPerformance(key, 'write');
-      log.perf(`Saved data to ${key}`, { duration: Date.now() - startTime });
-    } catch (error) {
-      log.error(`Error saving data to ${key}:`, error);
-      throw error;
+    // Vérifier si les données ont changé
+    const cachedData = this.memoryCache.get<T>(key);
+    if (cachedData && !this.isDataChanged(cachedData, data)) {
+      // Données identiques, pas besoin de sauvegarder
+      return Promise.resolve();
     }
+
+    // Mettre à jour le cache avant de sauvegarder
+    this.memoryCache.set(key, data);
+
+    // Utiliser batchSave même pour une seule opération (cohérence du code)
+    return this.batchSave([{ key, data }]);
   }
 
   static async load<T>(key: string, defaultValue: T): Promise<T> {

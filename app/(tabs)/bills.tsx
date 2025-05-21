@@ -1282,15 +1282,17 @@ export default function BillsScreen() {
               <FlatList
                 data={paginatedBills}
                 renderItem={renderBillItem}
-                keyExtractor={keyExtractor}
-                getItemLayout={getItemLayout}
-                onEndReached={handleLoadMore}
-                onEndReachedThreshold={0.5}
-                ListFooterComponent={renderListFooter}
-                removeClippedSubviews={true}
-                maxToRenderPerBatch={10}
-                windowSize={10}
+                keyExtractor={keyExtractor} // Assurez-vous d'avoir une fonction keyExtractor stable
+                getItemLayout={getItemLayout} // Ajoutez cette fonction pour des performances optimales
                 initialNumToRender={10}
+                maxToRenderPerBatch={8}
+                windowSize={15} // Optimisé pour la plupart des écrans
+                removeClippedSubviews={true}
+                updateCellsBatchingPeriod={50}
+                onEndReachedThreshold={0.5}
+                onEndReached={handleLoadMore}
+                ListFooterComponent={renderListFooter}
+                maintainVisibleContentPosition={{ minIndexForVisible: 0 }} // Aide à maintenir la position lors du changement de données
               />
               {renderPagination()}
             </View>

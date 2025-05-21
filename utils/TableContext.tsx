@@ -5,6 +5,7 @@ import React, {
   useState,
   useEffect,
   ReactNode,
+  useCallback,
 } from 'react';
 import { Table, getTables, updateTable } from './storage';
 import { EVENT_TYPES, events } from './events';
@@ -69,6 +70,22 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
   const getTableById = (id: number) => {
     return tables.find((table) => table.id === id);
   };
+
+  const updateSingleTableInContext = useCallback(
+    async (updatedTable: Table) => {
+      setTables((prevTables) =>
+        prevTables.map((table) =>
+          table.id === updatedTable.id ? updatedTable : table
+        )
+      );
+      // Pas besoin d'attendre la sauvegarde pour mettre à jour l'UI
+      // Mettre à jour le stockage en arrière-plan
+      updateTable(updatedTable).catch((error) =>
+        console.error('Error updating table:', error)
+      );
+    },
+    []
+  );
 
   const updateTableInContext = async (updatedTable: Table) => {
     // Mettre à jour dans le stockage
