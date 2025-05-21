@@ -78,7 +78,7 @@ const MAX_BILLS_IN_STORAGE = 1000; // Limite pour éviter les problèmes de mém
 // Modal pour voir le reçu - Mémoïzé
 const ViewReceiptModal = memo<ViewReceiptModalProps>(
   ({ visible, bill, onClose, onPrint, onShare, onDelete }) => {
-    if (!bill) return null;
+    // D'abord, déclarez tous vos hooks
     const { restaurantInfo } = useSettings();
     const handleDelete = useCallback(() => {
       Alert.alert(
@@ -90,6 +90,9 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
         ]
       );
     }, [onDelete]);
+
+    // Seulement APRÈS avoir déclaré tous vos hooks, placez votre condition
+    if (!bill) return null;
 
     const statusColor = STATUS_COLORS[bill.status];
     const paymentLabel = bill.paymentMethod

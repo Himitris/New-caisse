@@ -879,11 +879,63 @@ export default function TableScreen() {
         </View>
         <View style={styles.guestCounter}>
           <Users size={24} color="#666" />
-          <Pressable onPress={() => setGuestCount(Math.max(1, guestCount - 1))}>
+          <Pressable
+            onPress={async () => {
+              const newCount = Math.max(1, guestCount - 1);
+              setGuestCount(newCount);
+
+              if (table) {
+                const updatedTable = {
+                  ...table,
+                  guests: newCount,
+                  order: table.order
+                    ? { ...table.order, guests: newCount }
+                    : undefined,
+                };
+
+                setTable(updatedTable);
+
+                try {
+                  await updateTable(updatedTable);
+                } catch (error) {
+                  console.error(
+                    'Erreur lors de la mise à jour du nombre de couverts:',
+                    error
+                  );
+                }
+              }
+            }}
+          >
             <Minus size={24} color="#666" />
           </Pressable>
           <Text style={styles.guestCount}>{guestCount}</Text>
-          <Pressable onPress={() => setGuestCount(guestCount + 1)}>
+          <Pressable
+            onPress={async () => {
+              const newCount = guestCount + 1;
+              setGuestCount(newCount);
+
+              if (table) {
+                const updatedTable = {
+                  ...table,
+                  guests: newCount,
+                  order: table.order
+                    ? { ...table.order, guests: newCount }
+                    : undefined,
+                };
+
+                setTable(updatedTable);
+
+                try {
+                  await updateTable(updatedTable);
+                } catch (error) {
+                  console.error(
+                    'Erreur lors de la mise à jour du nombre de couverts:',
+                    error
+                  );
+                }
+              }
+            }}
+          >
             <Plus size={24} color="#666" />
           </Pressable>
         </View>
