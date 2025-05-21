@@ -6,12 +6,14 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { View, Text, ActivityIndicator } from 'react-native';
 import {
   initializeTables,
+  STORAGE_KEYS,
   StorageManager,
   TableManager,
 } from '../utils/storage';
 import { ToastProvider } from '../utils/ToastContext';
 import { SettingsProvider } from '../utils/SettingsContext';
 import { TableProvider } from '@/utils/TableContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 declare global {
   interface Window {
@@ -32,12 +34,24 @@ export default function RootLayout() {
         // Initialiser les tables seulement si nécessaire
         await initializeTables();
 
-        // Nettoyer les données orphelines
-        await TableManager.cleanupOrphanedTableData();
-
         // Marquer l'application comme lancée si c'est le premier lancement
         if (isFirstLaunch) {
           await StorageManager.markAppLaunched();
+        }
+        // Vérifier quand a eu lieu le dernier nettoyage
+        const lastCleanup = await AsyncStorage.getItem('last_cleanup_date');
+        const now = new Date().toISOString();
+
+        // Si aucun nettoyage n'a été fait ou si le dernier nettoyage date de plus de 7 jours
+        if (
+          !lastCleanup ||
+          new Date(lastCleanup).getTime() < Date.now() - 7 * 24 * 60 * 60 * 1000
+        ) {
+          console.log('Exécution du nettoyage automatique...');
+          // Effectuer un nettoyage léger
+          StorageManager.memoryCache.clear();
+          await AsyncStorage.removeItem(STORAGE_KEYS.CACHE);
+          await AsyncStorage.setItem('last_cleanup_date', now);
         }
 
         setInitialized(true);

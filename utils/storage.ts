@@ -86,7 +86,7 @@ export const TABLE_SECTIONS = {
 const STORAGE_PREFIX = 'manjo_carn_';
 const STORAGE_VERSION = 'v4'; // Incrémenté pour la nouvelle version optimisée
 
-const STORAGE_KEYS = {
+export const STORAGE_KEYS = {
   TABLES: `${STORAGE_PREFIX}tables_${STORAGE_VERSION}`,
   BILLS: `${STORAGE_PREFIX}bills_${STORAGE_VERSION}`,
   BILLS_ARCHIVE: `${STORAGE_PREFIX}bills_archive_${STORAGE_VERSION}`,
@@ -253,12 +253,29 @@ const log = {
 
 // Classe utilitaire améliorée pour gérer le stockage
 class StorageManager {
-  private static memoryCache = new MemoryCache();
+  public static memoryCache = new MemoryCache();
   private static performanceMonitor = new Map<
     string,
     { reads: number; writes: number }
   >();
 
+  static async performMaintenance(): Promise<void> {
+    try {
+
+      // 1. Nettoyer tout le cache en mémoire
+      StorageManager.memoryCache.clear();
+
+      // 2. Nettoyer les données de cache dans AsyncStorage
+      await AsyncStorage.removeItem(STORAGE_KEYS.CACHE);
+
+      // 3. Vérifier et réparer les données incohérentes des tables
+      await TableManager.cleanupOrphanedTableData();
+
+      console.log('Maintenance de stockage terminée avec succès');
+    } catch (error) {
+      console.error('Erreur lors de la maintenance du stockage:', error);
+    }
+  }
   static async resetCorruptedData(key: string): Promise<void> {
     try {
       await AsyncStorage.removeItem(key);

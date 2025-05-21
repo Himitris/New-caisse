@@ -7,6 +7,7 @@ import {
   Printer,
   Wallet,
   Edit3,
+  RefreshCw,
 } from 'lucide-react-native'; // Importez les icônes nécessaires
 import { useCallback, useEffect, useState } from 'react';
 import { settingsService } from './SettingsService';
@@ -62,6 +63,17 @@ const configToSettings = (config: ConfigData): Setting[] => {
       category: 'security',
       value: false,
       icon: Lock,
+    },
+    
+    // Catégorie Sécurité donnée
+    {
+      id: 'cleanStorage',
+      title: 'Nettoyer les données',
+      description: 'Supprimer les anciennes données et vider le cache',
+      type: 'action',
+      category: 'data',
+      value: false,
+      icon: RefreshCw,
     },
   ];
 };

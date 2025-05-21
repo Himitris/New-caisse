@@ -1,31 +1,29 @@
 // app/(tabs)/settings.tsx
-import React, { useState, useCallback } from 'react';
+import { Trash2 } from 'lucide-react-native';
+import React, { useCallback, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  Pressable,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
   View,
-  Pressable,
 } from 'react-native';
-import { Trash2 } from 'lucide-react-native';
+import { useSettingsContext } from '../../utils/SettingsContext';
+import {
+  PaymentMethod,
+  RestaurantInfo,
+  settingsCategories
+} from '../../utils/settingsTypes';
 import { BillManager, StorageManager, TableManager } from '../../utils/storage';
 import { useToast } from '../../utils/ToastContext';
 import PasswordModal from '../components/PasswordModal';
-import { useSettingsContext } from '../../utils/SettingsContext';
 import {
-  RestaurantInfoModal,
   PaymentMethodsModal,
+  RestaurantInfoModal,
 } from '../components/SettingsModals';
-import {
-  Setting,
-  RestaurantInfo,
-  PaymentMethod,
-  ConfigData,
-  settingsCategories,
-} from '../../utils/settingsTypes';
 
 // Clés de stockage
 export const SETTINGS_STORAGE_KEY = 'manjo_carn_restaurant_settings';
@@ -51,6 +49,7 @@ export default function SettingsScreen() {
   const [hoursModalVisible, setHoursModalVisible] = useState(false);
   const [paymentModalVisible, setPaymentModalVisible] = useState(false);
   const [passwordModalVisible, setPasswordModalVisible] = useState(false);
+  const [processingAction, setProcessingAction] = useState(false);
   const [printSettingsModalVisible, setPrintSettingsModalVisible] =
     useState(false);
 
@@ -125,6 +124,33 @@ export default function SettingsScreen() {
         break;
       case 'printSettings':
         setPrintSettingsModalVisible(true);
+        break;
+      case 'cleanStorage':
+        Alert.alert(
+          'Nettoyer les données',
+          'Cette action supprimera les anciennes factures et les données temporaires. Continuer?',
+          [
+            { text: 'Annuler', style: 'cancel' },
+            {
+              text: 'Nettoyer',
+              onPress: async () => {
+                setProcessingAction(true);
+                try {
+                  await StorageManager.performMaintenance();
+                  toast.showToast('Nettoyage des données réussi', 'success');
+                } catch (error) {
+                  console.error('Erreur lors du nettoyage:', error);
+                  toast.showToast(
+                    'Erreur lors du nettoyage des données',
+                    'error'
+                  );
+                } finally {
+                  setProcessingAction(false);
+                }
+              },
+            },
+          ]
+        );
         break;
       default:
         break;

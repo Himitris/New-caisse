@@ -1,35 +1,33 @@
 // app/(tabs)/index.tsx - Version optimisée et corrigée
 
+import * as Haptics from 'expo-haptics';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { Coffee, Filter, RefreshCcw, Users } from 'lucide-react-native';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  Alert,
-  Platform,
   ActivityIndicator,
+  Alert,
   Animated,
   Dimensions,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { useRouter, useFocusEffect } from 'expo-router';
-import { Users, RefreshCcw, Filter, Coffee } from 'lucide-react-native';
 import { useTableContext } from '../../utils/TableContext';
+import { useToast } from '../../utils/ToastContext';
 import {
-  getTables,
+  resetAllTables,
   saveTables,
   Table,
-  resetAllTables,
   TABLE_SECTIONS,
-  updateTable,
+  updateTable
 } from '../../utils/storage';
-import CustomCoversModal from '../components/CustomCoversModal';
 import CoversSelectionModal from '../components/CoversSelectionModal';
-import { useToast } from '../../utils/ToastContext';
-import { LinearGradient } from 'expo-linear-gradient';
-import * as Haptics from 'expo-haptics';
-import { events, EVENT_TYPES } from '../../utils/events';
+import CustomCoversModal from '../components/CustomCoversModal';
 
 // Mise en cache des couleurs et gradients des tables
 const TABLE_COLORS = {

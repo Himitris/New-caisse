@@ -857,8 +857,18 @@ export default function TableScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.push('/')} style={styles.backLink}>
-          <ArrowLeft size={24} color="#333" />
+        <Pressable
+          onPress={() => router.push('/')}
+          style={({ pressed }) => [
+            styles.backLink,
+            {
+              backgroundColor: pressed
+                ? '#8a8888'
+                : styles.backLink.backgroundColor,
+            },
+          ]}
+        >
+          <ArrowLeft size={28} color="#333" />
         </Pressable>
         <View style={styles.headerTitleContainer}>
           <Text style={styles.title}>{table.name}</Text>
@@ -1157,6 +1167,16 @@ const styles = StyleSheet.create({
   },
   backLink: {
     marginRight: 8,
+    padding: 12,
+    borderRadius: 999,
+    backgroundColor: '#f5f5f5',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerTitleContainer: {
     flex: 3,
