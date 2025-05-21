@@ -41,7 +41,8 @@ interface MenuItem {
 
 interface SelectedMenuItem extends MenuItem {
   selectedQuantity: number;
-  offered?: boolean; // Ajout de la propriété offered
+  offered?: boolean;
+  uniqueKey?: string;
 }
 
 // Fonction utilitaire pour obtenir l'icône en fonction du type de méthode
@@ -400,17 +401,19 @@ export default function ItemsPaymentScreen() {
           updatedSelectedItems[existingIndex] = {
             ...currentItem,
             selectedQuantity: currentItem.selectedQuantity + quantityToAdd,
-            offered: currentItem.offered, // Préserver l'état offert
+            offered: currentItem.offered,
           };
           return updatedSelectedItems;
         } else {
-          // Générer un ID unique pour éviter les duplications
+          // Correction: Garder l'ID original mais ajouter une propriété originalId
           const newSelectedItem: SelectedMenuItem = {
             ...item,
-            // S'assurer que l'ID est unique avec un timestamp
-            id: item.id + Date.now(),
+            // Garder l'ID original
+            id: item.id,
+            // Ajouter une propriété pour rendre l'item unique dans la liste si nécessaire
+            uniqueKey: `${item.id}-${Date.now()}`,
             selectedQuantity: quantityToAdd,
-            offered: item.offered, // Préserver l'état offert de l'article original
+            offered: item.offered,
           };
           return [...prevSelectedItems, newSelectedItem];
         }
@@ -580,13 +583,24 @@ export default function ItemsPaymentScreen() {
           return;
         }
 
-        const paidItems = selectedItems.map((item) => ({
-          id: item.id,
-          name: item.name,
-          quantity: item.selectedQuantity,
-          price: item.price,
-          offered: item.offered, // Inclure l'état offert
-        }));
+        // Problème 1: Les IDs des articles sélectionnés ne correspondent pas aux IDs originaux
+        // Solution: Récupérer les IDs originaux pour les articles sélectionnés
+        const paidItems = selectedItems.map((item) => {
+          // Trouver l'article original correspondant pour récupérer l'ID correct
+          const originalItem = allOriginalItems.find(
+            (origItem) =>
+              origItem.name === item.name && origItem.price === item.price
+          );
+
+          return {
+            // Utiliser l'ID original si disponible, sinon garder l'ID actuel
+            id: originalItem ? originalItem.id : item.id,
+            name: item.name,
+            quantity: item.selectedQuantity,
+            price: item.price,
+            offered: item.offered,
+          };
+        });
 
         const offeredAmount = paidItems.reduce((sum, item) => {
           return item.offered ? sum + item.price * item.quantity : sum;
@@ -597,23 +611,36 @@ export default function ItemsPaymentScreen() {
           tableNumber: tableIdNum,
           tableName: tableName,
           section: tableSection,
-          amount: totalSelected, // Le total exclut déjà les articles offerts
+          amount: totalSelected,
           items: paidItems.length,
           status: 'paid' as 'paid',
           timestamp: new Date().toISOString(),
           paymentMethod: method,
           paymentType: 'items' as any,
           paidItems: paidItems,
-          offeredAmount: offeredAmount, // Ajout du montant total des articles offerts
+          offeredAmount: offeredAmount,
         };
 
         await addBill(bill);
 
+        // Problème 2: La mise à jour des articles de la commande n'utilise pas les bons identifiants
+        // Solution: Améliorer la logique de mise à jour des articles dans la commande
         let updatedOrderItems = [...currentTable.order.items];
 
         for (const selectedItem of selectedItems) {
+          // Trouver l'article original correspondant
+          const originalItem = allOriginalItems.find(
+            (origItem) =>
+              origItem.name === selectedItem.name &&
+              origItem.price === selectedItem.price
+          );
+
+          // Utiliser l'ID original pour chercher dans la commande
+          const itemIdToFind = originalItem ? originalItem.id : selectedItem.id;
+
+          // Chercher l'article dans la commande actuelle
           const orderItemIndex = updatedOrderItems.findIndex(
-            (item) => item.id === selectedItem.id
+            (item) => item.id === itemIdToFind
           );
 
           if (orderItemIndex >= 0) {
@@ -622,12 +649,13 @@ export default function ItemsPaymentScreen() {
               orderItem.quantity - selectedItem.selectedQuantity;
 
             if (remainingQuantity <= 0) {
+              // Supprimer complètement l'article
               updatedOrderItems.splice(orderItemIndex, 1);
             } else {
+              // Mettre à jour la quantité
               updatedOrderItems[orderItemIndex] = {
                 ...orderItem,
                 quantity: remainingQuantity,
-                // Maintenir l'état "offered" si c'était déjà marqué comme tel
                 offered: orderItem.offered,
               };
             }
@@ -661,7 +689,7 @@ export default function ItemsPaymentScreen() {
             if (verifyReset && (verifyReset.order || verifyReset.guests)) {
               const forcedCleanTable = {
                 ...verifyReset,
-                status: 'available' as 'available', // Explicitly cast to the expected type
+                status: 'available' as 'available',
                 guests: undefined,
                 order: undefined,
               };
@@ -685,10 +713,16 @@ export default function ItemsPaymentScreen() {
           };
 
           await updateTable(updatedTable);
+
           // Émettre l'événement pour mettre à jour l'interface
           events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
+
+          // Problème 3: La liste des articles disponibles n'est pas correctement mise à jour
+          // Solution: Vider les articles sélectionnés et recharger complètement la table
           setSelectedItems([]);
-          loadTable();
+
+          // Recharger complètement les données de la table au lieu de manipuler l'état local
+          await loadTable();
 
           toast.showToast(
             `Articles payés: ${totalSelected.toFixed(
@@ -715,6 +749,7 @@ export default function ItemsPaymentScreen() {
       tableSection,
       loadTable,
       router,
+      allOriginalItems, // Ajout de cette dépendance importante
     ]
   );
 
@@ -839,7 +874,10 @@ export default function ItemsPaymentScreen() {
                 <ScrollView style={styles.itemsList}>
                   {categorizeItems(availableItems).plat.map((item) => (
                     <ItemCard
-                      key={`available-plat-${item.id}-${Math.random()}`}
+                      key={
+                        item.uniqueKey ||
+                        `available-plat-${item.id}-${Math.random()}`
+                      }
                       item={item}
                       isSelected={false}
                       onAdd={(addAll) => addItemToSelection(item, addAll)}
@@ -854,7 +892,10 @@ export default function ItemsPaymentScreen() {
                 <ScrollView style={styles.itemsList}>
                   {categorizeItems(availableItems).boisson.map((item) => (
                     <ItemCard
-                      key={`available-boisson-${item.id}-${Math.random()}`}
+                      key={
+                        item.uniqueKey ||
+                        `available-boisson-${item.id}-${Math.random()}`
+                      }
                       item={item}
                       isSelected={false}
                       onAdd={(addAll) => addItemToSelection(item, addAll)}
@@ -882,7 +923,7 @@ export default function ItemsPaymentScreen() {
                 <ScrollView style={styles.itemsList}>
                   {categorizeItems(selectedItems).plat.map((item) => (
                     <ItemCard
-                      key={`selected-plat-${item.id}`}
+                      key={item.uniqueKey || `selected-plat-${item.id}`}
                       item={item}
                       isSelected={true}
                       onQuantityChange={(increment) =>
@@ -899,7 +940,7 @@ export default function ItemsPaymentScreen() {
                 <ScrollView style={styles.itemsList}>
                   {categorizeItems(selectedItems).boisson.map((item) => (
                     <ItemCard
-                      key={`selected-boisson-${item.id}`}
+                      key={item.uniqueKey || `selected-boisson-${item.id}`}
                       item={item}
                       isSelected={true}
                       onQuantityChange={(increment) =>

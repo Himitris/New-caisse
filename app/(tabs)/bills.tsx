@@ -527,6 +527,7 @@ export default function BillsScreen() {
   const [totalPages, setTotalPages] = useState(0);
   const [totalBills, setTotalBills] = useState(0);
   const [hasMorePages, setHasMorePages] = useState(false);
+  const [isFirstRender, setIsFirstRender] = useState(true);
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<
     Bill['paymentMethod'] | null
   >(null);
@@ -649,6 +650,7 @@ export default function BillsScreen() {
           onPress: async () => {
             try {
               setProcessingAction(true);
+
               // On garde les factures qui ne font pas partie des factures filtrées
               const billIdsToDelete = new Set(
                 filteredBills.map((bill) => bill.id)
@@ -657,15 +659,34 @@ export default function BillsScreen() {
                 (bill) => !billIdsToDelete.has(bill.id)
               );
 
+              // Sauvegarde des factures dans le stockage
               await saveBills(remainingBills);
+
+              // Mise à jour groupée des états pour éviter les rendus partiels
+              setPage(0); // Réinitialiser la pagination
               setBills(remainingBills);
+
+              // Utilisez une fonction callback pour setFilteredBills pour s'assurer qu'elle a accès à la dernière valeur de remainingBills
+              // Remplacer cette ligne par une fonction vide temporairement
               setFilteredBills([]);
 
-              if (remainingBills.length > 0) {
+              // Mettre à jour le selectedBill une fois que les autres états sont mis à jour
+              // pour éviter de sélectionner une facture qui n'existe plus
+              if (
+                remainingBills.length > 0 &&
+                selectedBill &&
+                billIdsToDelete.has(selectedBill.id)
+              ) {
                 setSelectedBill(remainingBills[0]);
-              } else {
+              } else if (remainingBills.length === 0) {
                 setSelectedBill(null);
               }
+
+              // Utiliser requestAnimationFrame pour attendre que le DOM soit mis à jour
+              requestAnimationFrame(() => {
+                // Recharger les factures filtrées après la suppression
+                loadBills();
+              });
 
               toast.showToast(
                 `${billIdsToDelete.size} facture(s) supprimée(s) avec succès.`,
@@ -684,7 +705,7 @@ export default function BillsScreen() {
         },
       ]
     );
-  }, [filteredBills, bills]);
+  }, [filteredBills, bills, selectedBill, loadBills]);
 
   // Filtrage optimisé avec useMemo
   const appliedFilters = useMemo(() => {
@@ -774,7 +795,7 @@ export default function BillsScreen() {
   );
 
   const handleSelectBill = useCallback((bill: Bill) => {
-    setSelectedBill(bill);
+      setSelectedBill(bill);
   }, []);
 
   const handleView = useCallback(() => {
@@ -1055,122 +1076,31 @@ export default function BillsScreen() {
           <Text style={styles.paginationButtonText}>Précédent</Text>
         </Pressable>
 
-        {/* Afficher un nombre limité de pages */}
         {(() => {
           const pageButtons = [];
-          const maxVisiblePages = 5; // Maximum de pages visibles
-          let startPage = 0;
-          let endPage = 0;
 
-          if (totalPages <= maxVisiblePages) {
-            // Moins de 5 pages, on affiche toutes
-            startPage = 0;
-            endPage = totalPages - 1;
-          } else if (page < Math.floor(maxVisiblePages / 2)) {
-            // Proche du début
-            startPage = 0;
-            endPage = maxVisiblePages - 1;
-          } else if (page >= totalPages - Math.floor(maxVisiblePages / 2)) {
-            // Proche de la fin
-            startPage = totalPages - maxVisiblePages;
-            endPage = totalPages - 1;
-          } else {
-            // Au milieu
-            startPage = page - Math.floor(maxVisiblePages / 2);
-            endPage = page + Math.floor(maxVisiblePages / 2);
-          }
+          // N'afficher que la page courante et la page suivante (si disponible)
+          pageButtons.push(
+            <Pressable
+              key={`page-${page}`}
+              style={[styles.pageNumberButton, styles.currentPageButton]}
+              onPress={() => goToPage(page)}
+            >
+              <Text style={[styles.pageNumberText, styles.currentPageText]}>
+                {page + 1}
+              </Text>
+            </Pressable>
+          );
 
-          // Première page
-          if (startPage > 0) {
+          // Afficher la page suivante uniquement si elle existe
+          if (page + 1 < totalPages) {
             pageButtons.push(
               <Pressable
-                key="page-0"
-                style={[
-                  styles.pageNumberButton,
-                  0 === page && styles.currentPageButton,
-                ]}
-                onPress={() => goToPage(0)}
+                key={`page-${page + 1}`}
+                style={[styles.pageNumberButton]}
+                onPress={() => goToPage(page + 1)}
               >
-                <Text
-                  style={[
-                    styles.pageNumberText,
-                    0 === page && styles.currentPageText,
-                  ]}
-                >
-                  1
-                </Text>
-              </Pressable>
-            );
-
-            // Ellipsis si nécessaire
-            if (startPage > 1) {
-              pageButtons.push(
-                <Text key="ellipsis-start" style={styles.pageNumberText}>
-                  ...
-                </Text>
-              );
-            }
-          }
-
-          // Pages du milieu
-          for (let i = startPage; i <= endPage; i++) {
-            // Skip si c'est la première ou dernière page et qu'on les a déjà affichées
-            if (
-              (i === 0 && startPage > 0) ||
-              (i === totalPages - 1 && endPage < totalPages - 1)
-            ) {
-              continue;
-            }
-
-            pageButtons.push(
-              <Pressable
-                key={`page-${i}`}
-                style={[
-                  styles.pageNumberButton,
-                  i === page && styles.currentPageButton,
-                ]}
-                onPress={() => goToPage(i)}
-              >
-                <Text
-                  style={[
-                    styles.pageNumberText,
-                    i === page && styles.currentPageText,
-                  ]}
-                >
-                  {i + 1}
-                </Text>
-              </Pressable>
-            );
-          }
-
-          // Dernière page
-          if (endPage < totalPages - 1) {
-            // Ellipsis si nécessaire
-            if (endPage < totalPages - 2) {
-              pageButtons.push(
-                <Text key="ellipsis-end" style={styles.pageNumberText}>
-                  ...
-                </Text>
-              );
-            }
-
-            pageButtons.push(
-              <Pressable
-                key={`page-${totalPages - 1}`}
-                style={[
-                  styles.pageNumberButton,
-                  totalPages - 1 === page && styles.currentPageButton,
-                ]}
-                onPress={() => goToPage(totalPages - 1)}
-              >
-                <Text
-                  style={[
-                    styles.pageNumberText,
-                    totalPages - 1 === page && styles.currentPageText,
-                  ]}
-                >
-                  {totalPages}
-                </Text>
+                <Text style={styles.pageNumberText}>{page + 2}</Text>
               </Pressable>
             );
           }
@@ -1299,13 +1229,13 @@ export default function BillsScreen() {
   const renderBillItem = useCallback(
     ({ item }: { item: Bill }) => (
       <BillListItem
-        key={`bill-${item.id}-${item.timestamp}`}
+        key={`bill-${item.id}`} // Simplifier la clé
         bill={item}
         isSelected={selectedBill?.id === item.id}
         onSelect={handleSelectBill}
       />
     ),
-    [selectedBill, handleSelectBill]
+    [selectedBill?.id, handleSelectBill]
   );
 
   const renderListFooter = useCallback(() => {
@@ -1371,17 +1301,18 @@ export default function BillsScreen() {
               <FlatList
                 data={paginatedBills}
                 renderItem={renderBillItem}
-                keyExtractor={keyExtractor} // Assurez-vous d'avoir une fonction keyExtractor stable
-                getItemLayout={getItemLayout} // Ajoutez cette fonction pour des performances optimales
+                keyExtractor={keyExtractor}
+                getItemLayout={getItemLayout}
                 initialNumToRender={10}
                 maxToRenderPerBatch={8}
-                windowSize={15} // Optimisé pour la plupart des écrans
+                windowSize={15}
                 removeClippedSubviews={true}
                 updateCellsBatchingPeriod={50}
                 onEndReachedThreshold={0.5}
                 onEndReached={handleLoadMore}
                 ListFooterComponent={renderListFooter}
-                maintainVisibleContentPosition={{ minIndexForVisible: 0 }} // Aide à maintenir la position lors du changement de données
+                maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+                extraData={selectedBill?.id}
               />
               {renderPagination()}
             </View>

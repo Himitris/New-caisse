@@ -72,7 +72,7 @@ export default function SettingsScreen() {
 
               // Réinitialiser les tables en conservant leur nom et section
               // mais en effaçant leur statut, commandes, etc.
-              const resetTables = tables.map((table) => ({
+              const resetTables = tables.map((table: any) => ({
                 ...table,
                 status: 'available' as const,
                 guests: undefined,

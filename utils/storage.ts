@@ -107,7 +107,7 @@ const CONFIG = {
   MAX_ARCHIVE_AGE_DAYS: 90,
   CACHE_EXPIRY_MS: 5 * 60 * 1000, // 5 minutes
   MAX_STORAGE_SIZE_MB: 5,
-  COMPRESSION_ENABLED: true,
+  COMPRESSION_ENABLED: false,
   COMPRESSION_THRESHOLD: 1024, // Compresser seulement si > 1KB
   BATCH_SIZE: 100,
 } as const;
@@ -153,6 +153,11 @@ class CompressionManager {
 
       const jsonStr = JSON.stringify(data);
 
+      // Ne pas compresser les petites données
+      if (jsonStr.length < CONFIG.COMPRESSION_THRESHOLD) {
+        return jsonStr;
+      }
+
       // Compresser avec lz-string (format UTF16 pour compatibilité)
       const compressed = LZString.compressToUTF16(jsonStr);
 
@@ -160,10 +165,10 @@ class CompressionManager {
       return this.COMPRESSION_MARKER + compressed;
     } catch (error) {
       console.error('Compression error:', error);
+      // En cas d'erreur, retourner les données brutes
       return JSON.stringify(data);
     }
   }
-
   static decompress(data: string): any {
     try {
       // Vérifier si les données sont compressées avec notre nouveau format
@@ -287,26 +292,32 @@ class StorageManager {
   static async batchSave(
     operations: Array<{ key: string; data: any }>
   ): Promise<void> {
-    const pairs: [string, string][] = operations.map((op) => {
-      const jsonValue = this.shouldCompress(op.data)
-        ? CompressionManager.compress(op.data)
-        : JSON.stringify(op.data);
+    try {
+      const pairs: [string, string][] = operations.map((op) => {
+        const needsCompression =
+          JSON.stringify(op.data).length > CONFIG.COMPRESSION_THRESHOLD;
+        const jsonValue = needsCompression
+          ? CompressionManager.compress(op.data)
+          : JSON.stringify(op.data);
 
-      // Créer un tuple correctement typé
-      return [op.key, jsonValue];
-    });
+        // Mettre à jour le cache mémoire
+        this.memoryCache.set(op.key, op.data);
 
-    // Mise à jour du cache mémoire
-    operations.forEach((op) => {
-      this.memoryCache.set(op.key, op.data);
-    });
+        // Créer un tuple correctement typé
+        return [op.key, jsonValue];
+      });
 
-    // Vérifier si nous avons des paires à enregistrer
-    if (pairs.length > 0) {
-      return AsyncStorage.multiSet(pairs);
+      // Vérifier si nous avons des paires à enregistrer
+      if (pairs.length > 0) {
+        await AsyncStorage.multiSet(pairs);
+        log.info(`Batch saved ${pairs.length} items successfully`);
+      }
+
+      return Promise.resolve();
+    } catch (error) {
+      log.error(`Error in batch save:`, error);
+      throw error;
     }
-
-    return Promise.resolve();
   }
 
   static async resetApplicationData(): Promise<void> {
@@ -350,18 +361,37 @@ class StorageManager {
     data: T,
     compress: boolean = CONFIG.COMPRESSION_ENABLED
   ): Promise<void> {
-    // Vérifier si les données ont changé
-    const cachedData = this.memoryCache.get<T>(key);
-    if (cachedData && !this.isDataChanged(cachedData, data)) {
-      // Données identiques, pas besoin de sauvegarder
+    try {
+      // Vérifier si les données ont changé
+      const cachedData = this.memoryCache.get<T>(key);
+      if (cachedData && !this.isDataChanged(cachedData, data)) {
+        // Données identiques, pas besoin de sauvegarder
+        return Promise.resolve();
+      }
+
+      // Mettre à jour le cache avant de sauvegarder
+      this.memoryCache.set(key, data);
+
+      // Convertir en chaîne de caractères
+      let jsonValue: string;
+      if (
+        compress &&
+        JSON.stringify(data).length > CONFIG.COMPRESSION_THRESHOLD
+      ) {
+        jsonValue = CompressionManager.compress(data);
+      } else {
+        jsonValue = JSON.stringify(data);
+      }
+
+      // Enregistrer de manière asynchrone mais s'assurer que l'opération se termine
+      await AsyncStorage.setItem(key, jsonValue);
+      log.info(`Data saved to ${key} successfully`);
+
       return Promise.resolve();
+    } catch (error) {
+      log.error(`Error saving data to ${key}:`, error);
+      throw error;
     }
-
-    // Mettre à jour le cache avant de sauvegarder
-    this.memoryCache.set(key, data);
-
-    // Utiliser batchSave même pour une seule opération (cohérence du code)
-    return this.batchSave([{ key, data }]);
   }
 
   static async load<T>(key: string, defaultValue: T): Promise<T> {
@@ -834,10 +864,16 @@ class TableManager {
         tables.push(updatedTable);
       }
 
-      await TableManager.saveTables(tables);
-      log.info(`Updated table ${updatedTable.id} successfully`);
+      // Sauvegarde directe avec AsyncStorage
+      await AsyncStorage.setItem(STORAGE_KEYS.TABLES, JSON.stringify(tables));
+
+      // Mettre à jour le cache
+      StorageManager.memoryCache.set(STORAGE_KEYS.TABLES, tables);
+
+      // Émettre l'événement
+      events.emit(EVENT_TYPES.TABLE_UPDATED, updatedTable.id);
     } catch (error) {
-      log.error(`Error updating table ${updatedTable.id}:`, error);
+      console.error(`Error updating table ${updatedTable.id}:`, error);
       throw error;
     }
   }
@@ -969,12 +1005,18 @@ class BillManager {
       // Nettoyer les anciennes factures si nécessaire
       const cleanedBills = await BillManager.cleanOldBills(bills);
 
-      await BillManager.saveBills(cleanedBills);
-      log.info(`Added new bill ID ${bill.id} for table ${bill.tableNumber}`);
+      // Sauvegarde directe avec AsyncStorage
+      await AsyncStorage.setItem(
+        STORAGE_KEYS.BILLS,
+        JSON.stringify(cleanedBills)
+      );
+
+      // Mettre à jour le cache
+      StorageManager.memoryCache.set(STORAGE_KEYS.BILLS, cleanedBills);
 
       events.emit(EVENT_TYPES.PAYMENT_ADDED, bill.tableNumber, bill);
     } catch (error) {
-      log.error(`Error adding bill:`, error);
+      console.error(`Error adding bill:`, error);
       throw error;
     }
   }

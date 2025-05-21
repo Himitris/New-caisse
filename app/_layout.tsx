@@ -3,8 +3,10 @@ import { useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { View, Text, ActivityIndicator } from 'react-native';
+import { View, Text, ActivityIndicator, AppState } from 'react-native';
 import {
+  getBills,
+  getTables,
   initializeTables,
   STORAGE_KEYS,
   StorageManager,
@@ -23,6 +25,43 @@ declare global {
 
 export default function RootLayout() {
   const [initialized, setInitialized] = useState(false);
+
+  useEffect(() => {
+    // Sauvegarder les données lors de la mise en arrière-plan de l'app
+    const subscription = AppState.addEventListener(
+      'change',
+      async (nextAppState) => {
+        if (nextAppState === 'background' || nextAppState === 'inactive') {
+          // L'application passe en arrière-plan
+          console.log('App en arrière-plan - sauvegarde forcée des données');
+
+          try {
+            // Récupérer et sauvegarder les tables
+            const tables = await getTables();
+            await AsyncStorage.setItem(
+              STORAGE_KEYS.TABLES,
+              JSON.stringify(tables)
+            );
+
+            // Récupérer et sauvegarder les factures
+            const bills = await getBills();
+            await AsyncStorage.setItem(
+              STORAGE_KEYS.BILLS,
+              JSON.stringify(bills)
+            );
+
+            console.log('Données sauvegardées avec succès avant la fermeture');
+          } catch (error) {
+            console.error('Erreur lors de la sauvegarde forcée:', error);
+          }
+        }
+      }
+    );
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
 
   useEffect(() => {
     // Initialize app data
