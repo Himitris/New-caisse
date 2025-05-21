@@ -128,7 +128,8 @@ export default function TableScreen() {
   const tableId = parseInt(id as string, 10);
   const router = useRouter();
   const toast = useToast();
-  const { getTableById, updateTableInContext } = useTableContext();
+  const { getTableById, updateTableInContext, refreshSingleTable } =
+    useTableContext();
 
   const [unavailableItems, setUnavailableItems] = useState<number[]>([]);
   const [guestCount, setGuestCount] = useState(1);
@@ -261,24 +262,22 @@ export default function TableScreen() {
   const loadTable = useCallback(async () => {
     setLoading(true);
     try {
-      // Forcer le rechargement complet depuis le stockage
+      // Utiliser la fonction du context pour rafraîchir uniquement cette table
+      await refreshSingleTable(tableId);
+
+      // Maintenant, récupérer la table fraîchement mise à jour
       const freshTable = await getTable(tableId);
+
       if (freshTable) {
-        // Mettre à jour l'état avec les données fraîches
         setTable(freshTable);
         setGuestCount(freshTable.guests || 1);
-
-        // Si la table a un ordre, assurez-vous qu'il est à jour
-        if (freshTable.order) {
-          batchedUpdates.current = null; // Réinitialiser les mises à jour en attente
-        }
       }
     } catch (error) {
       console.error('Error loading table:', error);
     } finally {
       setLoading(false);
     }
-  }, [tableId]);
+  }, [tableId, refreshSingleTable]);
 
   useEffect(() => {
     // Écouter les événements de mise à jour de la table
@@ -310,36 +309,29 @@ export default function TableScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      console.log('Plan du restaurant en focus - rafraîchissement des données');
-      setTable(null); // Réinitialiser d'abord l'état local
-      loadTable(); // Puis charger les données fraîches
+      console.log(`Table ${tableId} en focus - rafraîchissement sélectif`);
+
+      // Rafraîchir uniquement cette table spécifique
+      refreshSingleTable(tableId);
 
       return () => {
-        // Annuler tout timeout en cours lors du déplacement
-        if (updateTimeoutRef.current) {
-          clearTimeout(updateTimeoutRef.current);
-          updateTimeoutRef.current = null;
-        }
+        // Nettoyage
       };
-    }, [loadTable])
+    }, [tableId, refreshSingleTable])
   );
 
   useEffect(() => {
-    // S'abonner à l'événement TABLE_UPDATED
     const unsubscribe = events.on(
       EVENT_TYPES.TABLE_UPDATED,
       (updatedTableId: number) => {
         if (updatedTableId === tableId) {
-          // Force un rechargement complet des données de la table
-          console.log(`Table ${tableId} was updated, reloading data...`);
-          setTable(null); // Réinitialiser d'abord
-          loadTable(); // Puis recharger
+          // Rafraîchir seulement si c'est notre table qui a été mise à jour
+          loadTable();
         }
       }
     );
 
     return () => {
-      // Se désabonner de l'événement lors du nettoyage
       unsubscribe();
     };
   }, [tableId, loadTable]);
@@ -524,9 +516,12 @@ export default function TableScreen() {
 
       updatedTable.order.total = calculateTotal(updatedTable.order.items);
 
-      // Utiliser les deux:
-      setTable(updatedTable); // Mise à jour instantanée de l'UI
-      await updateTableInContext(updatedTable); // Mise à jour dans le context et le stockage
+      // Mettre à jour l'état local immédiatement pour une UX réactive
+      setTable(updatedTable);
+      
+      // Utiliser la fonction du contexte pour mettre à jour la table
+      // et émettre l'événement approprié
+      await updateTableInContext(updatedTable);
     },
     [table, guestCount, calculateTotal, updateTableInContext]
   );

@@ -65,7 +65,12 @@ const tableCache = {
 
 export default function TablesScreen() {
   const router = useRouter();
-  const { tables, isLoading: tablesLoading, refreshTables } = useTableContext(); // Utiliser le context
+  const {
+    tables,
+    isLoading: tablesLoading,
+    refreshTables,
+    refreshSingleTable,
+  } = useTableContext();
   const [loading, setLoading] = useState(true); // Garder cette variable pour compatibilité
   const [refreshing, setRefreshing] = useState(false);
   const [activeSection, setActiveSection] = useState<string | null>(null);
@@ -156,13 +161,10 @@ export default function TablesScreen() {
         }),
       ]).start();
 
-      // Rafraîchir les tables via le context
-      refreshTables();
-
       return () => {
         // Fonction de nettoyage
       };
-    }, [refreshTables, fadeAnim, slideAnim])
+    }, [fadeAnim, slideAnim])
   );
 
   // Fonction de rafraîchissement

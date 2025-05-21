@@ -7,13 +7,14 @@ import React, {
   ReactNode,
   useCallback,
 } from 'react';
-import { Table, getTables, updateTable } from './storage';
+import { Table, getTables, updateTable, getTable } from './storage';
 import { EVENT_TYPES, events } from './events';
 
 interface TableContextType {
   tables: Table[];
   isLoading: boolean;
   refreshTables: () => Promise<void>;
+  refreshSingleTable: (tableId: number) => Promise<void>;
   getTableById: (id: number) => Table | undefined;
   updateTableInContext: (updatedTable: Table) => Promise<void>;
 }
@@ -36,6 +37,24 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  // Fonction pour rafraîchir une seule table
+  const refreshSingleTable = useCallback(async (tableId: number) => {
+    try {
+      // Récupérer uniquement la table spécifique
+      const freshTable = await getTable(tableId);
+
+      if (freshTable) {
+        // Mettre à jour seulement cette table dans le state
+        setTables((prev) =>
+          prev.map((table) => (table.id === tableId ? freshTable : table))
+        );
+        console.log(`Table ${tableId} refreshed individually`);
+      }
+    } catch (error) {
+      console.error(`Error refreshing single table ${tableId}:`, error);
+    }
+  }, []);
+
   // Charger les tables au démarrage
   useEffect(() => {
     loadTables();
@@ -46,22 +65,14 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
     const unsubscribe = events.on(
       EVENT_TYPES.TABLE_UPDATED,
       (updatedTableId: number) => {
-        // Mettre à jour seulement la table spécifique sans recharger toutes les tables
-        getTables().then((freshTables) => {
-          const updatedTable = freshTables.find((t) => t.id === updatedTableId);
-          if (updatedTable) {
-            setTables((prev) =>
-              prev.map((table) =>
-                table.id === updatedTableId ? updatedTable : table
-              )
-            );
-          }
-        });
+        // Optimisation: mettre à jour seulement la table spécifique
+        // sans recharger toutes les tables
+        refreshSingleTable(updatedTableId);
       }
     );
 
     return unsubscribe;
-  }, []);
+  }, [refreshSingleTable]);
 
   const refreshTables = async () => {
     await loadTables();
@@ -71,22 +82,6 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
     return tables.find((table) => table.id === id);
   };
 
-  const updateSingleTableInContext = useCallback(
-    async (updatedTable: Table) => {
-      setTables((prevTables) =>
-        prevTables.map((table) =>
-          table.id === updatedTable.id ? updatedTable : table
-        )
-      );
-      // Pas besoin d'attendre la sauvegarde pour mettre à jour l'UI
-      // Mettre à jour le stockage en arrière-plan
-      updateTable(updatedTable).catch((error) =>
-        console.error('Error updating table:', error)
-      );
-    },
-    []
-  );
-
   const updateTableInContext = async (updatedTable: Table) => {
     // Mettre à jour dans le stockage
     await updateTable(updatedTable);
@@ -95,6 +90,9 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
     setTables((prev) =>
       prev.map((table) => (table.id === updatedTable.id ? updatedTable : table))
     );
+
+    // Émettre l'événement pour informer d'autres composants
+    events.emit(EVENT_TYPES.TABLE_UPDATED, updatedTable.id);
   };
 
   return (
@@ -103,6 +101,7 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
         tables,
         isLoading,
         refreshTables,
+        refreshSingleTable,
         getTableById,
         updateTableInContext,
       }}

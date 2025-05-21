@@ -6,7 +6,13 @@ import React, {
   useCallback,
   ReactNode,
 } from 'react';
-import { View, Text, StyleSheet, Animated } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Animated,
+  TouchableOpacity,
+} from 'react-native';
 
 type ToastType = 'success' | 'error' | 'info' | 'warning';
 
@@ -36,6 +42,21 @@ export const ToastProvider: React.FC<{ children: ReactNode }> = ({
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const [fadeAnim] = useState(new Animated.Value(0));
 
+  const removeToast = useCallback(
+    (id: number) => {
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }).start(() => {
+        setToasts((prevToasts) =>
+          prevToasts.filter((toast) => toast.id !== id)
+        );
+      });
+    },
+    [fadeAnim]
+  );
+
   const showToast = useCallback(
     (message: string, type: ToastType = 'info') => {
       const id = Date.now();
@@ -50,19 +71,10 @@ export const ToastProvider: React.FC<{ children: ReactNode }> = ({
 
       // Auto dismiss after 3 seconds
       setTimeout(() => {
-        // Fade out
-        Animated.timing(fadeAnim, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-        }).start(() => {
-          setToasts((prevToasts) =>
-            prevToasts.filter((toast) => toast.id !== id)
-          );
-        });
+        removeToast(id);
       }, 3000);
     },
-    [fadeAnim]
+    [fadeAnim, removeToast]
   );
 
   const getBackgroundColor = (type: ToastType) => {
@@ -85,16 +97,21 @@ export const ToastProvider: React.FC<{ children: ReactNode }> = ({
       {toasts.length > 0 && (
         <View style={styles.toastContainer}>
           {toasts.map((toast) => (
-            <Animated.View
+            <TouchableOpacity
               key={toast.id}
-              style={[
-                styles.toast,
-                { backgroundColor: getBackgroundColor(toast.type) },
-                { opacity: fadeAnim },
-              ]}
+              activeOpacity={0.8}
+              onPress={() => removeToast(toast.id)}
             >
-              <Text style={styles.toastText}>{toast.message}</Text>
-            </Animated.View>
+              <Animated.View
+                style={[
+                  styles.toast,
+                  { backgroundColor: getBackgroundColor(toast.type) },
+                  { opacity: fadeAnim },
+                ]}
+              >
+                <Text style={styles.toastText}>{toast.message}</Text>
+              </Animated.View>
+            </TouchableOpacity>
           ))}
         </View>
       )}

@@ -1,4 +1,4 @@
-// utils/payment-utils.ts
+// utils/payment-utils.ts - Version optimisée
 
 import { getTable, updateTable, resetTable, Table, OrderItem } from './storage';
 import { events, EVENT_TYPES } from './events';
@@ -145,8 +145,9 @@ export const processPartialPayment = async (
       // Réinitialiser la table au lieu de juste mettre à jour
       await resetTable(tableId);
 
-      // Émettre l'événement pour informer l'interface
-      events.emit(EVENT_TYPES.TABLE_UPDATED, tableId);
+      // Émettre l'événement pour informer l'interface - la table est mise à jour
+      // avec une source indiquée pour éviter les boucles
+      events.emit(EVENT_TYPES.TABLE_UPDATED, tableId, 'paymentUtils');
 
       return {
         success: true,
@@ -166,7 +167,8 @@ export const processPartialPayment = async (
       };
 
       await updateTable(updatedTable);
-      // Émettre l'événement pour informer l'interface
+
+      // Émettre l'événement pour informer l'interface - une table spécifique est mise à jour
       events.emit(EVENT_TYPES.TABLE_UPDATED, tableId);
 
       return {
