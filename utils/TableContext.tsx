@@ -38,36 +38,59 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
   };
 
   // Fonction pour rafraîchir une seule table
-  const refreshSingleTable = useCallback(async (tableId: number) => {
-    try {
-      // Récupérer uniquement la table spécifique
-      const freshTable = await getTable(tableId);
-
-      if (freshTable) {
-        // Mettre à jour seulement cette table dans le state
-        setTables((prev) =>
-          prev.map((table) => (table.id === tableId ? freshTable : table))
+  const refreshSingleTable = useCallback(
+    async (tableId: number, source?: string) => {
+      try {
+        // Ajouter un log pour débugger
+        console.log(
+          `Refreshing table ${tableId} from source: ${source || 'unknown'}`
         );
-        console.log(`Table ${tableId} refreshed individually`);
+
+        // Récupérer uniquement la table spécifique
+        const freshTable = await getTable(tableId);
+
+        if (freshTable) {
+          // Mettre à jour seulement cette table dans le state
+          setTables((prev) =>
+            prev.map((table) => (table.id === tableId ? freshTable : table))
+          );
+          console.log(`Table ${tableId} refreshed successfully`);
+        }
+      } catch (error) {
+        console.error(`Error refreshing single table ${tableId}:`, error);
       }
-    } catch (error) {
-      console.error(`Error refreshing single table ${tableId}:`, error);
-    }
-  }, []);
+    },
+    []
+  );
 
   // Charger les tables au démarrage
   useEffect(() => {
     loadTables();
   }, []);
 
-  // Écouter les événements de mise à jour
   useEffect(() => {
+    // Un set pour suivre les mises à jour récentes
+    const recentUpdates = new Set<number>();
+
     const unsubscribe = events.on(
       EVENT_TYPES.TABLE_UPDATED,
       (updatedTableId: number) => {
-        // Optimisation: mettre à jour seulement la table spécifique
-        // sans recharger toutes les tables
-        refreshSingleTable(updatedTableId);
+        // Éviter les mises à jour dupliquées rapprochées
+        if (recentUpdates.has(updatedTableId)) {
+          console.log(`Skipping redundant update for table ${updatedTableId}`);
+          return;
+        }
+
+        // Marquer cette table comme récemment mise à jour
+        recentUpdates.add(updatedTableId);
+
+        // Rafraîchir la table
+        refreshSingleTable(updatedTableId, 'event');
+
+        // Supprimer du set après un court délai
+        setTimeout(() => {
+          recentUpdates.delete(updatedTableId);
+        }, 300);
       }
     );
 

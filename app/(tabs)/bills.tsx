@@ -1055,40 +1055,128 @@ export default function BillsScreen() {
           <Text style={styles.paginationButtonText}>Précédent</Text>
         </Pressable>
 
-        {/* Afficher les numéros de page */}
-        {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-          // Logique pour afficher les pages autour de la page courante
-          let pageNum;
-          if (totalPages <= 5) {
-            pageNum = i;
-          } else if (page < 3) {
-            pageNum = i;
-          } else if (page > totalPages - 3) {
-            pageNum = totalPages - 5 + i;
+        {/* Afficher un nombre limité de pages */}
+        {(() => {
+          const pageButtons = [];
+          const maxVisiblePages = 5; // Maximum de pages visibles
+          let startPage = 0;
+          let endPage = 0;
+
+          if (totalPages <= maxVisiblePages) {
+            // Moins de 5 pages, on affiche toutes
+            startPage = 0;
+            endPage = totalPages - 1;
+          } else if (page < Math.floor(maxVisiblePages / 2)) {
+            // Proche du début
+            startPage = 0;
+            endPage = maxVisiblePages - 1;
+          } else if (page >= totalPages - Math.floor(maxVisiblePages / 2)) {
+            // Proche de la fin
+            startPage = totalPages - maxVisiblePages;
+            endPage = totalPages - 1;
           } else {
-            pageNum = page - 2 + i;
+            // Au milieu
+            startPage = page - Math.floor(maxVisiblePages / 2);
+            endPage = page + Math.floor(maxVisiblePages / 2);
           }
 
-          return (
-            <Pressable
-              key={pageNum}
-              style={[
-                styles.pageNumberButton,
-                pageNum === page && styles.currentPageButton,
-              ]}
-              onPress={() => goToPage(pageNum)}
-            >
-              <Text
+          // Première page
+          if (startPage > 0) {
+            pageButtons.push(
+              <Pressable
+                key="page-0"
                 style={[
-                  styles.pageNumberText,
-                  pageNum === page && styles.currentPageText,
+                  styles.pageNumberButton,
+                  0 === page && styles.currentPageButton,
                 ]}
+                onPress={() => goToPage(0)}
               >
-                {pageNum + 1}
-              </Text>
-            </Pressable>
-          );
-        })}
+                <Text
+                  style={[
+                    styles.pageNumberText,
+                    0 === page && styles.currentPageText,
+                  ]}
+                >
+                  1
+                </Text>
+              </Pressable>
+            );
+
+            // Ellipsis si nécessaire
+            if (startPage > 1) {
+              pageButtons.push(
+                <Text key="ellipsis-start" style={styles.pageNumberText}>
+                  ...
+                </Text>
+              );
+            }
+          }
+
+          // Pages du milieu
+          for (let i = startPage; i <= endPage; i++) {
+            // Skip si c'est la première ou dernière page et qu'on les a déjà affichées
+            if (
+              (i === 0 && startPage > 0) ||
+              (i === totalPages - 1 && endPage < totalPages - 1)
+            ) {
+              continue;
+            }
+
+            pageButtons.push(
+              <Pressable
+                key={`page-${i}`}
+                style={[
+                  styles.pageNumberButton,
+                  i === page && styles.currentPageButton,
+                ]}
+                onPress={() => goToPage(i)}
+              >
+                <Text
+                  style={[
+                    styles.pageNumberText,
+                    i === page && styles.currentPageText,
+                  ]}
+                >
+                  {i + 1}
+                </Text>
+              </Pressable>
+            );
+          }
+
+          // Dernière page
+          if (endPage < totalPages - 1) {
+            // Ellipsis si nécessaire
+            if (endPage < totalPages - 2) {
+              pageButtons.push(
+                <Text key="ellipsis-end" style={styles.pageNumberText}>
+                  ...
+                </Text>
+              );
+            }
+
+            pageButtons.push(
+              <Pressable
+                key={`page-${totalPages - 1}`}
+                style={[
+                  styles.pageNumberButton,
+                  totalPages - 1 === page && styles.currentPageButton,
+                ]}
+                onPress={() => goToPage(totalPages - 1)}
+              >
+                <Text
+                  style={[
+                    styles.pageNumberText,
+                    totalPages - 1 === page && styles.currentPageText,
+                  ]}
+                >
+                  {totalPages}
+                </Text>
+              </Pressable>
+            );
+          }
+
+          return pageButtons;
+        })()}
 
         <Pressable
           style={[
@@ -1103,6 +1191,7 @@ export default function BillsScreen() {
       </View>
     </View>
   );
+  
 
   const handlePrint = useCallback(async () => {
     if (!selectedBill) {

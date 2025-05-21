@@ -311,13 +311,19 @@ export default function TableScreen() {
     useCallback(() => {
       console.log(`Table ${tableId} en focus - rafraîchissement sélectif`);
 
-      // Rafraîchir uniquement cette table spécifique
-      refreshSingleTable(tableId);
+      // Un flag pour éviter les mises à jour inutiles
+      let isMounted = true;
+
+      // Vérifier d'abord si la table a besoin d'être mise à jour
+      const tableInContext = getTableById(tableId);
+      if (!tableInContext || !table || tableInContext.id !== table.id) {
+        refreshSingleTable(tableId);
+      }
 
       return () => {
-        // Nettoyage
+        isMounted = false;
       };
-    }, [tableId, refreshSingleTable])
+    }, [tableId, refreshSingleTable, getTableById, table])
   );
 
   useEffect(() => {

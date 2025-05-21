@@ -404,8 +404,11 @@ export default function ItemsPaymentScreen() {
           };
           return updatedSelectedItems;
         } else {
+          // Générer un ID unique pour éviter les duplications
           const newSelectedItem: SelectedMenuItem = {
             ...item,
+            // S'assurer que l'ID est unique avec un timestamp
+            id: item.id + Date.now(),
             selectedQuantity: quantityToAdd,
             offered: item.offered, // Préserver l'état offert de l'article original
           };
@@ -836,7 +839,7 @@ export default function ItemsPaymentScreen() {
                 <ScrollView style={styles.itemsList}>
                   {categorizeItems(availableItems).plat.map((item) => (
                     <ItemCard
-                      key={item.id}
+                      key={`available-plat-${item.id}-${Math.random()}`}
                       item={item}
                       isSelected={false}
                       onAdd={(addAll) => addItemToSelection(item, addAll)}
@@ -851,7 +854,7 @@ export default function ItemsPaymentScreen() {
                 <ScrollView style={styles.itemsList}>
                   {categorizeItems(availableItems).boisson.map((item) => (
                     <ItemCard
-                      key={item.id}
+                      key={`available-boisson-${item.id}-${Math.random()}`}
                       item={item}
                       isSelected={false}
                       onAdd={(addAll) => addItemToSelection(item, addAll)}
@@ -879,7 +882,7 @@ export default function ItemsPaymentScreen() {
                 <ScrollView style={styles.itemsList}>
                   {categorizeItems(selectedItems).plat.map((item) => (
                     <ItemCard
-                      key={item.id}
+                      key={`selected-plat-${item.id}`}
                       item={item}
                       isSelected={true}
                       onQuantityChange={(increment) =>
@@ -896,7 +899,7 @@ export default function ItemsPaymentScreen() {
                 <ScrollView style={styles.itemsList}>
                   {categorizeItems(selectedItems).boisson.map((item) => (
                     <ItemCard
-                      key={item.id}
+                      key={`selected-boisson-${item.id}`}
                       item={item}
                       isSelected={true}
                       onQuantityChange={(increment) =>
