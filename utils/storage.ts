@@ -395,47 +395,49 @@ class StorageManager {
   }
 
   static async load<T>(key: string, defaultValue: T): Promise<T> {
-    const startTime = Date.now();
-    try {
-      // Vérifier le cache en mémoire
-      const cachedData = this.memoryCache.get<T>(key);
-      if (cachedData !== null) {
-        log.perf(`Cache hit for ${key}`, { duration: Date.now() - startTime });
-        return cachedData;
-      }
-
-      const jsonValue = await AsyncStorage.getItem(key);
-      if (jsonValue === null) {
-        log.info(`No data found for ${key}, using default value`);
-        return defaultValue;
-      }
-
-      let parsedData: T;
+    return LoadingStateManager.getOrLoad(key, async () => {
+      const startTime = Date.now();
       try {
-        // Essayer d'abord comme JSON normal
-        parsedData = JSON.parse(jsonValue) as T;
-      } catch (parseError) {
-        try {
-          // Essayer comme données compressées
-          parsedData = CompressionManager.decompress(jsonValue) as T;
-        } catch (decompressError) {
-          // Journaliser l'erreur mais retourner la valeur par défaut
-          log.error(`Failed to parse data from ${key}:`, decompressError);
-          // Sauvegarder la donnée corrompue pour analyse ultérieure
-          await AsyncStorage.setItem(`${key}_corrupted`, jsonValue);
+        // Vérifier le cache en mémoire
+        const cachedData = this.memoryCache.get<T>(key);
+        if (cachedData !== null) {
+          log.perf(`Cache hit for ${key}`, {
+            duration: Date.now() - startTime,
+          });
+          return cachedData;
+        }
+
+        const jsonValue = await AsyncStorage.getItem(key);
+        if (jsonValue === null) {
+          log.info(`No data found for ${key}, using default value`);
           return defaultValue;
         }
+
+        let parsedData: T;
+        try {
+          parsedData = JSON.parse(jsonValue) as T;
+        } catch (parseError) {
+          try {
+            parsedData = CompressionManager.decompress(jsonValue) as T;
+          } catch (decompressError) {
+            log.error(`Failed to parse data from ${key}:`, decompressError);
+            await AsyncStorage.setItem(`${key}_corrupted`, jsonValue);
+            return defaultValue;
+          }
+        }
+
+        this.memoryCache.set(key, parsedData);
+        this.trackPerformance(key, 'read');
+        log.perf(`Loaded data from ${key}`, {
+          duration: Date.now() - startTime,
+        });
+
+        return parsedData;
+      } catch (error) {
+        log.error(`Error loading data from ${key}:`, error);
+        return defaultValue;
       }
-
-      this.memoryCache.set(key, parsedData);
-      this.trackPerformance(key, 'read');
-      log.perf(`Loaded data from ${key}`, { duration: Date.now() - startTime });
-
-      return parsedData;
-    } catch (error) {
-      log.error(`Error loading data from ${key}:`, error);
-      return defaultValue;
-    }
+    });
   }
 
   private static shouldCompress(data: any): boolean {
@@ -771,6 +773,7 @@ export const defaultTables: Table[] = [
 // Classe de gestion des tables optimisée
 class TableManager {
   private static readonly CACHE_KEY = 'tables_cache';
+  private static isInitializing = false;
 
   static async initializeTables(): Promise<Table[]> {
     try {
@@ -805,35 +808,45 @@ class TableManager {
   };
 
   static async getTables(): Promise<Table[]> {
-    try {
-      let tables = await StorageManager.load<Table[]>(STORAGE_KEYS.TABLES, []);
+    return LoadingStateManager.getOrLoad('getTables', async () => {
+      try {
+        let tables = await StorageManager.load<Table[]>(
+          STORAGE_KEYS.TABLES,
+          []
+        );
 
-      if (tables.length === 0) {
-        log.info('No tables found, initializing with defaults');
-        return await TableManager.initializeTables();
-      }
-
-      const needsCorrection = tables.some((table) => !table.section);
-      if (needsCorrection) {
-        log.info('Found tables with missing section, correcting...');
-        tables = tables.map((table) => {
-          if (!table.section) {
-            const defaultTable = defaultTables.find((t) => t.id === table.id);
-            return {
-              ...table,
-              section: defaultTable?.section || TABLE_SECTIONS.EAU,
-            };
+        if (tables.length === 0 && !this.isInitializing) {
+          log.info('No tables found, initializing with defaults');
+          this.isInitializing = true;
+          try {
+            tables = await TableManager.initializeTables();
+          } finally {
+            this.isInitializing = false;
           }
-          return table;
-        });
-        await StorageManager.save(STORAGE_KEYS.TABLES, tables);
-      }
+        }
 
-      return tables;
-    } catch (error) {
-      log.error('Error retrieving tables:', error);
-      return defaultTables;
-    }
+        const needsCorrection = tables.some((table) => !table.section);
+        if (needsCorrection) {
+          log.info('Found tables with missing section, correcting...');
+          tables = tables.map((table) => {
+            if (!table.section) {
+              const defaultTable = defaultTables.find((t) => t.id === table.id);
+              return {
+                ...table,
+                section: defaultTable?.section || TABLE_SECTIONS.EAU,
+              };
+            }
+            return table;
+          });
+          await StorageManager.save(STORAGE_KEYS.TABLES, tables);
+        }
+
+        return tables;
+      } catch (error) {
+        log.error('Error retrieving tables:', error);
+        return defaultTables;
+      }
+    });
   }
 
   static async saveTables(tables: Table[]): Promise<void> {
@@ -990,7 +1003,9 @@ class TableManager {
 // Classe de gestion des factures optimisée
 class BillManager {
   static async getBills(): Promise<Bill[]> {
-    return StorageManager.load<Bill[]>(STORAGE_KEYS.BILLS, []);
+    return LoadingStateManager.getOrLoad('getBills', async () => {
+      return StorageManager.load<Bill[]>(STORAGE_KEYS.BILLS, []);
+    });
   }
 
   static async saveBills(bills: Bill[]): Promise<void> {
@@ -1371,6 +1386,30 @@ class MenuManager {
     } catch (error) {
       log.error(`Error updating item availability:`, error);
       throw error;
+    }
+  }
+}
+
+// Dans utils/storage.ts - Ajouter cette classe
+class LoadingStateManager {
+  private static loadingStates = new Map<string, Promise<any>>();
+
+  static async getOrLoad<T>(key: string, loadFunction: () => Promise<T>): Promise<T> {
+    // Si déjà en cours de chargement, retourner la promesse existante
+    if (this.loadingStates.has(key)) {
+      return this.loadingStates.get(key) as Promise<T>;
+    }
+
+    // Créer et stocker la promesse de chargement
+    const loadingPromise = loadFunction();
+    this.loadingStates.set(key, loadingPromise);
+
+    try {
+      const result = await loadingPromise;
+      return result;
+    } finally {
+      // Nettoyer l'état de chargement une fois terminé
+      this.loadingStates.delete(key);
     }
   }
 }

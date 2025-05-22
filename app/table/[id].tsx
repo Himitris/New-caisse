@@ -311,17 +311,16 @@ export default function TableScreen() {
     useCallback(() => {
       console.log(`Table ${tableId} en focus - rafraîchissement sélectif`);
 
-      // Un flag pour éviter les mises à jour inutiles
-      let isMounted = true;
-
-      // Vérifier d'abord si la table a besoin d'être mise à jour
-      const tableInContext = getTableById(tableId);
-      if (!tableInContext || !table || tableInContext.id !== table.id) {
-        refreshSingleTable(tableId);
-      }
+      // Debounce pour éviter les appels multiples rapides
+      const timeoutId = setTimeout(() => {
+        const tableInContext = getTableById(tableId);
+        if (!tableInContext || !table || tableInContext.id !== table.id) {
+          refreshSingleTable(tableId);
+        }
+      }, 100); // Délai de 100ms
 
       return () => {
-        isMounted = false;
+        clearTimeout(timeoutId);
       };
     }, [tableId, refreshSingleTable, getTableById, table])
   );

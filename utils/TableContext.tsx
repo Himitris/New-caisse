@@ -24,8 +24,16 @@ const TableContext = createContext<TableContextType | undefined>(undefined);
 export const TableProvider = ({ children }: { children: ReactNode }) => {
   const [tables, setTables] = useState<Table[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingRef, setIsLoadingRef] = useState(false); // Nouveau flag
 
   const loadTables = async () => {
+    // Éviter les chargements multiples simultanés
+    if (isLoadingRef) {
+      console.log('Tables loading already in progress, skipping...');
+      return;
+    }
+
+    setIsLoadingRef(true);
     setIsLoading(true);
     try {
       const loadedTables = await getTables();
@@ -34,6 +42,7 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
       console.error('Error loading tables:', error);
     } finally {
       setIsLoading(false);
+      setIsLoadingRef(false);
     }
   };
 

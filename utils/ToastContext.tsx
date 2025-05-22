@@ -23,7 +23,7 @@ interface ToastMessage {
   message: string;
   type: ToastType;
   opacity: Animated.Value;
-  isRemoving: boolean; // Flag pour indiquer qu'un toast est en cours de suppression
+  isRemoving: boolean;
 }
 
 interface ToastContextType {
@@ -49,13 +49,9 @@ export const ToastProvider: React.FC<{ children: ReactNode }> = ({
     {}
   );
 
-  // Nettoyer les timeouts et animations lors du démontage
   useEffect(() => {
     return () => {
-      // Nettoyer les timeouts
       Object.values(timeoutRefs.current).forEach(clearTimeout);
-
-      // Arrêter les animations en cours
       Object.values(animationRefs.current).forEach((animation) => {
         animation.stop();
       });
@@ -63,21 +59,18 @@ export const ToastProvider: React.FC<{ children: ReactNode }> = ({
   }, []);
 
   const removeToast = useCallback((id: number) => {
-    // Vérifier si le toast existe et n'est pas déjà en cours de suppression
     setToasts((prevToasts) => {
       const toastIndex = prevToasts.findIndex((t) => t.id === id);
       if (toastIndex === -1 || prevToasts[toastIndex].isRemoving) {
         return prevToasts;
       }
 
-      // Marquer le toast comme étant en cours de suppression
       const updatedToasts = [...prevToasts];
       updatedToasts[toastIndex] = {
         ...updatedToasts[toastIndex],
         isRemoving: true,
       };
 
-      // Démarrer l'animation de fade out
       const toast = prevToasts[toastIndex];
       const animation = Animated.timing(toast.opacity, {
         toValue: 0,
@@ -85,14 +78,11 @@ export const ToastProvider: React.FC<{ children: ReactNode }> = ({
         useNativeDriver: true,
       });
 
-      // Stocker la référence de l'animation
       animationRefs.current[id] = animation;
 
       animation.start(() => {
-        // Supprimer le toast une fois l'animation terminée
         setToasts((currentToasts) => currentToasts.filter((t) => t.id !== id));
 
-        // Nettoyer les références
         if (timeoutRefs.current[id]) {
           clearTimeout(timeoutRefs.current[id]);
           delete timeoutRefs.current[id];
@@ -110,15 +100,12 @@ export const ToastProvider: React.FC<{ children: ReactNode }> = ({
       const id = Date.now();
       const opacity = new Animated.Value(0);
 
-      // Ajouter le nouveau toast
       setToasts((prevToasts) => [
         ...prevToasts,
         { id, message, type, opacity, isRemoving: false },
       ]);
 
-      // Utiliser requestAnimationFrame pour s'assurer que l'animation démarre après le rendu
       requestAnimationFrame(() => {
-        // Démarrer l'animation de fade in
         const animation = Animated.timing(opacity, {
           toValue: 1,
           duration: 300,
@@ -128,7 +115,6 @@ export const ToastProvider: React.FC<{ children: ReactNode }> = ({
         animationRefs.current[id] = animation;
         animation.start();
 
-        // Configurer la suppression automatique
         const timeout = setTimeout(() => {
           removeToast(id);
         }, 3000);
@@ -157,15 +143,16 @@ export const ToastProvider: React.FC<{ children: ReactNode }> = ({
     <ToastContext.Provider value={{ showToast }}>
       {children}
       {toasts.length > 0 && (
-        <View style={styles.toastContainer}>
+        <View style={styles.toastContainer} pointerEvents="box-none">
           {toasts.map((toast) => (
             <TouchableOpacity
               key={toast.id}
               activeOpacity={0.8}
-              // Désactiver la pression pendant l'animation de suppression
               onPress={() => !toast.isRemoving && removeToast(toast.id)}
-              // Optionnel : désactiver visuellement le toast quand il est en cours de suppression
-              style={{ opacity: toast.isRemoving ? 0.7 : 1 }}
+              style={[
+                styles.toastWrapper,
+                { opacity: toast.isRemoving ? 0.7 : 1 },
+              ]}
             >
               <Animated.View
                 style={[
@@ -188,10 +175,14 @@ const styles = StyleSheet.create({
   toastContainer: {
     position: 'absolute',
     bottom: 20,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
+    alignSelf: 'center', // Centre le container
     zIndex: 9999,
+    // Retiré left: 0, right: 0 pour ne pas bloquer les côtés
+  },
+  toastWrapper: {
+    // Nouveau style pour le wrapper du toast
+    width: 320, // Largeur fixe au lieu de pourcentage
+    maxWidth: 400,
   },
   toast: {
     padding: 16,
@@ -202,8 +193,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     elevation: 5,
-    width: '80%',
-    maxWidth: 400,
+    width: '100%', // Prend toute la largeur du wrapper
   },
   toastText: {
     color: 'white',

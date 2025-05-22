@@ -27,17 +27,15 @@ class EventEmitter {
     // Fonction pour comparer les arguments d'événements
     const areArgsEqual = (args1: any[], args2: any[]): boolean => {
       if (!args1 || !args2 || args1.length !== args2.length) return false;
-
-      // Comparaison simple des arguments
       for (let i = 0; i < args1.length; i++) {
         if (args1[i] !== args2[i]) return false;
       }
-
       return true;
     };
 
-    // Ne pas émettre si exactement le même événement a été émis il y a moins de 100ms
-    if (lastParams && areArgsEqual(lastParams, args) && now - lastTime < 100) {
+    // Augmenter le délai pour réduire la fréquence
+    if (lastParams && areArgsEqual(lastParams, args) && now - lastTime < 300) {
+      // Augmenté à 300ms
       console.log(
         `Event ${event} ignored because it was emitted recently with the same arguments`
       );
