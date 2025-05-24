@@ -7,7 +7,14 @@ import React, {
   ReactNode,
   useCallback,
 } from 'react';
-import { Table, getTables, updateTable, getTable } from './storage';
+import {
+  Table,
+  getTables,
+  updateTable,
+  getTable,
+  STORAGE_KEYS,
+  StorageManager,
+} from './storage';
 import { EVENT_TYPES, events } from './events';
 
 interface TableContextType {
@@ -115,18 +122,19 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
   };
 
   const updateTableInContext = async (updatedTable: Table) => {
-    // Mettre à jour dans le stockage
-    await updateTable(updatedTable);
+    // Mettre à jour dans le stockage avec cache optimisé
+    await StorageManager.save(STORAGE_KEYS.TABLES, [
+      ...tables.map((t) => (t.id === updatedTable.id ? updatedTable : t)),
+    ]);
 
     // Mettre à jour dans le context
     setTables((prev) =>
       prev.map((table) => (table.id === updatedTable.id ? updatedTable : table))
     );
 
-    // Émettre l'événement pour informer d'autres composants
+    // Émettre l'événement
     events.emit(EVENT_TYPES.TABLE_UPDATED, updatedTable.id);
   };
-
   return (
     <TableContext.Provider
       value={{

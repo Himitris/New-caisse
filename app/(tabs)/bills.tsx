@@ -539,7 +539,7 @@ export default function BillsScreen() {
   const loadBills = useCallback(async () => {
     setLoading(true);
     try {
-      // Si des filtres sont actifs, utilisez la version filtrée
+      // Utiliser le cache optimisé au lieu des fonctions directes
       if (searchText || dateFilter || paymentMethodFilter) {
         const filters = {
           searchText: searchText.trim() || undefined,

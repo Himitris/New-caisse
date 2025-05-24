@@ -36,14 +36,17 @@ export default function RootLayout() {
           console.log('App en arrière-plan - sauvegarde forcée des données');
 
           try {
-            // Récupérer et sauvegarder les tables
+            // NOUVEAU : Forcer l'écriture de toutes les données en attente
+            await StorageManager.flushPendingWrites();
+
+            // Récupérer et sauvegarder les tables (sauvegarde de sécurité)
             const tables = await getTables();
             await AsyncStorage.setItem(
               STORAGE_KEYS.TABLES,
               JSON.stringify(tables)
             );
 
-            // Récupérer et sauvegarder les factures
+            // Récupérer et sauvegarder les factures (sauvegarde de sécurité)
             const bills = await getBills();
             await AsyncStorage.setItem(
               STORAGE_KEYS.BILLS,

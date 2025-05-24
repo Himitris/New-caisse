@@ -108,6 +108,212 @@ const getCategoryFromName = (
   }
 };
 
+// === HOOKS OPTIMISÉS ===
+
+// Hook pour mémoïsation stable des données du menu
+const useStableMenuItems = (customMenuItems: CustomMenuItem[]) => {
+  const menuItemsRef = useRef<MenuItem[]>([]);
+  const customItemsHashRef = useRef<string>('');
+
+  return useMemo(() => {
+    // Créer un hash simple pour détecter les changements
+    const customItemsHash = JSON.stringify(
+      customMenuItems.map((item) => ({
+        id: item.id,
+        name: item.name,
+        price: item.price,
+      }))
+    );
+
+    // Si rien n'a changé, retourner la référence existante
+    if (
+      customItemsHash === customItemsHashRef.current &&
+      menuItemsRef.current.length > 0
+    ) {
+      return menuItemsRef.current;
+    }
+
+    // Recalculer seulement si nécessaire
+    const standardItems = priceData.map((item) => {
+      const category = getCategoryFromName(
+        item.name,
+        item.type as 'resto' | 'boisson'
+      );
+      return {
+        id: item.id,
+        name: item.name,
+        price: item.price,
+        category,
+        type: item.type as 'resto' | 'boisson',
+        color: CATEGORY_COLORS[category] || '#757575',
+      };
+    });
+
+    const customItems = customMenuItems.map((item) => ({
+      id: item.id,
+      name: item.name,
+      price: item.price,
+      category: item.category,
+      type: item.type,
+      color:
+        CATEGORY_COLORS[item.category as keyof typeof CATEGORY_COLORS] ||
+        '#757575',
+    }));
+
+    const newMenuItems = [...standardItems, ...customItems];
+
+    // Mettre à jour les références
+    menuItemsRef.current = newMenuItems;
+    customItemsHashRef.current = customItemsHash;
+
+    return newMenuItems;
+  }, [customMenuItems]);
+};
+
+// Hook pour les catégories avec mémoïsation stable
+const useStableCategories = (menuItems: MenuItem[]) => {
+  const categoriesRef = useRef<string[]>([]);
+  const menuItemsHashRef = useRef<string>('');
+
+  return useMemo(() => {
+    const menuItemsHash = `${menuItems.length}-${menuItems
+      .map((i) => i.category)
+      .join(',')}`;
+
+    if (
+      menuItemsHash === menuItemsHashRef.current &&
+      categoriesRef.current.length > 0
+    ) {
+      return categoriesRef.current;
+    }
+
+    const newCategories = [
+      ...new Set(menuItems.map((item) => item.category)),
+    ].sort();
+    categoriesRef.current = newCategories;
+    menuItemsHashRef.current = menuItemsHash;
+
+    return newCategories;
+  }, [menuItems.length]);
+};
+
+// Hook pour les items filtrés avec debouncing
+const useFilteredMenuItems = (
+  menuItems: MenuItem[],
+  activeType: 'resto' | 'boisson' | null,
+  activeCategory: string | null,
+  unavailableItems: number[]
+) => {
+  const [debouncedFilters, setDebouncedFilters] = useState({
+    activeType,
+    activeCategory,
+    unavailableItemsHash: unavailableItems.join(','),
+  });
+
+  // Debouncer les changements de filtres
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedFilters({
+        activeType,
+        activeCategory,
+        unavailableItemsHash: unavailableItems.join(','),
+      });
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [activeType, activeCategory, unavailableItems]);
+
+  return useMemo(() => {
+    let items = menuItems;
+
+    if (debouncedFilters.activeType) {
+      items = items.filter((item) => item.type === debouncedFilters.activeType);
+    }
+
+    if (debouncedFilters.activeCategory) {
+      items = items.filter(
+        (item) => item.category === debouncedFilters.activeCategory
+      );
+    }
+
+    // Parser le hash des items indisponibles
+    const unavailableSet = new Set(
+      debouncedFilters.unavailableItemsHash
+        .split(',')
+        .map(Number)
+        .filter(Boolean)
+    );
+    items = items.filter((item) => !unavailableSet.has(item.id));
+
+    return items;
+  }, [menuItems, debouncedFilters]);
+};
+
+// Callback stable pour addItemToOrder
+const useStableAddItemCallback = (
+  table: Table | null,
+  guestCount: number,
+  updateTableInContext: (table: Table) => Promise<void>,
+  setTable: (table: Table | ((prev: Table | null) => Table | null)) => void
+) => {
+  const tableRef = useRef(table);
+  const guestCountRef = useRef(guestCount);
+
+  // Mettre à jour les refs
+  useEffect(() => {
+    tableRef.current = table;
+    guestCountRef.current = guestCount;
+  });
+
+  return useCallback(async (item: MenuItem) => {
+    const currentTable = tableRef.current;
+    if (!currentTable) return;
+
+    const updatedTable = { ...currentTable };
+
+    if (!updatedTable.order) {
+      updatedTable.order = {
+        id: Date.now(),
+        items: [],
+        guests: guestCountRef.current,
+        status: 'active',
+        timestamp: new Date().toISOString(),
+        total: 0,
+      };
+    }
+
+    const existingItem = updatedTable.order.items.find(
+      (orderItem) =>
+        orderItem.name === item.name && orderItem.price === item.price
+    );
+
+    if (existingItem) {
+      existingItem.quantity += 1;
+    } else {
+      updatedTable.order.items.push({
+        id: Date.now(),
+        name: item.name,
+        price: item.price,
+        quantity: 1,
+      });
+    }
+
+    // Calcul du total
+    updatedTable.order.total = updatedTable.order.items.reduce((sum, item) => {
+      if (!item.offered) {
+        return sum + item.price * item.quantity;
+      }
+      return sum;
+    }, 0);
+
+    // Mettre à jour l'état local immédiatement
+    setTable(updatedTable);
+
+    // Mettre à jour en base de données
+    await updateTableInContext(updatedTable);
+  }, []); // Pas de dépendances - utilise les refs
+};
+
 // Composant MenuItem mémoïzé avec optimisations
 const MenuItemComponent = memo(
   ({ item, onPress }: { item: MenuItem; onPress: () => void }) => (
@@ -142,13 +348,41 @@ export default function TableScreen() {
     'resto'
   );
   const [saveInProgress, setSaveInProgress] = useState(false);
-  const [saveSuccess, setSaveSuccess] = useState(false);
   const [customMenuItems, setCustomMenuItems] = useState<CustomMenuItem[]>([]);
   const [splitModalVisible, setSplitModalVisible] = useState(false);
 
   // Refs pour le debouncing et le batching
   const updateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const batchedUpdates = useRef<Table | null>(null);
+
+  // Hooks optimisés
+  const menuItems = useStableMenuItems(customMenuItems);
+  const categories = useStableCategories(menuItems);
+  const filteredMenuItems = useFilteredMenuItems(
+    menuItems,
+    activeType,
+    activeCategory,
+    unavailableItems
+  );
+  const addItemToOrder = useStableAddItemCallback(
+    table,
+    guestCount,
+    updateTableInContext,
+    setTable
+  );
+
+  // Mémoïsation des catégories par type
+  const categoriesByType = useMemo(() => {
+    return {
+      resto: categories.filter((cat) =>
+        menuItems.some((item) => item.category === cat && item.type === 'resto')
+      ),
+      boisson: categories.filter((cat) =>
+        menuItems.some(
+          (item) => item.category === cat && item.type === 'boisson'
+        )
+      ),
+    };
+  }, [categories, menuItems]);
 
   useEffect(() => {
     if (!table) {
@@ -186,86 +420,10 @@ export default function TableScreen() {
     loadData();
   }, []);
 
-  // Convertir les données de ManjosPrice en items de menu avec couleurs (mémoïzé)
-  const menuItems: MenuItem[] = useMemo(() => {
-    const standardItems = priceData.map((item) => {
-      const category = getCategoryFromName(
-        item.name,
-        item.type as 'resto' | 'boisson'
-      );
-      return {
-        id: item.id,
-        name: item.name,
-        price: item.price,
-        category,
-        type: item.type as 'resto' | 'boisson',
-        color: CATEGORY_COLORS[category] || '#757575',
-      };
-    });
-
-    const customItems = customMenuItems.map((item) => ({
-      id: item.id,
-      name: item.name,
-      price: item.price,
-      category: item.category,
-      type: item.type,
-      color:
-        CATEGORY_COLORS[item.category as keyof typeof CATEGORY_COLORS] ||
-        '#757575',
-    }));
-
-    return [...standardItems, ...customItems];
-  }, [customMenuItems]);
-
-  // Mémoïser les catégories
-  const categories = useMemo(() => {
-    return [...new Set(menuItems.map((item) => item.category))].sort();
-  }, [menuItems]);
-
-  const categoriesByType = useMemo(() => {
-    return {
-      resto: categories.filter((cat) =>
-        menuItems.some((item) => item.category === cat && item.type === 'resto')
-      ),
-      boisson: categories.filter((cat) =>
-        menuItems.some(
-          (item) => item.category === cat && item.type === 'boisson'
-        )
-      ),
-    };
-  }, [categories, menuItems]);
-
-  // Mémoïser les items filtrés (et exclure les items non disponibles)
-  const filteredMenuItems = useMemo(() => {
-    let items = menuItems;
-
-    // Filtrer par type
-    if (activeType) {
-      items = items.filter((item) => item.type === activeType);
-    }
-
-    // Filtrer par catégorie
-    if (activeCategory) {
-      items = items.filter((item) => item.category === activeCategory);
-    }
-
-    // Exclure les items non disponibles
-    items = items.filter((item) => !unavailableItems.includes(item.id));
-
-    return items;
-  }, [menuItems, activeType, activeCategory, unavailableItems]);
-
-  useEffect(() => {
-    loadTable();
-  }, [tableId]);
-
   const loadTable = useCallback(async () => {
     setLoading(true);
     try {
-      // Utiliser la fonction du context pour rafraîchir uniquement cette table
       await refreshSingleTable(tableId);
-
-      // Maintenant, récupérer la table fraîchement mise à jour
       const freshTable = await getTable(tableId);
 
       if (freshTable) {
@@ -280,7 +438,6 @@ export default function TableScreen() {
   }, [tableId, refreshSingleTable]);
 
   useEffect(() => {
-    // Écouter les événements de mise à jour de la table
     const unsubscribe = events.on(
       EVENT_TYPES.TABLE_UPDATED,
       (updatedTableId: number) => {
@@ -290,7 +447,6 @@ export default function TableScreen() {
       }
     );
 
-    // Écouter les événements de paiement ajouté
     const unsubscribePayment = events.on(
       EVENT_TYPES.PAYMENT_ADDED,
       (updatedTableId: number) => {
@@ -301,7 +457,6 @@ export default function TableScreen() {
     );
 
     return () => {
-      // Se désabonner des événements lors du nettoyage
       unsubscribe();
       unsubscribePayment();
     };
@@ -311,13 +466,12 @@ export default function TableScreen() {
     useCallback(() => {
       console.log(`Table ${tableId} en focus - rafraîchissement sélectif`);
 
-      // Debounce pour éviter les appels multiples rapides
       const timeoutId = setTimeout(() => {
         const tableInContext = getTableById(tableId);
         if (!tableInContext || !table || tableInContext.id !== table.id) {
           refreshSingleTable(tableId);
         }
-      }, 100); // Délai de 100ms
+      }, 100);
 
       return () => {
         clearTimeout(timeoutId);
@@ -326,32 +480,15 @@ export default function TableScreen() {
   );
 
   useEffect(() => {
-    const unsubscribe = events.on(
-      EVENT_TYPES.TABLE_UPDATED,
-      (updatedTableId: number) => {
-        if (updatedTableId === tableId) {
-          // Rafraîchir seulement si c'est notre table qui a été mise à jour
-          loadTable();
-        }
-      }
-    );
-
-    return () => {
-      unsubscribe();
-    };
-  }, [tableId, loadTable]);
-
-  useEffect(() => {
     return () => {
       if (updateTimeoutRef.current) {
         clearTimeout(updateTimeoutRef.current);
         updateTimeoutRef.current = null;
       }
-      batchedUpdates.current = null;
     };
   }, []);
 
-  // Fonction pour séparer les items en plats et boissons :
+  // Fonction pour séparer les items en plats et boissons - mémoïzée
   const categorizeOrderItems = useCallback(
     (items: OrderItem[]) => {
       const result = { plats: [] as OrderItem[], boissons: [] as OrderItem[] };
@@ -371,7 +508,7 @@ export default function TableScreen() {
     [menuItems]
   );
 
-  const handleClearOrder = () => {
+  const handleClearOrder = useCallback(() => {
     if (!table || !table.order || table.order.items.length === 0) return;
 
     Alert.alert(
@@ -401,7 +538,6 @@ export default function TableScreen() {
               };
               setTable(updatedTable);
               await updateTable(updatedTable);
-              setSaveSuccess(true);
               toast.showToast('Commande supprimée avec succès', 'success');
             } catch (error) {
               console.error(
@@ -419,7 +555,8 @@ export default function TableScreen() {
         },
       ]
     );
-  };
+  }, [table, toast]);
+
   const offeredTotal = useMemo(() => {
     if (!table || !table.order) return 0;
 
@@ -440,12 +577,9 @@ export default function TableScreen() {
 
         const updatedItems = prevTable.order.items.map((item) => {
           if (item.id !== itemId) return item;
-
-          // Inverser l'état "offered"
           return { ...item, offered: !item.offered };
         });
 
-        // Recalculer le total en excluant les articles offerts
         const newTotal = updatedItems.reduce((sum, item) => {
           if (!item.offered) {
             return sum + item.price * item.quantity;
@@ -462,7 +596,6 @@ export default function TableScreen() {
           },
         };
 
-        // Mise à jour asynchrone de la base de données
         updateTable(updatedTable).catch((error) => {
           toast.showToast('Erreur lors de la mise à jour', 'error');
           console.error('Error updating table:', error);
@@ -475,63 +608,16 @@ export default function TableScreen() {
   );
 
   // Calculer le total de la commande
-  const calculateTotal = (items: OrderItem[]): number => {
+  const calculateTotal = useCallback((items: OrderItem[]): number => {
     return items.reduce((sum, item) => {
-      // N'ajoute le prix au total que si l'article n'est pas marqué comme offert
       if (!item.offered) {
         return sum + item.price * item.quantity;
       }
       return sum;
     }, 0);
-  };
+  }, []);
 
-  // Handler pour ajouter un item à la commande (useCallback)
-  const addItemToOrder = useCallback(
-    async (item: MenuItem) => {
-      if (!table) return;
-
-      const updatedTable = { ...table };
-
-      if (!updatedTable.order) {
-        updatedTable.order = {
-          id: Date.now(),
-          items: [],
-          guests: guestCount,
-          status: 'active',
-          timestamp: new Date().toISOString(),
-          total: 0,
-        };
-      }
-
-      const existingItem = updatedTable.order.items.find(
-        (orderItem) =>
-          orderItem.name === item.name && orderItem.price === item.price
-      );
-
-      if (existingItem) {
-        existingItem.quantity += 1;
-      } else {
-        updatedTable.order.items.push({
-          id: Date.now(),
-          name: item.name,
-          price: item.price,
-          quantity: 1,
-        });
-      }
-
-      updatedTable.order.total = calculateTotal(updatedTable.order.items);
-
-      // Mettre à jour l'état local immédiatement pour une UX réactive
-      setTable(updatedTable);
-      
-      // Utiliser la fonction du contexte pour mettre à jour la table
-      // et émettre l'événement approprié
-      await updateTableInContext(updatedTable);
-    },
-    [table, guestCount, calculateTotal, updateTableInContext]
-  );
-
-  // Mise à jour de la quantité avec batching
+  // Mise à jour de la quantité avec batching optimisée
   const updateItemQuantity = useCallback(
     (itemId: number, increment: boolean) => {
       if (!table || !table.order) return;
@@ -562,7 +648,6 @@ export default function TableScreen() {
           },
         };
 
-        // Mise à jour asynchrone de la base de données
         updateTable(updatedTable).catch((error) => {
           toast.showToast('Erreur lors de la mise à jour', 'error');
           console.error('Error updating table:', error);
@@ -574,8 +659,7 @@ export default function TableScreen() {
     [table, calculateTotal, toast]
   );
 
-  // Reste des handlers (existants)...
-  const handleCloseTable = async () => {
+  const handleCloseTable = useCallback(async () => {
     if (!table) return;
 
     Alert.alert(
@@ -592,27 +676,12 @@ export default function TableScreen() {
           onPress: async () => {
             setSaveInProgress(true);
             try {
-              // Si la table a une commande active avec des articles, offrir de sauvegarder en tant qu'addition
-              if (
-                table.order?.items &&
-                table.order.items.length > 0 &&
-                table.order.total > 0
-              ) {
-                await resetTable(tableId);
-                router.push('/');
-                toast.showToast(
-                  `Table ${table.name} fermée avec succès`,
-                  'success'
-                );
-              } else {
-                // Si pas de commande active, réinitialiser simplement
-                await resetTable(tableId);
-                router.push('/');
-                toast.showToast(
-                  `Table ${table.name} fermée avec succès`,
-                  'success'
-                );
-              }
+              await resetTable(tableId);
+              router.push('/');
+              toast.showToast(
+                `Table ${table.name} fermée avec succès`,
+                'success'
+              );
             } catch (error) {
               console.error('Erreur lors de la fermeture de la table:', error);
               toast.showToast('Impossible de fermer la table', 'error');
@@ -623,13 +692,12 @@ export default function TableScreen() {
         },
       ]
     );
-  };
+  }, [table, tableId, router, toast]);
 
-  // Rendu du menu grid avec FlatList et restructuration
-  const renderMenuGrid = () => {
+  // Rendu du menu grid optimisé
+  const renderMenuGrid = useCallback(() => {
     const groupedByCategory = new Map<string, MenuItem[]>();
 
-    // Grouper les articles par catégorie
     filteredMenuItems.forEach((item) => {
       if (!groupedByCategory.has(item.category)) {
         groupedByCategory.set(item.category, []);
@@ -639,7 +707,6 @@ export default function TableScreen() {
 
     const sections: Array<{ category: string; items: MenuItem[] }> = [];
 
-    // Convertir en tableau ordonné
     categories
       .filter((cat) =>
         activeType
@@ -672,7 +739,6 @@ export default function TableScreen() {
                 />
               ))}
             </View>
-            {/* Ligne de séparation entre catégories */}
             {index < sections.length - 1 && (
               <View style={styles.categorySeparator} />
             )}
@@ -680,74 +746,73 @@ export default function TableScreen() {
         ))}
       </ScrollView>
     );
-  };
+  }, [filteredMenuItems, categories, activeType, menuItems, addItemToOrder]);
 
   // Fonction pour tronquer le nom si trop long
-  const truncateName = (name: string, maxLength: number = 18) => {
+  const truncateName = useCallback((name: string, maxLength: number = 18) => {
     if (name.length <= maxLength) return name;
     return name.substring(0, maxLength - 3) + '...';
-  };
+  }, []);
 
   // Rendu ultra-compact d'un item de commande
-  const renderUltraCompactItem = (item: OrderItem) => (
-    <View
-      key={`order-${item.id}`}
-      style={[
-        styles.ultraCompactItem,
-        item.offered && styles.offeredItem, // Ajouter un style spécial pour les articles offerts
-      ]}
-    >
-      <View style={styles.firstLineCompact}>
-        <View style={styles.itemNameContainer}>
-          {item.offered && <Gift size={14} color="#FF9800" />}
+  const renderUltraCompactItem = useCallback(
+    (item: OrderItem) => (
+      <View
+        key={`order-${item.id}`}
+        style={[styles.ultraCompactItem, item.offered && styles.offeredItem]}
+      >
+        <View style={styles.firstLineCompact}>
+          <View style={styles.itemNameContainer}>
+            {item.offered && <Gift size={14} color="#FF9800" />}
+            <Text
+              style={[
+                styles.itemNameUltraCompact,
+                item.offered && styles.offeredItemText,
+              ]}
+              numberOfLines={1}
+            >
+              {truncateName(item.name)} {item.offered ? '(Offert)' : ''}
+            </Text>
+          </View>
+          <View style={styles.quantityControlCompact}>
+            <Pressable
+              style={styles.quantityButton}
+              onPress={() => updateItemQuantity(item.id, false)}
+            >
+              <Minus size={16} color="#666" />
+            </Pressable>
+            <Text style={styles.quantityUltraCompact}>{item.quantity}</Text>
+            <Pressable
+              style={styles.quantityButton}
+              onPress={() => updateItemQuantity(item.id, true)}
+            >
+              <Plus size={16} color="#666" />
+            </Pressable>
+          </View>
+        </View>
+        <View style={styles.secondLineCompact}>
           <Text
             style={[
-              styles.itemNameUltraCompact,
-              item.offered && styles.offeredItemText,
+              styles.priceUltraCompact,
+              item.offered && styles.offeredItemPrice,
             ]}
-            numberOfLines={1}
           >
-            {truncateName(item.name)} {item.offered ? '(Offert)' : ''}
+            {(item.price * item.quantity).toFixed(2)} €
           </Text>
-        </View>
-        <View style={styles.quantityControlCompact}>
           <Pressable
-            style={styles.quantityButton}
-            onPress={() => updateItemQuantity(item.id, false)}
+            style={styles.offerButton}
+            onPress={() => toggleItemOffered(item.id)}
           >
-            <Minus size={16} color="#666" />
-          </Pressable>
-          <Text style={styles.quantityUltraCompact}>{item.quantity}</Text>
-          <Pressable
-            style={styles.quantityButton}
-            onPress={() => updateItemQuantity(item.id, true)}
-          >
-            <Plus size={16} color="#666" />
+            <Text style={styles.offerButtonText}>
+              {item.offered ? 'Annuler offre' : 'Offrir'}
+            </Text>
           </Pressable>
         </View>
       </View>
-      <View style={styles.secondLineCompact}>
-        <Text
-          style={[
-            styles.priceUltraCompact,
-            item.offered && styles.offeredItemPrice,
-          ]}
-        >
-          {(item.price * item.quantity).toFixed(2)} €
-        </Text>
-        <Pressable
-          style={styles.offerButton}
-          onPress={() => toggleItemOffered(item.id)}
-        >
-          <Text style={styles.offerButtonText}>
-            {item.offered ? 'Annuler offre' : 'Offrir'}
-          </Text>
-        </Pressable>
-      </View>
-    </View>
+    ),
+    [updateItemQuantity, toggleItemOffered, truncateName]
   );
 
-  // Reste des useEffects et autres fonctions...
   useEffect(() => {
     const loadUnavailableItems = async () => {
       const menuAvailability = await getMenuAvailability();
@@ -760,10 +825,10 @@ export default function TableScreen() {
     loadUnavailableItems();
   }, []);
 
-  const getVisibleCategories = () => {
+  const getVisibleCategories = useCallback(() => {
     if (!activeType) return categories;
     return categoriesByType[activeType];
-  };
+  }, [activeType, categories, categoriesByType]);
 
   const handlePreviewNote = useCallback(() => {
     if (!table || !table.order || table.order.items.length === 0) {
@@ -771,65 +836,67 @@ export default function TableScreen() {
       return;
     }
 
-    // Naviguer vers la prévisualisation de la note
     router.push({
       pathname: '/print-preview',
       params: {
         tableId: tableId.toString(),
         total: table.order.total.toString(),
         items: JSON.stringify(table.order.items),
-        isPreview: 'true', // Marque comme prévisualisation (non payée)
+        isPreview: 'true',
         tableName: table.name,
       },
     });
-  }, [table, tableId, router]);
+  }, [table, tableId, router, toast]);
 
-  const handlePayment = (type: 'full' | 'split' | 'custom' | 'items') => {
-    if (!table || !table.order) return;
+  const handlePayment = useCallback(
+    (type: 'full' | 'split' | 'custom' | 'items') => {
+      if (!table || !table.order) return;
 
-    const total = table.order.total;
+      const total = table.order.total;
 
-    if (total <= 0) {
-      toast.showToast("Il n'y a pas d'articles à payer", 'warning');
-      return;
-    }
-
-    if (type === 'full') {
-      router.push({
-        pathname: '/payment/full',
-        params: {
-          tableId: tableId.toString(),
-          total: total.toString(),
-          items: JSON.stringify(table.order.items),
-        },
-      });
-    } else if (type === 'split') {
-      if (guestCount <= 1) {
-        toast.showToast(
-          "Il faut au moins 2 convives pour partager l'addition",
-          'warning'
-        );
+      if (total <= 0) {
+        toast.showToast("Il n'y a pas d'articles à payer", 'warning');
         return;
       }
-      setSplitModalVisible(true);
-    } else if (type === 'custom') {
-      router.push({
-        pathname: '/payment/custom',
-        params: {
-          tableId: tableId.toString(),
-          total: total.toString(),
-          items: JSON.stringify(table.order.items),
-        },
-      });
-    } else if (type === 'items') {
-      router.push({
-        pathname: '/payment/items',
-        params: {
-          tableId: tableId.toString(),
-        },
-      });
-    }
-  };
+
+      if (type === 'full') {
+        router.push({
+          pathname: '/payment/full',
+          params: {
+            tableId: tableId.toString(),
+            total: total.toString(),
+            items: JSON.stringify(table.order.items),
+          },
+        });
+      } else if (type === 'split') {
+        if (guestCount <= 1) {
+          toast.showToast(
+            "Il faut au moins 2 convives pour partager l'addition",
+            'warning'
+          );
+          return;
+        }
+        setSplitModalVisible(true);
+      } else if (type === 'custom') {
+        router.push({
+          pathname: '/payment/custom',
+          params: {
+            tableId: tableId.toString(),
+            total: total.toString(),
+            items: JSON.stringify(table.order.items),
+          },
+        });
+      } else if (type === 'items') {
+        router.push({
+          pathname: '/payment/items',
+          params: {
+            tableId: tableId.toString(),
+          },
+        });
+      }
+    },
+    [table, guestCount, tableId, router, toast]
+  );
 
   if (loading) {
     return (
@@ -940,7 +1007,7 @@ export default function TableScreen() {
         </View>
         <Pressable
           style={[styles.paymentButton, { backgroundColor: '#9C27B0' }]}
-          onPress={() => handlePreviewNote()}
+          onPress={handlePreviewNote}
         >
           <Receipt size={24} color="white" />
           <Text style={styles.paymentButtonText}>Prévisualiser Note</Text>
@@ -1455,7 +1522,6 @@ const styles = StyleSheet.create({
   menuItems: {
     flex: 1,
   },
-  // Nouveaux styles pour la restructuration du menu
   menuItemsScroll: {
     flex: 1,
   },
@@ -1560,7 +1626,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#F9F9F9', // facultatif, pour adoucir le fond
+    backgroundColor: '#F9F9F9',
     padding: 20,
   },
   loadingText: {
@@ -1569,7 +1635,7 @@ const styles = StyleSheet.create({
     color: '#333',
   },
   offeredItem: {
-    backgroundColor: '#FFF8E1', // Fond légèrement jaune pour les articles offerts
+    backgroundColor: '#FFF8E1',
     borderLeftWidth: 2,
     borderLeftColor: '#FF9800',
   },

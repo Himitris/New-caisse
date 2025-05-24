@@ -112,33 +112,6 @@ const CONFIG = {
   BATCH_SIZE: 100,
 } as const;
 
-// Cache en mémoire
-class MemoryCache {
-  private cache: Map<string, { data: any; timestamp: number }> = new Map();
-
-  get<T>(key: string): T | null {
-    const item = this.cache.get(key);
-    if (!item) return null;
-
-    if (Date.now() - item.timestamp > CONFIG.CACHE_EXPIRY_MS) {
-      this.cache.delete(key);
-      return null;
-    }
-
-    return item.data as T;
-  }
-
-  set<T>(key: string, data: T): void {
-    this.cache.set(key, {
-      data,
-      timestamp: Date.now(),
-    });
-  }
-
-  clear(): void {
-    this.cache.clear();
-  }
-}
 
 // Système de compression simple
 class CompressionManager {
@@ -256,13 +229,297 @@ const log = {
   },
 };
 
-// Classe utilitaire améliorée pour gérer le stockage
+// Cache en mémoire optimisé avec limite de taille et nettoyage automatique
+class MemoryCache {
+  private cache: Map<string, { data: any; timestamp: number; size: number }> = new Map();
+  private maxSize: number = 50 * 1024 * 1024; // 50MB maximum
+  private currentSize: number = 0;
+  private maxEntries: number = 100; // Maximum 100 entrées
+
+  private calculateSize(data: any): number {
+    try {
+      return JSON.stringify(data).length * 2; // Approximation UTF-16
+    } catch {
+      return 1024; // Fallback 1KB
+    }
+  }
+
+  private evictOldest(): void {
+    if (this.cache.size === 0) return;
+
+    // Trier par timestamp et supprimer les plus anciens
+    const entries = Array.from(this.cache.entries())
+      .sort(([,a], [,b]) => a.timestamp - b.timestamp);
+
+    const toRemove = Math.ceil(entries.length * 0.3); // Supprimer 30% des entrées
+    
+    for (let i = 0; i < toRemove && i < entries.length; i++) {
+      const [key, value] = entries[i];
+      this.currentSize -= value.size;
+      this.cache.delete(key);
+    }
+  }
+
+  private cleanup(): void {
+    const now = Date.now();
+    const expiry = 5 * 60 * 1000; // 5 minutes
+
+    for (const [key, value] of this.cache.entries()) {
+      if (now - value.timestamp > expiry) {
+        this.currentSize -= value.size;
+        this.cache.delete(key);
+      }
+    }
+  }
+
+  get<T>(key: string): T | null {
+    const item = this.cache.get(key);
+    if (!item) return null;
+
+    if (Date.now() - item.timestamp > 5 * 60 * 1000) {
+      this.currentSize -= item.size;
+      this.cache.delete(key);
+      return null;
+    }
+
+    return item.data as T;
+  }
+
+  set<T>(key: string, data: T): void {
+    const size = this.calculateSize(data);
+    
+    // Vérifier les limites avant d'ajouter
+    if (this.cache.size >= this.maxEntries || this.currentSize + size > this.maxSize) {
+      this.cleanup();
+      
+      if (this.cache.size >= this.maxEntries || this.currentSize + size > this.maxSize) {
+        this.evictOldest();
+      }
+    }
+
+    // Supprimer l'ancienne entrée si elle existe
+    const existing = this.cache.get(key);
+    if (existing) {
+      this.currentSize -= existing.size;
+    }
+
+    this.cache.set(key, {
+      data,
+      timestamp: Date.now(),
+      size
+    });
+    
+    this.currentSize += size;
+  }
+
+  clear(): void {
+    this.cache.clear();
+    this.currentSize = 0;
+  }
+
+  getStats() {
+    return {
+      entries: this.cache.size,
+      currentSize: this.currentSize,
+      maxSize: this.maxSize,
+      maxEntries: this.maxEntries
+    };
+  }
+}
+
+// Classe utilitaire optimisée pour gérer le stockage
 class StorageManager {
-  public static memoryCache = new MemoryCache();
+  public static memoryCache = new MemoryCache(); // Le nouveau cache optimisé
+  private static serializationCache = new Map<string, { hash: string; serialized: string }>();
+  private static pendingWrites = new Map<string, ReturnType<typeof setTimeout>>();
+  private static hashCache = new Map<any, string>();
+
   private static performanceMonitor = new Map<
     string,
     { reads: number; writes: number }
   >();
+
+  // Cache de hash pour éviter les recalculs
+  private static calculateHash(data: any): string {
+    // Vérifier le cache de hash d'abord
+    if (this.hashCache.has(data)) {
+      return this.hashCache.get(data)!;
+    }
+
+    try {
+      // Hash simple et rapide
+      const str = typeof data === 'string' ? data : JSON.stringify(data);
+      let hash = 0;
+      for (let i = 0; i < str.length; i++) {
+        const char = str.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash; // Convert to 32-bit integer
+      }
+      
+      const result = hash.toString(36);
+      
+      // Limiter la taille du cache de hash
+      if (this.hashCache.size > 1000) {
+        this.hashCache.clear();
+      }
+      
+      this.hashCache.set(data, result);
+      return result;
+    } catch {
+      return Math.random().toString(36);
+    }
+  }
+
+  private static isDataChanged(oldData: any, newData: any): boolean {
+    if (oldData === newData) return false;
+
+    // Utiliser le hash pour une comparaison rapide
+    try {
+      const oldHash = this.calculateHash(oldData);
+      const newHash = this.calculateHash(newData);
+      return oldHash !== newHash;
+    } catch (e) {
+      // En cas d'erreur, considérer les données comme modifiées
+      return true;
+    }
+  }
+
+  static async save<T>(
+    key: string,
+    data: T,
+    compress: boolean = CONFIG.COMPRESSION_ENABLED
+  ): Promise<void> {
+    try {
+      // Annuler l'écriture en attente pour cette clé
+      const pendingTimeout = this.pendingWrites.get(key);
+      if (pendingTimeout) {
+        clearTimeout(pendingTimeout);
+      }
+
+      // Vérifier si les données ont vraiment changé
+      const cachedData = this.memoryCache.get<T>(key);
+      if (cachedData && !this.isDataChanged(cachedData, data)) {
+        return; // Données identiques, pas besoin de sauvegarder
+      }
+
+      // Mettre à jour le cache mémoire immédiatement
+      this.memoryCache.set(key, data);
+
+      // Préparer la sérialisation avec cache
+      const dataHash = this.calculateHash(data);
+      let jsonValue: string;
+      const cached = this.serializationCache.get(key);
+      
+      if (cached && cached.hash === dataHash) {
+        // Réutiliser la sérialisation en cache
+        jsonValue = cached.serialized;
+      } else {
+        // Nouvelle sérialisation
+        if (compress && JSON.stringify(data).length > CONFIG.COMPRESSION_THRESHOLD) {
+          jsonValue = CompressionManager.compress(data);
+        } else {
+          jsonValue = JSON.stringify(data);
+        }
+        
+        // Mettre en cache la sérialisation
+        this.serializationCache.set(key, { hash: dataHash, serialized: jsonValue });
+        
+        // Limiter la taille du cache de sérialisation
+        if (this.serializationCache.size > 50) {
+          const firstKey = this.serializationCache.keys().next().value;
+          if (typeof firstKey === 'string') {
+            this.serializationCache.delete(firstKey);
+          }
+        }
+      }
+
+      // Écriture différée pour éviter les écritures trop fréquentes
+      const writeTimeout = setTimeout(async () => {
+        try {
+          await AsyncStorage.setItem(key, jsonValue);
+          this.pendingWrites.delete(key);
+          log.info(`Data saved to ${key} successfully (deferred)`);
+        } catch (error) {
+          log.error(`Error saving deferred data to ${key}:`, error);
+        }
+      }, 100); // Attendre 100ms
+
+      this.pendingWrites.set(key, writeTimeout);
+
+      return Promise.resolve();
+    } catch (error) {
+      log.error(`Error preparing save for ${key}:`, error);
+      throw error;
+    }
+  }
+
+  static async load<T>(key: string, defaultValue: T): Promise<T> {
+    return LoadingStateManager.getOrLoad(key, async () => {
+      const startTime = Date.now();
+      try {
+        // Vérifier le cache en mémoire
+        const cachedData = this.memoryCache.get<T>(key);
+        if (cachedData !== null) {
+          log.perf(`Cache hit for ${key}`, {
+            duration: Date.now() - startTime,
+          });
+          return cachedData;
+        }
+
+        const jsonValue = await AsyncStorage.getItem(key);
+        if (jsonValue === null) {
+          log.info(`No data found for ${key}, using default value`);
+          return defaultValue;
+        }
+
+        let parsedData: T;
+        try {
+          parsedData = JSON.parse(jsonValue) as T;
+        } catch (parseError) {
+          try {
+            parsedData = CompressionManager.decompress(jsonValue) as T;
+          } catch (decompressError) {
+            log.error(`Failed to parse data from ${key}:`, decompressError);
+            await AsyncStorage.setItem(`${key}_corrupted`, jsonValue);
+            return defaultValue;
+          }
+        }
+
+        this.memoryCache.set(key, parsedData);
+        this.trackPerformance(key, 'read');
+        log.perf(`Loaded data from ${key}`, {
+          duration: Date.now() - startTime,
+        });
+
+        return parsedData;
+      } catch (error) {
+        log.error(`Error loading data from ${key}:`, error);
+        return defaultValue;
+      }
+    });
+  }
+
+  // Forcer l'écriture de toutes les données en attente
+  static async flushPendingWrites(): Promise<void> {
+    const promises: Promise<void>[] = [];
+    
+    for (const [key, timeout] of this.pendingWrites.entries()) {
+      clearTimeout(timeout);
+      this.pendingWrites.delete(key);
+      
+      // Effectuer l'écriture immédiatement
+      const cachedData = this.memoryCache.get(key);
+      if (cachedData) {
+        promises.push(
+          AsyncStorage.setItem(key, JSON.stringify(cachedData))
+            .catch(error => log.error(`Error flushing ${key}:`, error))
+        );
+      }
+    }
+
+    await Promise.all(promises);
+    log.info(`Flushed ${promises.length} pending writes`);
+  }
 
   static async performMaintenance(): Promise<void> {
     try {
@@ -272,14 +529,22 @@ class StorageManager {
       // 2. Nettoyer les données de cache dans AsyncStorage
       await AsyncStorage.removeItem(STORAGE_KEYS.CACHE);
 
-      // 3. Vérifier et réparer les données incohérentes des tables
+      // 3. Nettoyer les caches internes
+      this.serializationCache.clear();
+      this.hashCache.clear();
+
+      // 4. Annuler les écritures en attente et les forcer
+      await this.flushPendingWrites();
+
+      // 5. Vérifier et réparer les données incohérentes des tables
       await TableManager.cleanupOrphanedTableData();
 
-      console.log('Maintenance de stockage terminée avec succès');
+      log.info('Maintenance de stockage terminée avec succès');
     } catch (error) {
-      console.error('Erreur lors de la maintenance du stockage:', error);
+      log.error('Erreur lors de la maintenance du stockage:', error);
     }
   }
+
   static async resetCorruptedData(key: string): Promise<void> {
     try {
       await AsyncStorage.removeItem(key);
@@ -335,6 +600,15 @@ class StorageManager {
       }
 
       this.memoryCache.clear();
+      this.serializationCache.clear();
+      this.hashCache.clear();
+      
+      // Annuler toutes les écritures en attente
+      for (const timeout of this.pendingWrites.values()) {
+        clearTimeout(timeout);
+      }
+      this.pendingWrites.clear();
+
       log.info("Les données de l'application ont été réinitialisées");
 
       await AsyncStorage.setItem(STORAGE_KEYS.APP_VERSION, CONFIG.APP_VERSION);
@@ -342,107 +616,6 @@ class StorageManager {
       log.error('Erreur lors de la réinitialisation des données:', error);
       throw error;
     }
-  }
-
-  private static isDataChanged(oldData: any, newData: any): boolean {
-    if (oldData === newData) return false;
-
-    // Comparaison simple pour les objets et tableaux
-    try {
-      return JSON.stringify(oldData) !== JSON.stringify(newData);
-    } catch (e) {
-      // En cas d'erreur, considérer les données comme modifiées
-      return true;
-    }
-  }
-
-  static async save<T>(
-    key: string,
-    data: T,
-    compress: boolean = CONFIG.COMPRESSION_ENABLED
-  ): Promise<void> {
-    try {
-      // Vérifier si les données ont changé
-      const cachedData = this.memoryCache.get<T>(key);
-      if (cachedData && !this.isDataChanged(cachedData, data)) {
-        // Données identiques, pas besoin de sauvegarder
-        return Promise.resolve();
-      }
-
-      // Mettre à jour le cache avant de sauvegarder
-      this.memoryCache.set(key, data);
-
-      // Convertir en chaîne de caractères
-      let jsonValue: string;
-      if (
-        compress &&
-        JSON.stringify(data).length > CONFIG.COMPRESSION_THRESHOLD
-      ) {
-        jsonValue = CompressionManager.compress(data);
-      } else {
-        jsonValue = JSON.stringify(data);
-      }
-
-      // Enregistrer de manière asynchrone mais s'assurer que l'opération se termine
-      await AsyncStorage.setItem(key, jsonValue);
-      log.info(`Data saved to ${key} successfully`);
-
-      return Promise.resolve();
-    } catch (error) {
-      log.error(`Error saving data to ${key}:`, error);
-      throw error;
-    }
-  }
-
-  static async load<T>(key: string, defaultValue: T): Promise<T> {
-    return LoadingStateManager.getOrLoad(key, async () => {
-      const startTime = Date.now();
-      try {
-        // Vérifier le cache en mémoire
-        const cachedData = this.memoryCache.get<T>(key);
-        if (cachedData !== null) {
-          log.perf(`Cache hit for ${key}`, {
-            duration: Date.now() - startTime,
-          });
-          return cachedData;
-        }
-
-        const jsonValue = await AsyncStorage.getItem(key);
-        if (jsonValue === null) {
-          log.info(`No data found for ${key}, using default value`);
-          return defaultValue;
-        }
-
-        let parsedData: T;
-        try {
-          parsedData = JSON.parse(jsonValue) as T;
-        } catch (parseError) {
-          try {
-            parsedData = CompressionManager.decompress(jsonValue) as T;
-          } catch (decompressError) {
-            log.error(`Failed to parse data from ${key}:`, decompressError);
-            await AsyncStorage.setItem(`${key}_corrupted`, jsonValue);
-            return defaultValue;
-          }
-        }
-
-        this.memoryCache.set(key, parsedData);
-        this.trackPerformance(key, 'read');
-        log.perf(`Loaded data from ${key}`, {
-          duration: Date.now() - startTime,
-        });
-
-        return parsedData;
-      } catch (error) {
-        log.error(`Error loading data from ${key}:`, error);
-        return defaultValue;
-      }
-    });
-  }
-
-  private static shouldCompress(data: any): boolean {
-    const jsonStr = JSON.stringify(data);
-    return jsonStr.length > 1024; // Compress si > 1KB
   }
 
   private static trackPerformance(
@@ -495,12 +668,39 @@ class StorageManager {
         key.startsWith(STORAGE_PREFIX)
       );
       await AsyncStorage.multiRemove(keysToRemove);
+      
       this.memoryCache.clear();
+      this.serializationCache.clear();
+      this.hashCache.clear();
+      
+      // Annuler toutes les écritures en attente
+      for (const timeout of this.pendingWrites.values()) {
+        clearTimeout(timeout);
+      }
+      this.pendingWrites.clear();
+
       log.info(`Cleared ${keysToRemove.length} storage keys`);
     } catch (error) {
       log.error('Error clearing data:', error);
       throw error;
     }
+  }
+
+  // Nouvelle méthode pour obtenir les statistiques du cache
+  static getCacheStats() {
+    return {
+      memory: this.memoryCache.getStats(),
+      serialization: {
+        entries: this.serializationCache.size,
+        maxEntries: 50
+      },
+      hash: {
+        entries: this.hashCache.size,
+        maxEntries: 1000
+      },
+      pendingWrites: this.pendingWrites.size,
+      performance: this.getPerformanceStats()
+    };
   }
 }
 
