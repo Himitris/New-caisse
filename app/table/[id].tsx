@@ -47,6 +47,32 @@ interface MenuItem {
   color: string;
 }
 
+const serializationCache = new Map<string, string>();
+
+const getCachedSerialization = (items: OrderItem[]): string => {
+  // Créer une clé basée sur les items (hash simple)
+  const cacheKey = items
+    .map((item) => `${item.id}-${item.quantity}-${item.offered || false}`)
+    .join('|');
+
+  if (serializationCache.has(cacheKey)) {
+    return serializationCache.get(cacheKey)!;
+  }
+
+  const serialized = JSON.stringify(items);
+  serializationCache.set(cacheKey, serialized);
+
+  // Limiter la taille du cache
+  if (serializationCache.size > 10) {
+    const firstKey = serializationCache.keys().next().value;
+    if (typeof firstKey === 'string') {
+      serializationCache.delete(firstKey);
+    }
+  }
+
+  return serialized;
+};
+
 // Définition des couleurs pour les catégories
 const CATEGORY_COLORS: { [key: string]: string } = {
   // Resto
@@ -173,15 +199,12 @@ const useStableMenuItems = (customMenuItems: CustomMenuItem[]) => {
 // Hook pour les catégories avec mémoïsation stable
 const useStableCategories = (menuItems: MenuItem[]) => {
   const categoriesRef = useRef<string[]>([]);
-  const menuItemsHashRef = useRef<string>('');
+  const menuItemsLengthRef = useRef(0);
 
   return useMemo(() => {
-    const menuItemsHash = `${menuItems.length}-${menuItems
-      .map((i) => i.category)
-      .join(',')}`;
-
+    // 🔥 OPTIMISATION: Ne recalculer que si le nombre d'items change
     if (
-      menuItemsHash === menuItemsHashRef.current &&
+      menuItemsLengthRef.current === menuItems.length &&
       categoriesRef.current.length > 0
     ) {
       return categoriesRef.current;
@@ -190,11 +213,12 @@ const useStableCategories = (menuItems: MenuItem[]) => {
     const newCategories = [
       ...new Set(menuItems.map((item) => item.category)),
     ].sort();
+
     categoriesRef.current = newCategories;
-    menuItemsHashRef.current = menuItemsHash;
+    menuItemsLengthRef.current = menuItems.length;
 
     return newCategories;
-  }, [menuItems.length]);
+  }, [menuItems.length]); // 🔥 Dépendance simplifiée
 };
 
 // Hook pour les items filtrés avec debouncing
@@ -204,50 +228,47 @@ const useFilteredMenuItems = (
   activeCategory: string | null,
   unavailableItems: number[]
 ) => {
-  const [debouncedFilters, setDebouncedFilters] = useState({
-    activeType,
-    activeCategory,
-    unavailableItemsHash: unavailableItems.join(','),
+  // 🔥 AJOUT: Mémoriser les filtres pour éviter les recalculs
+  const filtersRef = useRef({
+    activeType: null as 'resto' | 'boisson' | null,
+    activeCategory: null as string | null,
+    unavailableHash: '',
   });
-
-  // Debouncer les changements de filtres
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebouncedFilters({
-        activeType,
-        activeCategory,
-        unavailableItemsHash: unavailableItems.join(','),
-      });
-    }, 100);
-
-    return () => clearTimeout(timer);
-  }, [activeType, activeCategory, unavailableItems]);
+  const resultRef = useRef<MenuItem[]>([]);
 
   return useMemo(() => {
-    let items = menuItems;
+    const unavailableHash = unavailableItems.join(',');
 
-    if (debouncedFilters.activeType) {
-      items = items.filter((item) => item.type === debouncedFilters.activeType);
+    // 🔥 OPTIMISATION: Vérifier si les filtres ont vraiment changé
+    if (
+      filtersRef.current.activeType === activeType &&
+      filtersRef.current.activeCategory === activeCategory &&
+      filtersRef.current.unavailableHash === unavailableHash &&
+      resultRef.current.length > 0
+    ) {
+      return resultRef.current; // Retourner le cache
     }
 
-    if (debouncedFilters.activeCategory) {
-      items = items.filter(
-        (item) => item.category === debouncedFilters.activeCategory
-      );
-    }
+    // 🔥 OPTIMISATION: Créer un Set une seule fois pour unavailable
+    const unavailableSet =
+      unavailableItems.length > 0 ? new Set(unavailableItems) : null;
 
-    // Parser le hash des items indisponibles
-    const unavailableSet = new Set(
-      debouncedFilters.unavailableItemsHash
-        .split(',')
-        .map(Number)
-        .filter(Boolean)
-    );
-    items = items.filter((item) => !unavailableSet.has(item.id));
+    // Filtrage optimisé
+    const filtered = menuItems.filter((item) => {
+      if (unavailableSet?.has(item.id)) return false;
+      if (activeType && item.type !== activeType) return false;
+      if (activeCategory && item.category !== activeCategory) return false;
+      return true;
+    });
 
-    return items;
-  }, [menuItems, debouncedFilters]);
+    // Mettre à jour les caches
+    filtersRef.current = { activeType, activeCategory, unavailableHash };
+    resultRef.current = filtered;
+
+    return filtered;
+  }, [menuItems.length, activeType, activeCategory, unavailableItems.length]); // 🔥 Dépendances optimisées
 };
+
 
 // Callback stable pour addItemToOrder
 const useStableAddItemCallback = (
@@ -256,62 +277,69 @@ const useStableAddItemCallback = (
   updateTableInContext: (table: Table) => Promise<void>,
   setTable: (table: Table | ((prev: Table | null) => Table | null)) => void
 ) => {
-  const tableRef = useRef(table);
-  const guestCountRef = useRef(guestCount);
+  // 🔥 OPTIMISATION: Éviter les re-créations de callback
+  return useCallback(
+    async (item: MenuItem) => {
+      if (!table) return;
 
-  // Mettre à jour les refs
-  useEffect(() => {
-    tableRef.current = table;
-    guestCountRef.current = guestCount;
-  });
+      setTable((prevTable) => {
+        if (!prevTable) return prevTable;
 
-  return useCallback(async (item: MenuItem) => {
-    const currentTable = tableRef.current;
-    if (!currentTable) return;
+        const updatedTable = { ...prevTable };
 
-    const updatedTable = { ...currentTable };
+        if (!updatedTable.order) {
+          updatedTable.order = {
+            id: Date.now(),
+            items: [],
+            guests: guestCount,
+            status: 'active',
+            timestamp: new Date().toISOString(),
+            total: 0,
+          };
+        }
 
-    if (!updatedTable.order) {
-      updatedTable.order = {
-        id: Date.now(),
-        items: [],
-        guests: guestCountRef.current,
-        status: 'active',
-        timestamp: new Date().toISOString(),
-        total: 0,
-      };
-    }
+        // 🔥 OPTIMISATION: Cloner seulement les items nécessaires
+        const items = [...updatedTable.order.items];
+        const existingItemIndex = items.findIndex(
+          (orderItem) =>
+            orderItem.name === item.name && orderItem.price === item.price
+        );
 
-    const existingItem = updatedTable.order.items.find(
-      (orderItem) =>
-        orderItem.name === item.name && orderItem.price === item.price
-    );
+        if (existingItemIndex >= 0) {
+          items[existingItemIndex] = {
+            ...items[existingItemIndex],
+            quantity: items[existingItemIndex].quantity + 1,
+          };
+        } else {
+          items.push({
+            id: Date.now(),
+            name: item.name,
+            price: item.price,
+            quantity: 1,
+          });
+        }
 
-    if (existingItem) {
-      existingItem.quantity += 1;
-    } else {
-      updatedTable.order.items.push({
-        id: Date.now(),
-        name: item.name,
-        price: item.price,
-        quantity: 1,
+        // Recalcul optimisé du total
+        const total = items.reduce((sum, orderItem) => {
+          return orderItem.offered
+            ? sum
+            : sum + orderItem.price * orderItem.quantity;
+        }, 0);
+
+        updatedTable.order = {
+          ...updatedTable.order,
+          items,
+          total,
+        };
+
+        // 🔥 OPTIMISATION: Mise à jour async pour éviter les blocages
+        Promise.resolve().then(() => updateTableInContext(updatedTable));
+
+        return updatedTable;
       });
-    }
-
-    // Calcul du total
-    updatedTable.order.total = updatedTable.order.items.reduce((sum, item) => {
-      if (!item.offered) {
-        return sum + item.price * item.quantity;
-      }
-      return sum;
-    }, 0);
-
-    // Mettre à jour l'état local immédiatement
-    setTable(updatedTable);
-
-    // Mettre à jour en base de données
-    await updateTableInContext(updatedTable);
-  }, []); // Pas de dépendances - utilise les refs
+    },
+    [table?.id, guestCount]
+  ); 
 };
 
 // Composant MenuItem mémoïzé avec optimisations
@@ -482,8 +510,10 @@ export default function TableScreen() {
   useEffect(() => {
     return () => {
       if (updateTimeoutRef.current) {
-        clearTimeout(updateTimeoutRef.current);
-        updateTimeoutRef.current = null;
+        if (updateTimeoutRef.current !== null) {
+          clearTimeout(updateTimeoutRef.current);
+          updateTimeoutRef.current = null;
+        }
       }
     };
   }, []);
@@ -622,6 +652,7 @@ export default function TableScreen() {
     (itemId: number, increment: boolean) => {
       if (!table || !table.order) return;
 
+      // 🔥 OPTIMISATION: Debounce les mises à jour rapides
       setTable((prevTable) => {
         if (!prevTable || !prevTable.order) return prevTable;
 
@@ -637,7 +668,12 @@ export default function TableScreen() {
           })
           .filter((item) => item.quantity > 0);
 
-        const newTotal = calculateTotal(updatedItems);
+        const newTotal = updatedItems.reduce((sum, item) => {
+          if (!item.offered) {
+            return sum + item.price * item.quantity;
+          }
+          return sum;
+        }, 0);
 
         const updatedTable = {
           ...prevTable,
@@ -648,15 +684,19 @@ export default function TableScreen() {
           },
         };
 
-        updateTable(updatedTable).catch((error) => {
-          toast.showToast('Erreur lors de la mise à jour', 'error');
-          console.error('Error updating table:', error);
-        });
+        // 🔥 OPTIMISATION: Mise à jour async avec debounce
+        clearTimeout(updateTimeoutRef.current);
+        updateTimeoutRef.current = setTimeout(() => {
+          updateTable(updatedTable).catch((error) => {
+            toast.showToast('Erreur lors de la mise à jour', 'error');
+            console.error('Error updating table:', error);
+          });
+        }, 150); // Debounce de 150ms
 
         return updatedTable;
       });
     },
-    [table, calculateTotal, toast]
+    [table?.id, toast] // 🔥 Dépendances minimales
   );
 
   const handleCloseTable = useCallback(async () => {
@@ -696,31 +736,41 @@ export default function TableScreen() {
 
   // Rendu du menu grid optimisé
   const renderMenuGrid = useCallback(() => {
-    const groupedByCategory = new Map<string, MenuItem[]>();
+    // 🔥 OPTIMISATION: Grouper par catégorie UNE SEULE FOIS
+    const groupedByCategory = useMemo(() => {
+      const groups = new Map<string, MenuItem[]>();
 
-    filteredMenuItems.forEach((item) => {
-      if (!groupedByCategory.has(item.category)) {
-        groupedByCategory.set(item.category, []);
-      }
-      groupedByCategory.get(item.category)!.push(item);
-    });
-
-    const sections: Array<{ category: string; items: MenuItem[] }> = [];
-
-    categories
-      .filter((cat) =>
-        activeType
-          ? menuItems.some(
-              (item) => item.category === cat && item.type === activeType
-            )
-          : true
-      )
-      .forEach((category) => {
-        const items = groupedByCategory.get(category);
-        if (items && items.length > 0) {
-          sections.push({ category, items });
+      filteredMenuItems.forEach((item) => {
+        if (!groups.has(item.category)) {
+          groups.set(item.category, []);
         }
+        groups.get(item.category)!.push(item);
       });
+
+      return groups;
+    }, [filteredMenuItems]);
+
+    // 🔥 OPTIMISATION: Calculer les sections UNE SEULE FOIS
+    const sections = useMemo(() => {
+      const result: Array<{ category: string; items: MenuItem[] }> = [];
+
+      categories
+        .filter((cat) =>
+          activeType
+            ? menuItems.some(
+                (item) => item.category === cat && item.type === activeType
+              )
+            : true
+        )
+        .forEach((category) => {
+          const items = groupedByCategory.get(category);
+          if (items && items.length > 0) {
+            result.push({ category, items });
+          }
+        });
+
+      return result;
+    }, [groupedByCategory, categories, activeType, menuItems.length]);
 
     return (
       <ScrollView
@@ -746,7 +796,13 @@ export default function TableScreen() {
         ))}
       </ScrollView>
     );
-  }, [filteredMenuItems, categories, activeType, menuItems, addItemToOrder]);
+  }, [
+    filteredMenuItems,
+    categories,
+    activeType,
+    menuItems.length,
+    addItemToOrder,
+  ]);
 
   // Fonction pour tronquer le nom si trop long
   const truncateName = useCallback((name: string, maxLength: number = 18) => {
@@ -836,17 +892,27 @@ export default function TableScreen() {
       return;
     }
 
+    // 🔥 OPTIMISATION: Réutiliser le cache de sérialisation
+    const serializedItems = getCachedSerialization(table.order.items);
+
     router.push({
       pathname: '/print-preview',
       params: {
         tableId: tableId.toString(),
         total: table.order.total.toString(),
-        items: JSON.stringify(table.order.items),
+        items: serializedItems, // 🔥 Cache réutilisé
         isPreview: 'true',
         tableName: table.name,
       },
     });
-  }, [table, tableId, router, toast]);
+  }, [
+    table?.order?.total,
+    table?.order?.items?.length,
+    table?.name,
+    tableId,
+    router,
+    toast,
+  ]);
 
   const handlePayment = useCallback(
     (type: 'full' | 'split' | 'custom' | 'items') => {
@@ -859,13 +925,16 @@ export default function TableScreen() {
         return;
       }
 
+      // 🔥 OPTIMISATION: Sérialisation mise en cache
+      const serializedItems = getCachedSerialization(table.order.items);
+
       if (type === 'full') {
         router.push({
           pathname: '/payment/full',
           params: {
             tableId: tableId.toString(),
             total: total.toString(),
-            items: JSON.stringify(table.order.items),
+            items: serializedItems, // 🔥 Cache réutilisé
           },
         });
       } else if (type === 'split') {
@@ -883,7 +952,7 @@ export default function TableScreen() {
           params: {
             tableId: tableId.toString(),
             total: total.toString(),
-            items: JSON.stringify(table.order.items),
+            items: serializedItems, // 🔥 Cache réutilisé
           },
         });
       } else if (type === 'items') {
@@ -895,7 +964,14 @@ export default function TableScreen() {
         });
       }
     },
-    [table, guestCount, tableId, router, toast]
+    [
+      table?.order?.total,
+      table?.order?.items?.length,
+      guestCount,
+      tableId,
+      router,
+      toast,
+    ] 
   );
 
   if (loading) {
