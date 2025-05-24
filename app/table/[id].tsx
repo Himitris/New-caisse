@@ -37,6 +37,7 @@ import {
 } from '../../utils/storage';
 import { useToast } from '../../utils/ToastContext';
 import SplitSelectionModal from '../components/SplitSelectionModal';
+import { BackHandler } from 'react-native';
 
 interface MenuItem {
   id: number;
@@ -398,6 +399,22 @@ export default function TableScreen() {
     setTable
   );
 
+  const handleBackPress = useCallback(() => {
+    // Utiliser la même logique que la flèche de retour
+    router.push('/');
+    return true; // Indique que l'événement a été géré
+  }, [router]);
+
+  // NOUVEAU: useEffect pour gérer le bouton retour matériel
+  useEffect(() => {
+    const backHandler = BackHandler.addEventListener(
+      'hardwareBackPress',
+      handleBackPress
+    );
+
+    return () => backHandler.remove();
+  }, [handleBackPress]);
+
   // Mémoïsation des catégories par type
   const categoriesByType = useMemo(() => {
     return {
@@ -685,7 +702,9 @@ export default function TableScreen() {
         };
 
         // 🔥 OPTIMISATION: Mise à jour async avec debounce
-        clearTimeout(updateTimeoutRef.current);
+        if (updateTimeoutRef.current !== null) {
+          clearTimeout(updateTimeoutRef.current);
+        }
         updateTimeoutRef.current = setTimeout(() => {
           updateTable(updatedTable).catch((error) => {
             toast.showToast('Erreur lors de la mise à jour', 'error');
@@ -1001,7 +1020,7 @@ export default function TableScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Pressable
-          onPress={() => router.push('/')}
+          onPress={handleBackPress}
           style={({ pressed }) => [
             styles.backLink,
             {
