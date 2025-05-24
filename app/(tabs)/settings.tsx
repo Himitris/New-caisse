@@ -15,7 +15,7 @@ import { useSettingsContext } from '../../utils/SettingsContext';
 import {
   PaymentMethod,
   RestaurantInfo,
-  settingsCategories
+  settingsCategories,
 } from '../../utils/settingsTypes';
 import { BillManager, StorageManager, TableManager } from '../../utils/storage';
 import { useToast } from '../../utils/ToastContext';
@@ -24,6 +24,12 @@ import {
   PaymentMethodsModal,
   RestaurantInfoModal,
 } from '../components/SettingsModals';
+
+interface VersionFooterProps {
+  version?: string;
+  buildNumber?: string;
+  style?: any;
+}
 
 // Clés de stockage
 export const SETTINGS_STORAGE_KEY = 'manjo_carn_restaurant_settings';
@@ -185,6 +191,22 @@ export default function SettingsScreen() {
     setPasswordModalVisible(false);
   }, []);
 
+  const VersionFooter: React.FC<VersionFooterProps> = ({
+    version = '1.0.0',
+    buildNumber,
+    style,
+  }) => {
+    const versionText = buildNumber
+      ? `v${version} (${buildNumber})`
+      : `v${version}`;
+
+    return (
+      <View style={[styles.containerVersion, style]}>
+        <Text style={styles.versionText}>{versionText}</Text>
+      </View>
+    );
+  };
+
   // Filtrer les paramètres par catégorie active
   const filteredSettings = settings.filter(
     (setting) => setting.category === activeCategory
@@ -260,7 +282,9 @@ export default function SettingsScreen() {
                 </View>
                 {setting.type === 'toggle' ? (
                   <Switch
-                    value={typeof setting.value === 'boolean' ? setting.value : false}
+                    value={
+                      typeof setting.value === 'boolean' ? setting.value : false
+                    }
                     onValueChange={() => toggleSetting(setting.id)}
                     trackColor={{ false: '#e0e0e0', true: '#4CAF50' }}
                   />
@@ -293,6 +317,12 @@ export default function SettingsScreen() {
           )}
         </ScrollView>
       </View>
+
+      <VersionFooter
+        version="1.2.0"
+        buildNumber="42"
+        style={{ borderTopWidth: 1, borderTopColor: '#e0e0e0' }}
+      />
 
       {/* Modals de configuration */}
       <RestaurantInfoModal
@@ -694,5 +724,17 @@ const styles = StyleSheet.create({
   paymentMethodInfo: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  containerVersion: {
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: 'transparent',
+  },
+  versionText: {
+    fontSize: 12,
+    color: '#999',
+    fontWeight: '400',
+    letterSpacing: 0.5,
   },
 });

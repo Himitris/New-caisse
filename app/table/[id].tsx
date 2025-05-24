@@ -12,10 +12,10 @@ import {
   X,
 } from 'lucide-react-native';
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useTableContext } from '../../utils/TableContext';
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -28,16 +28,15 @@ import {
   CustomMenuItem,
   OrderItem,
   Table,
-  addBill,
   getCustomMenuItems,
   getMenuAvailability,
   getTable,
   resetTable,
-  updateTable,
+  updateTable
 } from '../../utils/storage';
+import { useTableContext } from '../../utils/TableContext';
 import { useToast } from '../../utils/ToastContext';
 import SplitSelectionModal from '../components/SplitSelectionModal';
-import { BackHandler } from 'react-native';
 
 interface MenuItem {
   id: number;

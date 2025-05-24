@@ -1,21 +1,20 @@
 // utils/TableContext.tsx
 import React, {
   createContext,
-  useContext,
-  useState,
-  useEffect,
   ReactNode,
   useCallback,
+  useContext,
+  useEffect,
+  useState,
 } from 'react';
+import { EVENT_TYPES, events } from './events';
 import {
-  Table,
-  getTables,
-  updateTable,
   getTable,
+  getTables,
   STORAGE_KEYS,
   StorageManager,
+  Table
 } from './storage';
-import { EVENT_TYPES, events } from './events';
 
 interface TableContextType {
   tables: Table[];
