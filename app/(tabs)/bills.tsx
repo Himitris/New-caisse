@@ -485,7 +485,9 @@ const BillListItem = memo<BillListItemProps>(
       onSelect(bill);
     }, [bill, onSelect]);
 
-    const statusColor = STATUS_COLORS[bill.status];
+    // ✅ Améliorer la comparaison pour éviter les faux positifs
+    const statusColor = STATUS_COLORS[bill.status] || STATUS_COLORS.default;
+
     const formattedDate = useMemo(() => {
       const date = new Date(bill.timestamp);
       return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], {
@@ -539,7 +541,6 @@ export default function BillsScreen() {
   const loadBills = useCallback(async () => {
     setLoading(true);
     try {
-      // Utiliser le cache optimisé au lieu des fonctions directes
       if (searchText || dateFilter || paymentMethodFilter) {
         const filters = {
           searchText: searchText.trim() || undefined,
@@ -554,15 +555,20 @@ export default function BillsScreen() {
 
         const result = await getFilteredPaginatedBills(filters, page, pageSize);
 
-        setFilteredBills(result.bills);
+        // ✅ Assurer l'unicité des IDs
+        const uniqueBills = ensureUniqueBillIds(result.bills);
+
+        setFilteredBills(uniqueBills);
         setTotalPages(result.totalPages);
         setTotalBills(result.total);
         setHasMorePages(result.hasMore);
       } else {
-        // Sinon, utilisez la pagination simple
         const result = await getPaginatedBills(page, pageSize);
 
-        setFilteredBills(result.bills);
+        // ✅ Assurer l'unicité des IDs
+        const uniqueBills = ensureUniqueBillIds(result.bills);
+
+        setFilteredBills(uniqueBills);
         setTotalPages(result.totalPages);
         setTotalBills(result.total);
         setHasMorePages(result.hasMore);
@@ -797,10 +803,15 @@ export default function BillsScreen() {
     []
   );
 
-  const handleSelectBill = useCallback((bill: Bill) => {
-      setSelectedBill(bill);
-  }, []);
-
+  const handleSelectBill = useCallback(
+    (bill: Bill) => {
+      // Vérifier si la facture n'est pas déjà sélectionnée
+      if (selectedBill?.id !== bill.id) {
+        setSelectedBill(bill);
+      }
+    },
+    [selectedBill?.id]
+  );
   const handleView = useCallback(() => {
     if (selectedBill) {
       setViewModalVisible(true);
@@ -1203,9 +1214,14 @@ export default function BillsScreen() {
 
   // Pagination pour FlatList
   const paginatedBills = useMemo(() => {
+    // Vérifier s'il y a des doublons avant de paginer
+    const uniqueFilteredBills = filteredBills.filter(
+      (bill, index, arr) => arr.findIndex((b) => b.id === bill.id) === index
+    );
+
     const start = 0;
     const end = (page + 1) * PAGE_SIZE;
-    return filteredBills.slice(start, end);
+    return uniqueFilteredBills.slice(start, end);
   }, [filteredBills, page]);
 
   const handleLoadMore = useCallback(() => {
@@ -1227,12 +1243,30 @@ export default function BillsScreen() {
     []
   );
 
-  const keyExtractor = useCallback((item: Bill) => item.id.toString(), []);
+  const ensureUniqueBillIds = (bills: Bill[]): Bill[] => {
+    const seenIds = new Set<string>();
+    const uniqueBills: Bill[] = [];
+
+    bills.forEach((bill, index) => {
+      if (!bill.id || seenIds.has(bill.id.toString())) {
+        // Générer un nouvel ID unique si manquant ou dupliqué
+        bill.id = Date.now() + Math.random() * 1000 + index;
+      }
+      seenIds.add(bill.id.toString());
+      uniqueBills.push(bill);
+    });
+
+    return uniqueBills;
+  };
+
+  const keyExtractor = useCallback((item: Bill, index: number) => {
+    // S'assurer que l'ID existe et est unique
+    return item.id ? `bill-${item.id}` : `bill-index-${index}`;
+  }, []);
 
   const renderBillItem = useCallback(
     ({ item }: { item: Bill }) => (
       <BillListItem
-        key={`bill-${item.id}`} // Simplifier la clé
         bill={item}
         isSelected={selectedBill?.id === item.id}
         onSelect={handleSelectBill}
@@ -1316,6 +1350,7 @@ export default function BillsScreen() {
                 ListFooterComponent={renderListFooter}
                 maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
                 extraData={selectedBill?.id}
+                key={`flatlist-${filteredBills.length}`}
               />
               {renderPagination()}
             </View>

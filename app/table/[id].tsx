@@ -32,7 +32,7 @@ import {
   getMenuAvailability,
   getTable,
   resetTable,
-  updateTable
+  updateTable,
 } from '../../utils/storage';
 import { useTableContext } from '../../utils/TableContext';
 import { useToast } from '../../utils/ToastContext';
@@ -269,7 +269,6 @@ const useFilteredMenuItems = (
   }, [menuItems.length, activeType, activeCategory, unavailableItems.length]); // 🔥 Dépendances optimisées
 };
 
-
 // Callback stable pour addItemToOrder
 const useStableAddItemCallback = (
   table: Table | null,
@@ -339,7 +338,7 @@ const useStableAddItemCallback = (
       });
     },
     [table?.id, guestCount]
-  ); 
+  );
 };
 
 // Composant MenuItem mémoïzé avec optimisations
@@ -366,7 +365,10 @@ export default function TableScreen() {
     useTableContext();
 
   const [unavailableItems, setUnavailableItems] = useState<number[]>([]);
-  const [guestCount, setGuestCount] = useState(1);
+  const [guestCount, setGuestCount] = useState(() => {
+    const contextTable = getTableById(tableId);
+    return contextTable?.guests || contextTable?.order?.guests || 1;
+  });
   const [table, setTable] = useState<Table | null>(
     getTableById(tableId) || null
   );
@@ -989,7 +991,7 @@ export default function TableScreen() {
       tableId,
       router,
       toast,
-    ] 
+    ]
   );
 
   if (loading) {
@@ -1114,13 +1116,12 @@ export default function TableScreen() {
               backgroundColor:
                 (table?.order?.items?.length ?? 0) > 0 ? '#FF6600' : '#BDBDBD',
               marginLeft: 8,
-              marginRight: 8,
             },
           ]}
           onPress={handleClearOrder}
           disabled={!table?.order?.items?.length}
         >
-          <ShoppingCart size={20} color="white" />
+          <ShoppingCart size={24} color="white" />
           <Text style={styles.paymentButtonText}>Vider</Text>
         </Pressable>
 
@@ -1419,6 +1420,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f5f5',
     padding: 6,
     borderRadius: 8,
+    marginRight: 8,
   },
   guestCount: {
     fontSize: 16,
