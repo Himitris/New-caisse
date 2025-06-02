@@ -1,4 +1,4 @@
-// app/payment/custom.tsx - Fonctionnalité de partage personnalisé avec SettingsContext
+// app/payment/custom.tsx - Correction du bug des hooks
 
 import {
   View,
@@ -38,19 +38,27 @@ export default function CustomSplitScreen() {
   const totalAmount = parseFloat(total as string);
   const orderItems = items ? JSON.parse(items as string) : [];
   const toast = useToast();
+
+  // ✅ TOUS LES HOOKS DOIVENT ÊTRE DÉCLARÉS EN PREMIER - SANS EXCEPTION
   const [processing, setProcessing] = useState(false);
   const [totalOffered, setTotalOffered] = useState(0);
   const [tableFullyPaid, setTableFullyPaid] = useState(false);
-
-  // Utiliser le SettingsContext pour accéder aux méthodes de paiement configurées
-  const { paymentMethods, restaurantInfo } = useSettings();
-  const enabledPaymentMethods = paymentMethods.filter(method => method.enabled);
-
-  // Ajouter un état pour le nom et la section de la table
   const [tableName, setTableName] = useState('');
   const [tableSection, setTableSection] = useState('');
+  const [splitAmounts, setSplitAmounts] = useState<string[]>(['']);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [currentTotal, setCurrentTotal] = useState(0);
+  const [paymentMethodIds, setPaymentMethodIds] = useState<(string | null)[]>([
+    null,
+  ]);
 
-  // Récupérer les détails de la table au chargement
+  // ✅ Hooks personnalisés APRÈS les hooks de base
+  const { paymentMethods, restaurantInfo } = useSettings();
+  const enabledPaymentMethods = paymentMethods.filter(
+    (method) => method.enabled
+  );
+
+  // ✅ TOUS LES useEffect et useCallback APRÈS
   useEffect(() => {
     const fetchTableDetails = async () => {
       const table = await getTable(tableIdNum);
@@ -58,7 +66,6 @@ export default function CustomSplitScreen() {
         setTableName(table.name);
         setTableSection(table.section);
 
-        // Calculer le montant des articles offerts s'il y en a
         if (table.order && table.order.items) {
           const offeredAmount = table.order.items.reduce((sum, item) => {
             if (item.offered) {
@@ -75,95 +82,72 @@ export default function CustomSplitScreen() {
     fetchTableDetails();
   }, [tableIdNum]);
 
-  // État pour les montants de partage personnalisés
-  const [splitAmounts, setSplitAmounts] = useState<string[]>(['']);
-  const [errorMessage, setErrorMessage] = useState('');
-
-  // Suivre le total des montants saisis
-  const [currentTotal, setCurrentTotal] = useState(0);
-
-  // État pour la méthode de paiement sélectionnée pour chaque partage
-  const [paymentMethodIds, setPaymentMethodIds] = useState<(string | null)[]>([
-    null,
-  ]);
-
-
   useEffect(() => {
-    // Calculer le total actuel de tous les montants saisis
     const calculatedTotal = splitAmounts.reduce((sum, amount) => {
       const parsedAmount = parseFloat(amount || '0');
       return sum + (isNaN(parsedAmount) ? 0 : parsedAmount);
     }, 0);
 
-    // Arrondir à 2 décimales pour éviter les erreurs de précision
     const roundedTotal = Math.round(calculatedTotal * 100) / 100;
     setCurrentTotal(roundedTotal);
 
-    // Vérifier si le total est valide
-    // Comparer avec une petite marge d'erreur pour gérer les problèmes d'arrondi
     if (roundedTotal > totalAmount + 0.01) {
       setErrorMessage('Le total des partages dépasse le montant de la facture');
     } else if (roundedTotal < totalAmount - 0.01 && roundedTotal > 0) {
       setErrorMessage(`Restant : ${(totalAmount - roundedTotal).toFixed(2)} €`);
     } else if (Math.abs(roundedTotal - totalAmount) <= 0.01) {
-      setErrorMessage(''); // Le total est correct
+      setErrorMessage('');
     }
   }, [splitAmounts, totalAmount]);
 
-  // Ajouter un nouveau champ de montant de partage
-  const addSplitAmount = () => {
+  const addSplitAmount = useCallback(() => {
     setSplitAmounts([...splitAmounts, '']);
     setPaymentMethodIds([...paymentMethodIds, null]);
-  };
+  }, [splitAmounts, paymentMethodIds]);
 
-  // Supprimer un champ de montant de partage
-  const removeSplitAmount = (index: number) => {
-    const newAmounts = [...splitAmounts];
-    newAmounts.splice(index, 1);
-    setSplitAmounts(newAmounts);
-
-    const newMethods = [...paymentMethodIds];
-    newMethods.splice(index, 1);
-    setPaymentMethodIds(newMethods);
-  };
-
-  // Mettre à jour la valeur d'un montant de partage
-  const updateSplitAmount = (index: number, value: string) => {
-    const newAmounts = [...splitAmounts];
-
-    // Autoriser uniquement les chiffres et une seule virgule/point
-    if (value === '' || /^\d*\.?\d*$/.test(value)) {
-      newAmounts[index] = value;
+  const removeSplitAmount = useCallback(
+    (index: number) => {
+      const newAmounts = [...splitAmounts];
+      newAmounts.splice(index, 1);
       setSplitAmounts(newAmounts);
-    }
-  };
 
-  // Calculer automatiquement le montant restant et créer un nouveau partage
-  const calculateRemaining = () => {
-    // Calculer la somme de tous les montants
+      const newMethods = [...paymentMethodIds];
+      newMethods.splice(index, 1);
+      setPaymentMethodIds(newMethods);
+    },
+    [splitAmounts, paymentMethodIds]
+  );
+
+  const updateSplitAmount = useCallback(
+    (index: number, value: string) => {
+      const newAmounts = [...splitAmounts];
+
+      if (value === '' || /^\d*\.?\d*$/.test(value)) {
+        newAmounts[index] = value;
+        setSplitAmounts(newAmounts);
+      }
+    },
+    [splitAmounts]
+  );
+
+  const calculateRemaining = useCallback(() => {
     const currentSum = splitAmounts.reduce((sum, amount) => {
       const parsedAmount = parseFloat(amount || '0');
       return sum + (isNaN(parsedAmount) ? 0 : parsedAmount);
     }, 0);
 
-    // Arrondir pour éviter les problèmes de précision
     const roundedSum = Math.round(currentSum * 100) / 100;
-
-    // Calculer le reste avec une précision de 2 décimales
     const remaining = Math.round((totalAmount - roundedSum) * 100) / 100;
 
     if (remaining > 0) {
-      // Vérifier si le dernier partage a un montant de 0
       const lastIndex = splitAmounts.length - 1;
       const lastAmount = parseFloat(splitAmounts[lastIndex] || '0');
 
       if (lastAmount === 0 && splitAmounts.length > 0) {
-        // Utiliser le dernier partage s'il est à 0
         const newAmounts = [...splitAmounts];
         newAmounts[lastIndex] = remaining.toFixed(2);
         setSplitAmounts(newAmounts);
       } else {
-        // Créer un nouveau partage avec le montant restant
         const newAmounts = [...splitAmounts, remaining.toFixed(2)];
         const newMethods = [...paymentMethodIds, null];
 
@@ -171,21 +155,193 @@ export default function CustomSplitScreen() {
         setPaymentMethodIds(newMethods);
       }
     }
-  };
+  }, [splitAmounts, paymentMethodIds, totalAmount]);
 
-  // Définir la méthode de paiement pour un partage spécifique
-  const setPaymentMethod = (
-    index: number,
-    methodId: string
-  ) => {
-    const newMethods = [...paymentMethodIds];
-    newMethods[index] = methodId;
-    setPaymentMethodIds(newMethods);
-  };
+  const setPaymentMethod = useCallback(
+    (index: number, methodId: string) => {
+      const newMethods = [...paymentMethodIds];
+      newMethods[index] = methodId;
+      setPaymentMethodIds(newMethods);
+    },
+    [paymentMethodIds]
+  );
 
-  // Traiter le paiement pour tous les partages
-  const processPayments = async () => {
-    // Vérifier que tous les partages ont un montant et une méthode de paiement
+  const processPaymentTransactions = useCallback(async () => {
+    try {
+      setProcessing(true);
+      const table = await getTable(tableIdNum);
+
+      if (!table || !table.order) {
+        toast.showToast(
+          'Impossible de récupérer les informations de la table',
+          'error'
+        );
+        return;
+      }
+
+      let allPaymentsProcessed = true;
+      let tableWasClosed = false;
+
+      const validPayments = splitAmounts
+        .map((amount, index) => ({
+          amount: parseFloat(amount),
+          methodId: paymentMethodIds[index],
+        }))
+        .filter((p) => !isNaN(p.amount) && p.amount > 0 && p.methodId !== null);
+
+      const totalValidPayments = validPayments.reduce(
+        (sum, payment) => sum + payment.amount,
+        0
+      );
+
+      const willPayFull = Math.abs(totalValidPayments - totalAmount) <= 0.02;
+
+      for (let i = 0; i < validPayments.length; i++) {
+        const payment = validPayments[i];
+        const isLastPayment = i === validPayments.length - 1;
+
+        if (isLastPayment && willPayFull) {
+          const remainingTable = await getTable(tableIdNum);
+          if (remainingTable?.order?.total) {
+            payment.amount = Math.min(
+              payment.amount,
+              remainingTable.order.total
+            );
+          }
+        }
+
+        const result = await processPartialPayment(tableIdNum, payment.amount);
+
+        if (!result.success) {
+          allPaymentsProcessed = false;
+          console.error('Erreur de paiement:', result.error);
+          continue;
+        }
+
+        if (result.tableClosed) {
+          tableWasClosed = true;
+        }
+
+        const bill = {
+          id: Date.now() + Math.random(),
+          tableNumber: tableIdNum,
+          tableName: tableName,
+          section: tableSection,
+          amount: payment.amount,
+          items: orderItems.length,
+          status: 'split' as 'split',
+          timestamp: new Date().toISOString(),
+          paymentMethod: payment.methodId as 'card' | 'cash' | 'check',
+          paymentType: 'custom' as 'custom',
+          paidItems: orderItems.map((item: any) => ({
+            ...item,
+            paymentPercentage: table.order
+              ? (payment.amount / table.order.total) * 100
+              : 0,
+            customAmount: payment.amount,
+          })),
+          offeredAmount: (payment.amount / totalAmount) * totalOffered,
+        };
+
+        if (payment.methodId) {
+          await addBill(bill);
+        }
+      }
+
+      // ✅ CORRECTION PRINCIPALE : Traiter la navigation et le toast de manière séquentielle
+      if (allPaymentsProcessed && willPayFull) {
+        const finalCheck = await getTable(tableIdNum);
+        if (finalCheck && (finalCheck.order || finalCheck.guests)) {
+          console.warn(
+            "La table n'a pas été correctement fermée, forçage de la réinitialisation"
+          );
+          await resetTable(tableIdNum);
+
+          const verifyReset = await getTable(tableIdNum);
+          if (verifyReset && (verifyReset.order || verifyReset.guests)) {
+            const forcedCleanTable = {
+              ...verifyReset,
+              status: 'available' as 'available',
+              guests: undefined,
+              order: undefined,
+            };
+            await updateTable(forcedCleanTable);
+          }
+        }
+
+        events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
+        setTableFullyPaid(true);
+
+        // ✅ CORRECTION : Afficher le toast AVANT de naviguer
+        toast.showToast(
+          'Tous les partages ont été traités avec succès.',
+          'success'
+        );
+
+        // ✅ Utiliser setTimeout pour s'assurer que le toast s'affiche avant la navigation
+        setTimeout(() => {
+          router.push('/');
+        }, 100);
+      } else {
+        if (tableWasClosed) {
+          const checkTable = await getTable(tableIdNum);
+          if (checkTable && (checkTable.order || checkTable.guests)) {
+            console.warn(
+              'Table marquée comme fermée mais contient encore des données, nettoyage forcé'
+            );
+            await resetTable(tableIdNum);
+          }
+
+          setTableFullyPaid(true);
+
+          // ✅ Même correction ici
+          toast.showToast(
+            'Tous les partages ont été traités avec succès.',
+            'success'
+          );
+
+          setTimeout(() => {
+            router.push('/');
+          }, 100);
+        } else {
+          const updatedTable = await getTable(tableIdNum);
+          const remainingAmount = updatedTable?.order?.total || 0;
+
+          toast.showToast(
+            `Paiement(s) traité(s) avec succès. Solde restant : ${remainingAmount.toFixed(
+              2
+            )} €`,
+            'success'
+          );
+
+          setTimeout(() => {
+            router.push(`/table/${tableIdNum}`);
+          }, 100);
+        }
+      }
+    } catch (error) {
+      console.error('Erreur de paiement :', error);
+      toast.showToast(
+        'Il y a eu une erreur lors du traitement de vos paiements.',
+        'error'
+      );
+    } finally {
+      setProcessing(false);
+    }
+  }, [
+    tableIdNum,
+    splitAmounts,
+    paymentMethodIds,
+    totalAmount,
+    tableName,
+    tableSection,
+    orderItems,
+    totalOffered,
+    router,
+    toast,
+  ]);
+
+  const processPayments = useCallback(async () => {
     const isValid = splitAmounts.every((amount, index) => {
       const parsedAmount = parseFloat(amount || '0');
       return (
@@ -203,7 +359,6 @@ export default function CustomSplitScreen() {
       return;
     }
 
-    // Vérifier si le total correspond au montant de la facture (avec une petite marge d'erreur)
     const calculatedTotal = splitAmounts.reduce((sum, amount) => {
       return sum + parseFloat(amount || '0');
     }, 0);
@@ -227,190 +382,26 @@ export default function CustomSplitScreen() {
     } else {
       processPaymentTransactions();
     }
-  };
+  }, [
+    splitAmounts,
+    paymentMethodIds,
+    totalAmount,
+    processPaymentTransactions,
+    toast,
+  ]);
 
-  const processPaymentTransactions = async () => {
-    try {
-      setProcessing(true);
-      // Obtenir les données actuelles de la table
-      const table = await getTable(tableIdNum);
-
-      if (!table || !table.order) {
-        toast.showToast(
-          'Impossible de récupérer les informations de la table',
-          'error'
-        );
-        setProcessing(false);
-        return;
-      }
-
-      let allPaymentsProcessed = true;
-      let tableWasClosed = false;
-
-      // Obtenir tous les paiements valides
-      const validPayments = splitAmounts
-        .map((amount, index) => ({
-          amount: parseFloat(amount),
-          methodId: paymentMethodIds[index],
-        }))
-        .filter((p) => !isNaN(p.amount) && p.amount > 0 && p.methodId !== null);
-
-      // Calculer le total de tous les paiements valides
-      const totalValidPayments = validPayments.reduce(
-        (sum, payment) => sum + payment.amount,
-        0
-      );
-
-      // Vérifier si tous les paiements couvrent le total (avec marge d'erreur)
-      const willPayFull = Math.abs(totalValidPayments - totalAmount) <= 0.02;
-
-      // Traiter chaque paiement séquentiellement pour éviter des conflits
-      for (let i = 0; i < validPayments.length; i++) {
-        const payment = validPayments[i];
-        const isLastPayment = i === validPayments.length - 1;
-
-        // Pour le dernier paiement quand on est sur le point de tout payer, on force le montant exact restant
-        if (isLastPayment && willPayFull) {
-          // Recalculer le montant final pour s'assurer que tout est payé
-          const remainingTable = await getTable(tableIdNum);
-          if (remainingTable?.order?.total) {
-            payment.amount = Math.min(
-              payment.amount,
-              remainingTable.order.total
-            );
-          }
-        }
-
-        // Utiliser la fonction optimisée pour chaque paiement
-        const result = await processPartialPayment(tableIdNum, payment.amount);
-
-        if (!result.success) {
-          allPaymentsProcessed = false;
-          console.error('Erreur de paiement:', result.error);
-          continue;
-        }
-
-        // Vérifier si la table a été fermée
-        if (result.tableClosed) {
-          tableWasClosed = true;
-        }
-
-        // Créer la facture pour ce paiement
-        const bill = {
-          id: Date.now() + Math.random(),
-          tableNumber: tableIdNum,
-          tableName: tableName,
-          section: tableSection,
-          amount: payment.amount,
-          items: orderItems.length,
-          status: 'split' as 'split',
-          timestamp: new Date().toISOString(),
-          paymentMethod: payment.methodId as 'card' | 'cash' | 'check',
-          paymentType: 'custom' as 'custom',
-          paidItems: orderItems.map((item: any) => ({
-            ...item,
-            paymentPercentage: table.order
-              ? (payment.amount / table.order.total) * 100
-              : 0,
-            customAmount: payment.amount,
-          })),
-          offeredAmount: (payment.amount / totalAmount) * totalOffered,
-        };
-
-        // Si vous avez toujours des problèmes, vous pouvez ajouter une vérification supplémentaire
-        if (payment.methodId) {
-          // Assurez-vous que la méthode n'est pas null
-          await addBill(bill);
-        }
-      }
-
-      // Si tous les paiements ont été traités et couvrent tout le montant, forcer la fermeture de la table
-      if (allPaymentsProcessed && willPayFull) {
-        // Double vérification: vérifier que la table est réellement fermée
-        const finalCheck = await getTable(tableIdNum);
-        if (finalCheck && (finalCheck.order || finalCheck.guests)) {
-          // La table n'a pas été correctement fermée, forcer la réinitialisation
-          console.warn(
-            "La table n'a pas été correctement fermée, forçage de la réinitialisation"
-          );
-          await resetTable(tableIdNum);
-
-          // Vérification supplémentaire
-          const verifyReset = await getTable(tableIdNum);
-          if (verifyReset && (verifyReset.order || verifyReset.guests)) {
-            // Nettoyage forcé si la réinitialisation n'a pas fonctionné
-            const forcedCleanTable = {
-              ...verifyReset,
-              status: "available" as "available",
-              guests: undefined,
-              order: undefined,
-            };
-            await updateTable(forcedCleanTable);
-          }
-        }
-
-        events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
-        setTableFullyPaid(true);
-
-        router.push('/');
-        toast.showToast(
-          'Tous les partages ont été traités avec succès.',
-          'success'
-        );
-      } else {
-        // Vérifier si la table a été fermée automatiquement
-        if (tableWasClosed) {
-          // Vérification supplémentaire que la table est réellement fermée
-          const checkTable = await getTable(tableIdNum);
-          if (checkTable && (checkTable.order || checkTable.guests)) {
-            console.warn(
-              'Table marquée comme fermée mais contient encore des données, nettoyage forcé'
-            );
-            await resetTable(tableIdNum);
-          }
-
-          setTableFullyPaid(true);
-          router.push('/');
-          toast.showToast(
-            'Tous les partages ont été traités avec succès.',
-            'success'
-          );
-        } else {
-          // Il reste un solde à payer
-          router.push(`/table/${tableIdNum}`);
-
-          // Récupérer les données les plus récentes pour afficher le solde correct
-          const updatedTable = await getTable(tableIdNum);
-          const remainingAmount = updatedTable?.order?.total || 0;
-
-          toast.showToast(
-            `Paiement(s) traité(s) avec succès. Solde restant : ${remainingAmount.toFixed(
-              2
-            )} €`,
-            'success'
-          );
-        }
-      }
-    } catch (error) {
-      console.error('Erreur de paiement :', error);
-      toast.showToast(
-        'Il y a eu une erreur lors du traitement de vos paiements.',
-        'error'
-      );
-    } finally {
-      setProcessing(false);
-    }
-  };
-
-  // Fonction utilitaire pour obtenir l'icône en fonction du type de méthode
-  const getMethodIcon = (methodId: string) => {
+  const getMethodIcon = useCallback((methodId: string) => {
     switch (methodId) {
-      case 'card': return <CreditCard size={20} color="white" />;
-      case 'cash': return <Wallet size={20} color="white" />;
-      case 'check': return <Edit3 size={20} color="white" />;
-      default: return <Wallet size={20} color="white" />;
+      case 'card':
+        return <CreditCard size={20} color="white" />;
+      case 'cash':
+        return <Wallet size={20} color="white" />;
+      case 'check':
+        return <Edit3 size={20} color="white" />;
+      default:
+        return <Wallet size={20} color="white" />;
     }
-  };
+  }, []);
 
   return (
     <View style={styles.container}>
@@ -577,6 +568,7 @@ export default function CustomSplitScreen() {
   );
 }
 
+// Styles restent identiques
 const styles = StyleSheet.create({
   container: {
     flex: 1,

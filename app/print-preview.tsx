@@ -9,6 +9,7 @@ import * as Sharing from 'expo-sharing';
 import { useSettings } from '@/utils/useSettings';
 
 export default function PrintPreviewScreen() {
+  const { paymentMethods } = useSettings();
   const {
     tableId,
     total,
@@ -71,6 +72,11 @@ export default function PrintPreviewScreen() {
       hour12: false,
       timeZone: 'Europe/Paris',
     }),
+  };
+
+  const getPaymentMethodLabel = (methodId: string) => {
+    const method = paymentMethods.find((m) => m.id === methodId);
+    return method ? method.name : methodId;
   };
 
   // Fonction modifiée generateHTML pour un format d'impression 80mm avec meilleure lisibilité
@@ -268,13 +274,11 @@ export default function PrintPreviewScreen() {
         ${
           isPreviewMode
             ? `<p><strong>NOTE NON PAYÉE</strong></p>`
-            : `<p>Paiement: ${
-                order.paymentMethod === 'card'
-                  ? 'Carte bancaire'
-                  : order.paymentMethod === 'cash'
-                  ? 'Espèces'
-                  : 'Chèque'
-              }</p>
+            : `<p>Paiement: ${getPaymentMethodLabel(
+                Array.isArray(order.paymentMethod)
+                  ? order.paymentMethod[0]
+                  : order.paymentMethod
+              )}</p>
               ${
                 order.isPartial
                   ? `<p>Payé: ${(order.total - order.remaining).toFixed(
@@ -429,11 +433,11 @@ export default function PrintPreviewScreen() {
             <>
               <Text style={styles.paymentMethod}>
                 Méthode de paiement:{' '}
-                {order.paymentMethod === 'card'
-                  ? 'Carte bancaire'
-                  : order.paymentMethod === 'cash'
-                  ? 'Espèces'
-                  : 'Chèque'}
+                {getPaymentMethodLabel(
+                  Array.isArray(order.paymentMethod)
+                    ? order.paymentMethod[0]
+                    : order.paymentMethod
+                )}
               </Text>
               <Text style={styles.paymentStatus}>
                 Statut:{' '}

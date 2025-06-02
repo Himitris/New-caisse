@@ -1,4 +1,5 @@
 // utils/report-utils.ts - Mise à jour avec fonctions pour la TVA
+import { PaymentMethod } from './settingsTypes';
 import { Bill } from './storage';
 
 interface SalesByCategory {
@@ -211,17 +212,12 @@ export const formatDate = (date: Date): string => {
   });
 };
 
-export const getPaymentMethodLabel = (method: string): string => {
-  switch (method) {
-    case 'card':
-      return 'Carte bancaire';
-    case 'cash':
-      return 'Espèces';
-    case 'check':
-      return 'Chèque';
-    default:
-      return 'Autre';
-  }
+export const getPaymentMethodLabel = (
+  method: string,
+  paymentMethods: PaymentMethod[]
+): string => {
+  const foundMethod = paymentMethods.find((m) => m.id === method);
+  return foundMethod ? foundMethod.name : 'Autre';
 };
 
 export const getPaymentTypeLabel = (type: string): string => {

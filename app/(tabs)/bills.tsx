@@ -79,7 +79,15 @@ const MAX_BILLS_IN_STORAGE = 1000; // Limite pour éviter les problèmes de mém
 const ViewReceiptModal = memo<ViewReceiptModalProps>(
   ({ visible, bill, onClose, onPrint, onShare, onDelete }) => {
     // D'abord, déclarez tous vos hooks
-    const { restaurantInfo } = useSettings();
+    const { restaurantInfo, paymentMethods } = useSettings();
+
+    const getPaymentMethodLabel = useCallback(
+      (methodId: string) => {
+        const method = paymentMethods.find((m) => m.id === methodId);
+        return method ? method.name : methodId;
+      },
+      [paymentMethods]
+    );
     const handleDelete = useCallback(() => {
       Alert.alert(
         'Supprimer la facture',
@@ -96,7 +104,7 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
 
     const statusColor = STATUS_COLORS[bill.status];
     const paymentLabel = bill.paymentMethod
-      ? PAYMENT_METHOD_LABELS[bill.paymentMethod]
+      ? getPaymentMethodLabel(bill.paymentMethod)
       : '';
 
     // Vérifier si nous avons des articles payés détaillés
@@ -287,12 +295,21 @@ const FilterBar = memo<FilterBarProps>(
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [showPaymentPicker, setShowPaymentPicker] = useState(false);
     const [tempDate, setTempDate] = useState(selectedDate || new Date());
+    const { paymentMethods } = useSettings();
 
     const handleSearch = useCallback(
       (text: string) => {
         onSearch(text);
       },
       [onSearch]
+    );
+
+    const getPaymentMethodLabel = useCallback(
+      (methodId: string) => {
+        const method = paymentMethods.find((m) => m.id === methodId);
+        return method ? method.name : methodId;
+      },
+      [paymentMethods]
     );
 
     const handleDateChange = useCallback(
@@ -345,7 +362,7 @@ const FilterBar = memo<FilterBarProps>(
 
     const paymentMethodLabel = useMemo(() => {
       if (!selectedPaymentMethod) return 'Mode de paiement';
-      return PAYMENT_METHOD_LABELS[selectedPaymentMethod];
+      return getPaymentMethodLabel(selectedPaymentMethod);
     }, [selectedPaymentMethod]);
 
     return (
@@ -537,6 +554,8 @@ export default function BillsScreen() {
     Bill['paymentMethod'] | null
   >(null);
   const toast = useToast();
+  const { paymentMethods } = useSettings();
+  
 
   const loadBills = useCallback(async () => {
     setLoading(true);
@@ -640,6 +659,14 @@ export default function BillsScreen() {
       });
     },
     []
+  );
+
+  const getPaymentMethodLabel = useCallback(
+    (methodId: string) => {
+      const method = paymentMethods.find((m) => m.id === methodId);
+      return method ? method.name : methodId;
+    },
+    [paymentMethods]
   );
 
   const handleDeleteFiltered = useCallback(() => {
@@ -883,7 +910,7 @@ export default function BillsScreen() {
 
   const generateHTML = useCallback((bill: Bill) => {
     const paymentLabel = bill.paymentMethod
-      ? PAYMENT_METHOD_LABELS[bill.paymentMethod]
+      ? getPaymentMethodLabel(bill.paymentMethod)
       : '';
 
     const taxInfo = 'TVA non applicable - art.293B du CGI';
@@ -1048,13 +1075,7 @@ export default function BillsScreen() {
           <div class="divider"></div>
   
           <div class="payment-info">
-            <p>Paiement: ${
-              bill.paymentMethod === 'card'
-                ? 'Carte bancaire'
-                : bill.paymentMethod === 'cash'
-                ? 'Espèces'
-                : 'Chèque'
-            }</p>
+            <p>Paiement: ${bill.paymentMethod ? getPaymentMethodLabel(bill.paymentMethod) : ''}</p>
             <p>Statut: ${bill.status}</p>
           </div>
   
@@ -1402,7 +1423,7 @@ export default function BillsScreen() {
                           Mode de paiement:
                         </Text>
                         <Text style={styles.detailValue}>
-                          {PAYMENT_METHOD_LABELS[selectedBill.paymentMethod]}
+                          {getPaymentMethodLabel(selectedBill.paymentMethod)}
                         </Text>
                       </View>
                     )}
