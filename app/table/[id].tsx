@@ -412,21 +412,29 @@ export default function TableScreen() {
   const tableId = parseInt(id as string, 10);
   const router = useRouter();
   const toast = useToast();
-  const timeoutManager = useRef(new TimeoutManager());
-  const eventListeners = useRef<Array<() => void>>([]);
+  // ✅ CORRECTION CRITIQUE : Refs stables pour éviter re-créations
+  const tableRef = useRef<Table | null>(null);
+  const isLoadingRef = useRef(false);
+  const isMountedRef = useRef(true);
+  const lastLoadTimeRef = useRef(0);
+
   const { getTableById, updateTableInContext, refreshSingleTable } =
     useTableContext();
 
-  // ✅ TOUS LES HOOKS DOIVENT ÊTRE DÉCLARÉS EN PREMIER - SANS EXCEPTION
-  const [unavailableItems, setUnavailableItems] = useState<number[]>([]);
-  const [guestCount, setGuestCount] = useState(() => {
-    const contextTable = getTableById(tableId);
-    return contextTable?.guests || contextTable?.order?.guests || 1;
-  });
+  // États normaux
   const [table, setTable] = useState<Table | null>(
     getTableById(tableId) || null
   );
   const [loading, setLoading] = useState(!table);
+  const [guestCount, setGuestCount] = useState(() => {
+    const contextTable = getTableById(tableId);
+    return contextTable?.guests || contextTable?.order?.guests || 1;
+  });
+  const timeoutManager = useRef(new TimeoutManager());
+  const eventListeners = useRef<Array<() => void>>([]);
+
+  // ✅ TOUS LES HOOKS DOIVENT ÊTRE DÉCLARÉS EN PREMIER - SANS EXCEPTION
+  const [unavailableItems, setUnavailableItems] = useState<number[]>([]);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [activeType, setActiveType] = useState<'resto' | 'boisson' | null>(
     'resto'
@@ -457,6 +465,19 @@ export default function TableScreen() {
     router.push('/');
     return true;
   }, [router]);
+
+  // ✅ Synchroniser le ref avec l'état
+  useEffect(() => {
+    tableRef.current = table;
+  }, [table]);
+
+  // ✅ Cleanup au démontage
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -547,95 +568,131 @@ export default function TableScreen() {
     loadData();
   }, []);
 
-  const loadTable = useCallback(async () => {
+  const loadTableStable = useCallback(async () => {
+    if (isLoadingRef.current) {
+      console.log(`Table ${tableId} already loading, skipping`);
+      return;
+    }
+
+    // ✅ Éviter les chargements trop fréquents
+    const now = Date.now();
+    if (now - lastLoadTimeRef.current < 200) {
+      console.log(`Table ${tableId} loaded recently, skipping`);
+      return;
+    }
+
+    isLoadingRef.current = true;
+    lastLoadTimeRef.current = now;
     setLoading(true);
+
     try {
       await refreshSingleTable(tableId);
       const freshTable = await getTable(tableId);
-      if (freshTable) {
+
+      if (freshTable && isMountedRef.current) {
         setTable(freshTable);
+        tableRef.current = freshTable;
         setGuestCount(freshTable.guests || 1);
       }
     } catch (error) {
       console.error('Error loading table:', error);
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
+      isLoadingRef.current = false;
     }
   }, [tableId, refreshSingleTable]);
 
   useEffect(() => {
+    if (!table) {
+      loadTableStable();
+    }
+  }, [table, loadTableStable]);
+
+  useEffect(() => {
+    const componentId = `TableScreen-${tableId}`;
+
     const cleanup1 = events.on(
       EVENT_TYPES.TABLE_UPDATED,
       (updatedTableId: number) => {
-        if (updatedTableId === tableId) {
-          loadTable();
+        if (updatedTableId === tableId && isMountedRef.current) {
+          console.log(`Table ${tableId} updated event received`);
+          // ✅ Utiliser un délai pour éviter les cascades
+          setTimeout(() => {
+            if (isMountedRef.current) {
+              loadTableStable();
+            }
+          }, 100);
         }
-      }
+      },
+      componentId // ✅ ID unique pour déduplication
     );
 
     const cleanup2 = events.on(
       EVENT_TYPES.PAYMENT_ADDED,
       (updatedTableId: number) => {
-        if (updatedTableId === tableId) {
-          loadTable();
+        if (updatedTableId === tableId && isMountedRef.current) {
+          console.log(`Payment added for table ${tableId}`);
+          setTimeout(() => {
+            if (isMountedRef.current) {
+              loadTableStable();
+            }
+          }, 150);
         }
-      }
+      },
+      componentId // ✅ ID unique pour déduplication
     );
 
-    // Stocker les fonctions de cleanup
-    eventListeners.current.push(cleanup1, cleanup2);
-
+    // ✅ Cleanup stable
     return () => {
       cleanup1();
       cleanup2();
     };
-  }, [tableId, loadTable]);
+  }, [tableId, loadTableStable]);
 
   useFocusEffect(
     useCallback(() => {
       console.log(`Table ${tableId} en focus`);
 
-      // Timeout avec cleanup automatique
-      const focusTimeoutKey = 'focus-refresh';
-      timeoutManager.current.setTimeout(
-        focusTimeoutKey,
-        () => {
+      // ✅ Vérification simple et timeout court
+      const focusTimeout = setTimeout(() => {
+        if (isMountedRef.current) {
           const tableInContext = getTableById(tableId);
-          if (!tableInContext || !table || tableInContext.id !== table.id) {
-            refreshSingleTable(tableId);
+          const currentTable = tableRef.current;
+
+          // ✅ Charger seulement si vraiment nécessaire
+          if (
+            !tableInContext ||
+            !currentTable ||
+            tableInContext.id !== currentTable.id
+          ) {
+            loadTableStable();
           }
-        },
-        100
-      );
+        }
+      }, 50); // ✅ Délai très court
 
       return () => {
-        // Cleanup au défocus
-        timeoutManager.current.clearTimeout(focusTimeoutKey);
+        clearTimeout(focusTimeout);
       };
-    }, [tableId, refreshSingleTable, getTableById, table])
+    }, [tableId, getTableById, loadTableStable]) // ✅ Dépendances stables
   );
-
 
   useEffect(() => {
     if (__DEV__) {
-      const memoryCheckInterval = setInterval(() => {
-        const stats = StorageManager.getMemoryStats();
-        if (stats.memoryPressure > 70) {
+      const debugInterval = setInterval(() => {
+        const activeTimeouts = (global as any).__tableUpdates?.size || 0;
+        if (activeTimeouts > 3) {
           console.warn(
-            `[TableScreen] High memory pressure: ${stats.memoryPressure}%`
+            `[TableScreen ${tableId}] Too many active timeouts: ${activeTimeouts}`
           );
         }
-        if (timeoutManager.current.getActiveCount() > 5) {
-          console.warn(
-            `[TableScreen] Too many active timeouts: ${timeoutManager.current.getActiveCount()}`
-          );
-        }
-      }, 10000); // Check toutes les 10 secondes
+      }, 5000);
 
-      return () => clearInterval(memoryCheckInterval);
+      return () => clearInterval(debugInterval);
     }
-  }, []);
-  
+  }, [tableId]);
+
   useEffect(() => {
     return () => {
       if (updateTimeoutRef.current) {
@@ -749,10 +806,11 @@ export default function TableScreen() {
 
   const updateItemQuantity = useCallback(
     (itemId: number, increment: boolean) => {
-      if (!table || !table.order) return;
+      if (!table || !table.order || !isMountedRef.current) return;
 
       setTable((prevTable) => {
-        if (!prevTable || !prevTable.order) return prevTable;
+        if (!prevTable || !prevTable.order || !isMountedRef.current)
+          return prevTable;
 
         const updatedItems = prevTable.order.items
           .map((item) => {
@@ -780,23 +838,50 @@ export default function TableScreen() {
           },
         };
 
-        // ✅ SOLUTION : Utiliser le gestionnaire de timeouts centralisé
-        timeoutManager.current.setTimeout(
-          `update-${itemId}`,
-          () => {
+        // ✅ CORRECTION : Debounced update sans timeout multiple
+        const updateKey = `update-${itemId}`;
+        if (!(global as any).__tableUpdates) {
+          (global as any).__tableUpdates = new Map();
+        }
+
+        const existingTimeout = (global as any).__tableUpdates.get(updateKey);
+        if (existingTimeout) {
+          clearTimeout(existingTimeout);
+        }
+
+        const newTimeout = setTimeout(() => {
+          if (isMountedRef.current) {
             updateTable(updatedTable).catch((error) => {
-              toast.showToast('Erreur lors de la mise à jour', 'error');
+              if (isMountedRef.current) {
+                toast.showToast('Erreur lors de la mise à jour', 'error');
+              }
               console.error('Error updating table:', error);
             });
-          },
-          100 // Réduit à 100ms
-        );
+          }
+          (global as any).__tableUpdates.delete(updateKey);
+        }, 200);
+
+        (global as any).__tableUpdates.set(updateKey, newTimeout);
 
         return updatedTable;
       });
     },
     [table?.id, toast]
   );
+
+  useEffect(() => {
+    return () => {
+      // Nettoyer tous les timeouts de cette table
+      if ((global as any).__tableUpdates) {
+        for (const [key, timeout] of (global as any).__tableUpdates.entries()) {
+          if (key.includes(`update-${tableId}`)) {
+            clearTimeout(timeout);
+            (global as any).__tableUpdates.delete(key);
+          }
+        }
+      }
+    };
+  }, [tableId]);
 
   const handleCloseTable = useCallback(async () => {
     if (!table) return;
@@ -811,31 +896,43 @@ export default function TableScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              // ✅ SOLUTION : Nettoyer les timeouts avant fermeture
-              timeoutManager.current.clearAll();
+              // ✅ Marquer comme démonté pour éviter les updates
+              isMountedRef.current = false;
 
-              // ✅ SOLUTION : Forcer l'écriture des données en attente
-              await StorageManager.flushPendingWrites();
+              // ✅ Nettoyer les timeouts en cours
+              if ((global as any).__tableUpdates) {
+                for (const [key, timeout] of (
+                  global as any
+                ).__tableUpdates.entries()) {
+                  if (key.includes(`${tableId}`)) {
+                    clearTimeout(timeout);
+                    (global as any).__tableUpdates.delete(key);
+                  }
+                }
+              }
 
               // Navigation immédiate
               router.push('/');
 
-              // Réinitialisation de la table en arrière-plan
+              // Réinitialisation en arrière-plan
               setTimeout(async () => {
                 try {
                   await resetTable(tableId);
-                  toast.showToast(
-                    `Table ${table.name} fermée avec succès`,
-                    'success'
-                  );
+                  if (isMountedRef.current) {
+                    toast.showToast(
+                      `Table ${table.name} fermée avec succès`,
+                      'success'
+                    );
+                  }
                 } catch (error) {
                   console.error('Erreur lors de la fermeture:', error);
-                  toast.showToast('Impossible de fermer la table', 'error');
                 }
-              }, 50); // Délai réduit
+              }, 100);
             } catch (error) {
               console.error('Erreur lors de la navigation:', error);
-              toast.showToast('Erreur lors de la fermeture', 'error');
+              if (isMountedRef.current) {
+                toast.showToast('Erreur lors de la fermeture', 'error');
+              }
             }
           },
         },

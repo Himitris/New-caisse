@@ -1,10 +1,10 @@
-// utils/TableContext.tsx
 import React, {
   createContext,
   ReactNode,
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
 } from 'react';
 import { EVENT_TYPES, events } from './events';
@@ -30,10 +30,18 @@ const TableContext = createContext<TableContextType | undefined>(undefined);
 export const TableProvider = ({ children }: { children: ReactNode }) => {
   const [tables, setTables] = useState<Table[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isLoadingRef, setIsLoadingRef] = useState(false); // Nouveau flag
+  const [isLoadingRef, setIsLoadingRef] = useState(false);
 
-  const loadTables = async () => {
-    // Éviter les chargements multiples simultanés
+  // ✅ CORRECTION CRITIQUE : Refs stables pour éviter re-créations
+  const tablesRef = useRef<Table[]>([]);
+  const refreshInProgress = useRef<Set<number>>(new Set());
+
+  // ✅ Synchroniser le ref avec l'état
+  useEffect(() => {
+    tablesRef.current = tables;
+  }, [tables]);
+
+  const loadTables = useCallback(async () => {
     if (isLoadingRef) {
       console.log('Tables loading already in progress, skipping...');
       return;
@@ -44,53 +52,62 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
     try {
       const loadedTables = await getTables();
       setTables(loadedTables);
+      tablesRef.current = loadedTables; // ✅ Mise à jour du ref
     } catch (error) {
       console.error('Error loading tables:', error);
     } finally {
       setIsLoading(false);
       setIsLoadingRef(false);
     }
-  };
+  }, []);
 
-  // Fonction pour rafraîchir une seule table
-  const refreshSingleTable = useCallback(
+  // ✅ CORRECTION CRITIQUE : Fonction stable avec ref
+  const refreshSingleTableStable = useCallback(
     async (tableId: number, source?: string) => {
       try {
-        // Ajouter un log pour débugger
-        console.log(
-          `Refreshing table ${tableId} from source: ${source || 'unknown'}`
-        );
+        // ✅ Prévenir les rafraîchissements multiples simultanés
+        if (refreshInProgress.current.has(tableId)) {
+          console.log(`Refresh already in progress for table ${tableId}, skipping`);
+          return;
+        }
 
-        // Récupérer uniquement la table spécifique
+        refreshInProgress.current.add(tableId);
+        
+        console.log(`Refreshing table ${tableId} from source: ${source || 'unknown'}`);
+
         const freshTable = await getTable(tableId);
 
         if (freshTable) {
-          // Mettre à jour seulement cette table dans le state
-          setTables((prev) =>
-            prev.map((table) => (table.id === tableId ? freshTable : table))
+          // ✅ Utiliser le ref pour éviter de dépendre de l'état tables
+          const currentTables = tablesRef.current;
+          const updatedTables = currentTables.map((table) => 
+            table.id === tableId ? freshTable : table
           );
+          
+          setTables(updatedTables);
+          tablesRef.current = updatedTables;
+          
           console.log(`Table ${tableId} refreshed successfully`);
         }
       } catch (error) {
         console.error(`Error refreshing single table ${tableId}:`, error);
+      } finally {
+        // ✅ Toujours nettoyer le flag, même en cas d'erreur
+        refreshInProgress.current.delete(tableId);
       }
     },
-    []
+    [] // ✅ AUCUNE DÉPENDANCE - fonction complètement stable
   );
 
-  // Charger les tables au démarrage
+  // ✅ CORRECTION CRITIQUE : Event listener stable avec componentId
   useEffect(() => {
-    loadTables();
-  }, []);
-
-  useEffect(() => {
-    // Un set pour suivre les mises à jour récentes
-    const recentUpdates = new Set<number>();
+    const componentId = 'TableProvider';
+    let recentUpdates = new Set<number>();
 
     const unsubscribe = events.on(
       EVENT_TYPES.TABLE_UPDATED,
       (updatedTableId: number) => {
-        // Éviter les mises à jour dupliquées rapprochées
+        // ✅ Éviter les mises à jour dupliquées rapprochées
         if (recentUpdates.has(updatedTableId)) {
           console.log(`Skipping redundant update for table ${updatedTableId}`);
           return;
@@ -99,48 +116,96 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
         // Marquer cette table comme récemment mise à jour
         recentUpdates.add(updatedTableId);
 
-        // Rafraîchir la table
-        refreshSingleTable(updatedTableId, 'event');
+        // Rafraîchir la table avec la fonction stable
+        refreshSingleTableStable(updatedTableId, 'event');
 
-        // Supprimer du set après un court délai
+        // Supprimer du set après un délai
         setTimeout(() => {
           recentUpdates.delete(updatedTableId);
-        }, 300);
-      }
+        }, 500);
+      },
+      componentId // ✅ ID unique pour déduplication
     );
 
-    return unsubscribe;
-  }, [refreshSingleTable]);
+    // ✅ Cleanup avec nettoyage du set
+    return () => {
+      unsubscribe();
+      recentUpdates.clear();
+    };
+  }, []); // ✅ AUCUNE DÉPENDANCE
 
-  const refreshTables = async () => {
+  // ✅ Charger les tables au démarrage - fonction stable
+  useEffect(() => {
+    loadTables();
+  }, [loadTables]);
+
+  const refreshTables = useCallback(async () => {
     await loadTables();
-  };
+  }, [loadTables]);
 
-  const getTableById = (id: number) => {
-    return tables.find((table) => table.id === id);
-  };
+  // ✅ CORRECTION : getTableById stable avec ref
+  const getTableById = useCallback((id: number) => {
+    return tablesRef.current.find((table) => table.id === id);
+  }, []);
 
-  const updateTableInContext = async (updatedTable: Table) => {
-    // Mettre à jour dans le stockage avec cache optimisé
-    await StorageManager.save(STORAGE_KEYS.TABLES, [
-      ...tables.map((t) => (t.id === updatedTable.id ? updatedTable : t)),
-    ]);
+  // ✅ CORRECTION : updateTableInContext optimisé
+  const updateTableInContext = useCallback(async (updatedTable: Table) => {
+    try {
+      // ✅ Éviter les mises à jour si déjà en cours
+      if (refreshInProgress.current.has(updatedTable.id)) {
+        console.log(`Update already in progress for table ${updatedTable.id}, queuing...`);
+        
+        // Attendre un peu et réessayer
+        setTimeout(() => updateTableInContext(updatedTable), 100);
+        return;
+      }
 
-    // Mettre à jour dans le context
-    setTables((prev) =>
-      prev.map((table) => (table.id === updatedTable.id ? updatedTable : table))
-    );
+      refreshInProgress.current.add(updatedTable.id);
 
-    // Émettre l'événement
-    events.emit(EVENT_TYPES.TABLE_UPDATED, updatedTable.id);
-  };
+      const currentTables = tablesRef.current;
+      const updatedTables = currentTables.map((t) => 
+        t.id === updatedTable.id ? updatedTable : t
+      );
+
+      // Mettre à jour dans le stockage avec cache optimisé
+      await StorageManager.save(STORAGE_KEYS.TABLES, updatedTables);
+
+      // Mettre à jour dans le context
+      setTables(updatedTables);
+      tablesRef.current = updatedTables;
+
+      // ✅ Émettre l'événement avec un délai pour éviter les boucles
+      setTimeout(() => {
+        events.emit(EVENT_TYPES.TABLE_UPDATED, updatedTable.id);
+      }, 50);
+
+    } catch (error) {
+      console.error('Error updating table in context:', error);
+    } finally {
+      refreshInProgress.current.delete(updatedTable.id);
+    }
+  }, []);
+
+  // ✅ NOUVEAU : Debug en développement
+  useEffect(() => {
+    if (__DEV__) {
+      const debugInterval = setInterval(() => {
+        if (refreshInProgress.current.size > 0) {
+          console.log('[TableContext] Refreshes in progress:', Array.from(refreshInProgress.current));
+        }
+      }, 5000);
+
+      return () => clearInterval(debugInterval);
+    }
+  }, []);
+
   return (
     <TableContext.Provider
       value={{
         tables,
         isLoading,
         refreshTables,
-        refreshSingleTable,
+        refreshSingleTable: refreshSingleTableStable, // ✅ Fonction stable
         getTableById,
         updateTableInContext,
       }}
