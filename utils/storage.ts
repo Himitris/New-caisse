@@ -231,10 +231,122 @@ const log = {
 
 // Cache en mémoire optimisé avec limite de taille et nettoyage automatique
 class MemoryCache {
-  private cache: Map<string, { data: any; timestamp: number; size: number }> = new Map();
-  private maxSize: number = 50 * 1024 * 1024; // 50MB maximum
+  private cache: Map<string, { data: any; timestamp: number; size: number }> =
+    new Map();
+  private maxSize: number = 5 * 1024 * 1024; // 5MB max au lieu de 50MB
   private currentSize: number = 0;
-  private maxEntries: number = 100; // Maximum 100 entrées
+  private maxEntries: number = 20; // 20 entrées max au lieu de 100
+  private cleanupInterval: ReturnType<typeof setInterval> | null = null;
+
+  constructor() {
+    // Nettoyage automatique toutes les 30 secondes
+    this.cleanupInterval = setInterval(() => {
+      this.aggressiveCleanup();
+    }, 30000);
+  }
+
+  private aggressiveCleanup(): void {
+    const now = Date.now();
+    const maxAge = 2 * 60 * 1000; // 2 minutes au lieu de 5
+    let removedCount = 0;
+
+    // Supprimer les entrées expirées
+    for (const [key, value] of this.cache.entries()) {
+      if (now - value.timestamp > maxAge) {
+        this.currentSize -= value.size;
+        this.cache.delete(key);
+        removedCount++;
+      }
+    }
+
+    // Si encore trop d'entrées, supprimer les plus anciennes
+    if (this.cache.size > this.maxEntries) {
+      const entries = Array.from(this.cache.entries()).sort(
+        ([, a], [, b]) => a.timestamp - b.timestamp
+      );
+
+      const toRemove = this.cache.size - Math.floor(this.maxEntries * 0.7); // Garder que 70%
+
+      for (let i = 0; i < toRemove && i < entries.length; i++) {
+        const [key, value] = entries[i];
+        this.currentSize -= value.size;
+        this.cache.delete(key);
+        removedCount++;
+      }
+    }
+
+    console.log(
+      `[MemoryCache] Cleaned ${removedCount} entries, current size: ${this.cache.size}`
+    );
+  }
+
+  set<T>(key: string, data: T): void {
+    const size = this.calculateSize(data);
+
+    // Ne pas stocker si trop gros
+    if (size > this.maxSize / 4) {
+      console.warn(
+        `[MemoryCache] Data too large for key ${key}, skipping cache`
+      );
+      return;
+    }
+
+    // Nettoyage préventif si approche des limites
+    if (
+      this.cache.size >= this.maxEntries * 0.8 ||
+      this.currentSize + size > this.maxSize * 0.8
+    ) {
+      this.aggressiveCleanup();
+    }
+
+    // Supprimer l'ancienne entrée si elle existe
+    const existing = this.cache.get(key);
+    if (existing) {
+      this.currentSize -= existing.size;
+    }
+
+    this.cache.set(key, {
+      data,
+      timestamp: Date.now(),
+      size,
+    });
+
+    this.currentSize += size;
+  }
+
+  get<T>(key: string): T | null {
+    const item = this.cache.get(key);
+    if (!item) return null;
+
+    // Vérification d'expiration plus stricte
+    if (Date.now() - item.timestamp > 2 * 60 * 1000) {
+      // 2 minutes
+      this.currentSize -= item.size;
+      this.cache.delete(key);
+      return null;
+    }
+
+    return item.data as T;
+  }
+
+  clear(): void {
+    this.cache.clear();
+    this.currentSize = 0;
+    console.log('[MemoryCache] Cache cleared completely');
+  }
+
+  destroy(): void {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
+    this.clear();
+  }
+
+  // Nouvelle méthode pour surveillance
+  getMemoryPressure(): number {
+    return (this.currentSize / this.maxSize) * 100;
+  }
 
   private calculateSize(data: any): number {
     try {
@@ -248,11 +360,12 @@ class MemoryCache {
     if (this.cache.size === 0) return;
 
     // Trier par timestamp et supprimer les plus anciens
-    const entries = Array.from(this.cache.entries())
-      .sort(([,a], [,b]) => a.timestamp - b.timestamp);
+    const entries = Array.from(this.cache.entries()).sort(
+      ([, a], [, b]) => a.timestamp - b.timestamp
+    );
 
     const toRemove = Math.ceil(entries.length * 0.3); // Supprimer 30% des entrées
-    
+
     for (let i = 0; i < toRemove && i < entries.length; i++) {
       const [key, value] = entries[i];
       this.currentSize -= value.size;
@@ -272,57 +385,12 @@ class MemoryCache {
     }
   }
 
-  get<T>(key: string): T | null {
-    const item = this.cache.get(key);
-    if (!item) return null;
-
-    if (Date.now() - item.timestamp > 5 * 60 * 1000) {
-      this.currentSize -= item.size;
-      this.cache.delete(key);
-      return null;
-    }
-
-    return item.data as T;
-  }
-
-  set<T>(key: string, data: T): void {
-    const size = this.calculateSize(data);
-    
-    // Vérifier les limites avant d'ajouter
-    if (this.cache.size >= this.maxEntries || this.currentSize + size > this.maxSize) {
-      this.cleanup();
-      
-      if (this.cache.size >= this.maxEntries || this.currentSize + size > this.maxSize) {
-        this.evictOldest();
-      }
-    }
-
-    // Supprimer l'ancienne entrée si elle existe
-    const existing = this.cache.get(key);
-    if (existing) {
-      this.currentSize -= existing.size;
-    }
-
-    this.cache.set(key, {
-      data,
-      timestamp: Date.now(),
-      size
-    });
-    
-    this.currentSize += size;
-  }
-
-  clear(): void {
-    this.cache.clear();
-    this.currentSize = 0;
-  }
-
   getStats() {
     return {
       entries: this.cache.size,
       currentSize: this.currentSize,
       maxSize: this.maxSize,
-      maxEntries: this.maxEntries
+      maxEntries: this.maxEntries,
     };
   }
 }
@@ -330,8 +398,14 @@ class MemoryCache {
 // Classe utilitaire optimisée pour gérer le stockage
 class StorageManager {
   public static memoryCache = new MemoryCache(); // Le nouveau cache optimisé
-  private static serializationCache = new Map<string, { hash: string; serialized: string }>();
-  private static pendingWrites = new Map<string, ReturnType<typeof setTimeout>>();
+  private static serializationCache = new Map<
+    string,
+    { hash: string; serialized: string }
+  >();
+  private static pendingWrites = new Map<
+    string,
+    ReturnType<typeof setTimeout>
+  >();
   private static hashCache = new Map<any, string>();
 
   private static performanceMonitor = new Map<
@@ -352,17 +426,17 @@ class StorageManager {
       let hash = 0;
       for (let i = 0; i < str.length; i++) {
         const char = str.charCodeAt(i);
-        hash = ((hash << 5) - hash) + char;
+        hash = (hash << 5) - hash + char;
         hash = hash & hash; // Convert to 32-bit integer
       }
-      
+
       const result = hash.toString(36);
-      
+
       // Limiter la taille du cache de hash
       if (this.hashCache.size > 1000) {
         this.hashCache.clear();
       }
-      
+
       this.hashCache.set(data, result);
       return result;
     } catch {
@@ -387,13 +461,23 @@ class StorageManager {
   static async save<T>(
     key: string,
     data: T,
-    compress: boolean = CONFIG.COMPRESSION_ENABLED
+    compress: boolean = false
   ): Promise<void> {
     try {
+      // Vérifier la pression mémoire
+      const memoryPressure = this.memoryCache.getMemoryPressure();
+      if (memoryPressure > 80) {
+        console.warn(
+          `[StorageManager] High memory pressure: ${memoryPressure}%, forcing cleanup`
+        );
+        this.memoryCache.clear();
+      }
+
       // Annuler l'écriture en attente pour cette clé
       const pendingTimeout = this.pendingWrites.get(key);
       if (pendingTimeout) {
         clearTimeout(pendingTimeout);
+        this.pendingWrites.delete(key);
       }
 
       // Vérifier si les données ont vraiment changé
@@ -402,53 +486,28 @@ class StorageManager {
         return; // Données identiques, pas besoin de sauvegarder
       }
 
-      // Mettre à jour le cache mémoire immédiatement
+      // Mettre à jour le cache mémoire immédiatement mais avec limite
       this.memoryCache.set(key, data);
 
-      // Préparer la sérialisation avec cache
-      const dataHash = this.calculateHash(data);
-      let jsonValue: string;
-      const cached = this.serializationCache.get(key);
-      
-      if (cached && cached.hash === dataHash) {
-        // Réutiliser la sérialisation en cache
-        jsonValue = cached.serialized;
-      } else {
-        // Nouvelle sérialisation
-        if (compress && JSON.stringify(data).length > CONFIG.COMPRESSION_THRESHOLD) {
-          jsonValue = CompressionManager.compress(data);
-        } else {
-          jsonValue = JSON.stringify(data);
-        }
-        
-        // Mettre en cache la sérialisation
-        this.serializationCache.set(key, { hash: dataHash, serialized: jsonValue });
-        
-        // Limiter la taille du cache de sérialisation
-        if (this.serializationCache.size > 50) {
-          const firstKey = this.serializationCache.keys().next().value;
-          if (typeof firstKey === 'string') {
-            this.serializationCache.delete(firstKey);
-          }
-        }
+      // Écriture immédiate pour les données critiques (tables)
+      if (key.includes('tables')) {
+        await AsyncStorage.setItem(key, JSON.stringify(data));
+        return;
       }
 
-      // Écriture différée pour éviter les écritures trop fréquentes
+      // Écriture différée pour les autres données avec timeout réduit
       const writeTimeout = setTimeout(async () => {
         try {
-          await AsyncStorage.setItem(key, jsonValue);
+          await AsyncStorage.setItem(key, JSON.stringify(data));
           this.pendingWrites.delete(key);
-          log.info(`Data saved to ${key} successfully (deferred)`);
         } catch (error) {
-          log.error(`Error saving deferred data to ${key}:`, error);
+          console.error(`Error saving deferred data to ${key}:`, error);
         }
-      }, 100); // Attendre 100ms
+      }, 50); // 50ms au lieu de 100ms
 
       this.pendingWrites.set(key, writeTimeout);
-
-      return Promise.resolve();
     } catch (error) {
-      log.error(`Error preparing save for ${key}:`, error);
+      console.error(`Error preparing save for ${key}:`, error);
       throw error;
     }
   }
@@ -501,24 +560,69 @@ class StorageManager {
 
   // Forcer l'écriture de toutes les données en attente
   static async flushPendingWrites(): Promise<void> {
+    console.log(
+      `[StorageManager] Flushing ${this.pendingWrites.size} pending writes`
+    );
+
     const promises: Promise<void>[] = [];
-    
+
     for (const [key, timeout] of this.pendingWrites.entries()) {
       clearTimeout(timeout);
-      this.pendingWrites.delete(key);
-      
-      // Effectuer l'écriture immédiatement
+
       const cachedData = this.memoryCache.get(key);
       if (cachedData) {
         promises.push(
-          AsyncStorage.setItem(key, JSON.stringify(cachedData))
-            .catch(error => log.error(`Error flushing ${key}:`, error))
+          AsyncStorage.setItem(key, JSON.stringify(cachedData)).catch((error) =>
+            console.error(`Error flushing ${key}:`, error)
+          )
         );
       }
     }
 
+    this.pendingWrites.clear();
+
     await Promise.all(promises);
-    log.info(`Flushed ${promises.length} pending writes`);
+
+    // Nettoyage après flush
+    this.performCleanup();
+  }
+
+  private static performCleanup(): void {
+    // Nettoyer tous les caches
+    this.memoryCache.clear();
+    this.serializationCache.clear();
+    this.hashCache.clear();
+
+    console.log('[StorageManager] Performed complete cleanup');
+  }
+
+  static getMemoryStats() {
+    return {
+      memoryPressure: this.memoryCache.getMemoryPressure(),
+      cacheSize: this.memoryCache.getStats(),
+      pendingWrites: this.pendingWrites.size,
+      serializationCache: this.serializationCache.size,
+      hashCache: this.hashCache.size,
+    };
+  }
+
+  static emergencyCleanup(): void {
+    console.warn('[StorageManager] Emergency cleanup triggered!');
+
+    // Forcer l'écriture synchrone des pending writes
+    for (const [key, timeout] of this.pendingWrites.entries()) {
+      clearTimeout(timeout);
+      const cachedData = this.memoryCache.get(key);
+      if (cachedData && key.includes('tables')) {
+        try {
+          AsyncStorage.setItem(key, JSON.stringify(cachedData));
+        } catch (error) {
+          console.error(`Emergency save failed for ${key}:`, error);
+        }
+      }
+    }
+
+    this.performCleanup();
   }
 
   static async performMaintenance(): Promise<void> {
@@ -602,7 +706,7 @@ class StorageManager {
       this.memoryCache.clear();
       this.serializationCache.clear();
       this.hashCache.clear();
-      
+
       // Annuler toutes les écritures en attente
       for (const timeout of this.pendingWrites.values()) {
         clearTimeout(timeout);
@@ -668,11 +772,11 @@ class StorageManager {
         key.startsWith(STORAGE_PREFIX)
       );
       await AsyncStorage.multiRemove(keysToRemove);
-      
+
       this.memoryCache.clear();
       this.serializationCache.clear();
       this.hashCache.clear();
-      
+
       // Annuler toutes les écritures en attente
       for (const timeout of this.pendingWrites.values()) {
         clearTimeout(timeout);
@@ -692,14 +796,14 @@ class StorageManager {
       memory: this.memoryCache.getStats(),
       serialization: {
         entries: this.serializationCache.size,
-        maxEntries: 50
+        maxEntries: 50,
       },
       hash: {
         entries: this.hashCache.size,
-        maxEntries: 1000
+        maxEntries: 1000,
       },
       pendingWrites: this.pendingWrites.size,
-      performance: this.getPerformanceStats()
+      performance: this.getPerformanceStats(),
     };
   }
 }

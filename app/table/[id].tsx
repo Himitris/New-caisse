@@ -33,6 +33,7 @@ import {
   getTable,
   resetTable,
   updateTable,
+  StorageManager,
 } from '../../utils/storage';
 import { useTableContext } from '../../utils/TableContext';
 import { useToast } from '../../utils/ToastContext';
@@ -133,6 +134,56 @@ const getCategoryFromName = (
     return 'Softs';
   }
 };
+
+class TimeoutManager {
+  private timeouts: Map<string, number> = new Map();
+  private maxTimeouts = 10; // Limite le nombre de timeouts
+
+  setTimeout(key: string, callback: () => void, delay: number): void {
+    // Nettoyer l'ancien timeout s'il existe
+    this.clearTimeout(key);
+
+    // Vérifier les limites
+    if (this.timeouts.size >= this.maxTimeouts) {
+      console.warn('[TimeoutManager] Too many timeouts, clearing oldest');
+      this.clearOldest();
+    }
+
+    const timeoutId = setTimeout(() => {
+      callback();
+      this.timeouts.delete(key); // Auto-cleanup
+    }, delay) as unknown as number;
+
+    this.timeouts.set(key, timeoutId);
+  }
+
+  clearTimeout(key: string): void {
+    const timeoutId = this.timeouts.get(key);
+    if (timeoutId) {
+      clearTimeout(timeoutId);
+      this.timeouts.delete(key);
+    }
+  }
+
+  clearAll(): void {
+    for (const [key, timeoutId] of this.timeouts.entries()) {
+      clearTimeout(timeoutId);
+    }
+    this.timeouts.clear();
+    console.log('[TimeoutManager] Cleared all timeouts');
+  }
+
+  private clearOldest(): void {
+    const firstKey = this.timeouts.keys().next().value;
+    if (firstKey) {
+      this.clearTimeout(firstKey);
+    }
+  }
+
+  getActiveCount(): number {
+    return this.timeouts.size;
+  }
+}
 
 // === HOOKS OPTIMISÉS ===
 
@@ -361,6 +412,8 @@ export default function TableScreen() {
   const tableId = parseInt(id as string, 10);
   const router = useRouter();
   const toast = useToast();
+  const timeoutManager = useRef(new TimeoutManager());
+  const eventListeners = useRef<Array<() => void>>([]);
   const { getTableById, updateTableInContext, refreshSingleTable } =
     useTableContext();
 
@@ -404,6 +457,24 @@ export default function TableScreen() {
     router.push('/');
     return true;
   }, [router]);
+
+  useEffect(() => {
+    return () => {
+      // Nettoyer tous les timeouts
+      timeoutManager.current.clearAll();
+
+      // Nettoyer tous les event listeners
+      eventListeners.current.forEach((cleanup) => cleanup());
+      eventListeners.current = [];
+
+      // Forcer un emergency cleanup du storage si trop de timeouts étaient actifs
+      if (timeoutManager.current.getActiveCount() > 5) {
+        StorageManager.emergencyCleanup();
+      }
+
+      console.log('[TableScreen] Complete cleanup performed');
+    };
+  }, []);
 
   const categorizeOrderItems = useCallback(
     (items: OrderItem[]) => {
@@ -493,7 +564,7 @@ export default function TableScreen() {
   }, [tableId, refreshSingleTable]);
 
   useEffect(() => {
-    const unsubscribe = events.on(
+    const cleanup1 = events.on(
       EVENT_TYPES.TABLE_UPDATED,
       (updatedTableId: number) => {
         if (updatedTableId === tableId) {
@@ -502,7 +573,7 @@ export default function TableScreen() {
       }
     );
 
-    const unsubscribePayment = events.on(
+    const cleanup2 = events.on(
       EVENT_TYPES.PAYMENT_ADDED,
       (updatedTableId: number) => {
         if (updatedTableId === tableId) {
@@ -511,27 +582,60 @@ export default function TableScreen() {
       }
     );
 
+    // Stocker les fonctions de cleanup
+    eventListeners.current.push(cleanup1, cleanup2);
+
     return () => {
-      unsubscribe();
-      unsubscribePayment();
+      cleanup1();
+      cleanup2();
     };
   }, [tableId, loadTable]);
 
   useFocusEffect(
     useCallback(() => {
-      console.log(`Table ${tableId} en focus - rafraîchissement sélectif`);
-      const timeoutId = setTimeout(() => {
-        const tableInContext = getTableById(tableId);
-        if (!tableInContext || !table || tableInContext.id !== table.id) {
-          refreshSingleTable(tableId);
-        }
-      }, 100);
+      console.log(`Table ${tableId} en focus`);
+
+      // Timeout avec cleanup automatique
+      const focusTimeoutKey = 'focus-refresh';
+      timeoutManager.current.setTimeout(
+        focusTimeoutKey,
+        () => {
+          const tableInContext = getTableById(tableId);
+          if (!tableInContext || !table || tableInContext.id !== table.id) {
+            refreshSingleTable(tableId);
+          }
+        },
+        100
+      );
+
       return () => {
-        clearTimeout(timeoutId);
+        // Cleanup au défocus
+        timeoutManager.current.clearTimeout(focusTimeoutKey);
       };
     }, [tableId, refreshSingleTable, getTableById, table])
   );
 
+
+  useEffect(() => {
+    if (__DEV__) {
+      const memoryCheckInterval = setInterval(() => {
+        const stats = StorageManager.getMemoryStats();
+        if (stats.memoryPressure > 70) {
+          console.warn(
+            `[TableScreen] High memory pressure: ${stats.memoryPressure}%`
+          );
+        }
+        if (timeoutManager.current.getActiveCount() > 5) {
+          console.warn(
+            `[TableScreen] Too many active timeouts: ${timeoutManager.current.getActiveCount()}`
+          );
+        }
+      }, 10000); // Check toutes les 10 secondes
+
+      return () => clearInterval(memoryCheckInterval);
+    }
+  }, []);
+  
   useEffect(() => {
     return () => {
       if (updateTimeoutRef.current) {
@@ -646,8 +750,10 @@ export default function TableScreen() {
   const updateItemQuantity = useCallback(
     (itemId: number, increment: boolean) => {
       if (!table || !table.order) return;
+
       setTable((prevTable) => {
         if (!prevTable || !prevTable.order) return prevTable;
+
         const updatedItems = prevTable.order.items
           .map((item) => {
             if (item.id !== itemId) return item;
@@ -657,12 +763,14 @@ export default function TableScreen() {
             return { ...item, quantity: newQuantity };
           })
           .filter((item) => item.quantity > 0);
+
         const newTotal = updatedItems.reduce((sum, item) => {
           if (!item.offered) {
             return sum + item.price * item.quantity;
           }
           return sum;
         }, 0);
+
         const updatedTable = {
           ...prevTable,
           order: {
@@ -671,15 +779,19 @@ export default function TableScreen() {
             total: newTotal,
           },
         };
-        if (updateTimeoutRef.current !== null) {
-          clearTimeout(updateTimeoutRef.current);
-        }
-        updateTimeoutRef.current = setTimeout(() => {
-          updateTable(updatedTable).catch((error) => {
-            toast.showToast('Erreur lors de la mise à jour', 'error');
-            console.error('Error updating table:', error);
-          });
-        }, 150);
+
+        // ✅ SOLUTION : Utiliser le gestionnaire de timeouts centralisé
+        timeoutManager.current.setTimeout(
+          `update-${itemId}`,
+          () => {
+            updateTable(updatedTable).catch((error) => {
+              toast.showToast('Erreur lors de la mise à jour', 'error');
+              console.error('Error updating table:', error);
+            });
+          },
+          100 // Réduit à 100ms
+        );
+
         return updatedTable;
       });
     },
@@ -691,22 +803,24 @@ export default function TableScreen() {
 
     Alert.alert(
       'Fermer la table',
-      `Êtes-vous sûr de vouloir fermer la table "${table.name}" ? Toutes les commandes non payées seront perdues.`,
+      `Êtes-vous sûr de vouloir fermer la table "${table.name}" ?`,
       [
-        {
-          text: 'Annuler',
-          style: 'cancel',
-        },
+        { text: 'Annuler', style: 'cancel' },
         {
           text: 'Fermer',
           style: 'destructive',
           onPress: async () => {
-            setSaveInProgress(true);
             try {
-              // 1. D'abord naviguer
+              // ✅ SOLUTION : Nettoyer les timeouts avant fermeture
+              timeoutManager.current.clearAll();
+
+              // ✅ SOLUTION : Forcer l'écriture des données en attente
+              await StorageManager.flushPendingWrites();
+
+              // Navigation immédiate
               router.push('/');
 
-              // 2. Ensuite réinitialiser la table en arrière-plan
+              // Réinitialisation de la table en arrière-plan
               setTimeout(async () => {
                 try {
                   await resetTable(tableId);
@@ -715,21 +829,13 @@ export default function TableScreen() {
                     'success'
                   );
                 } catch (error) {
-                  console.error(
-                    'Erreur lors de la fermeture de la table:',
-                    error
-                  );
+                  console.error('Erreur lors de la fermeture:', error);
                   toast.showToast('Impossible de fermer la table', 'error');
                 }
-              }, 100);
+              }, 50); // Délai réduit
             } catch (error) {
               console.error('Erreur lors de la navigation:', error);
               toast.showToast('Erreur lors de la fermeture', 'error');
-            } finally {
-              // Réinitialiser le flag après un délai pour éviter les conflits
-              setTimeout(() => {
-                setSaveInProgress(false);
-              }, 200);
             }
           },
         },
