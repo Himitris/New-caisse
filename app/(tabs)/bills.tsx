@@ -55,14 +55,8 @@ const STATUS_COLORS = {
   pending: '#FFC107',
   paid: '#4CAF50',
   split: '#2196F3',
+  custom: '#FF9800',
   default: '#E0E0E0',
-} as const;
-
-const PAYMENT_METHOD_ICONS = {
-  card: '💳',
-  cash: '💶',
-  check: '📝',
-  default: '',
 } as const;
 
 const PAYMENT_METHOD_LABELS = {
@@ -73,7 +67,14 @@ const PAYMENT_METHOD_LABELS = {
 
 const ITEM_HEIGHT = 80;
 const PAGE_SIZE = 20;
-const MAX_BILLS_IN_STORAGE = 1000; // Limite pour éviter les problèmes de mémoire
+const MAX_BILLS_IN_STORAGE = 1000;
+
+const getBillStatusColor = (bill: Bill) => {
+  if (bill.status === 'split' && bill.paymentType === 'custom') {
+    return STATUS_COLORS.custom;
+  }
+  return STATUS_COLORS[bill.status] || STATUS_COLORS.default;
+};
 
 // Modal pour voir le reçu - Mémoïzé
 const ViewReceiptModal = memo<ViewReceiptModalProps>(
@@ -88,6 +89,23 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
       },
       [paymentMethods]
     );
+
+    const calculateOriginalAmount = useCallback((bill: Bill) => {
+      const hasDetailedItems = bill.paidItems && bill.paidItems.length > 0;
+
+      if (bill.paymentType === 'custom' && hasDetailedItems) {
+        // Pour les paiements custom, le total = somme des prix originaux des articles
+        return (
+          bill.paidItems?.reduce((sum, item) => {
+            if (item.offered) return sum; // Les articles offerts ne comptent pas
+            return sum + item.price * item.quantity;
+          }, 0) || bill.amount
+        );
+      }
+
+      return bill.amount;
+    }, []);
+
     const handleDelete = useCallback(() => {
       Alert.alert(
         'Supprimer la facture',
@@ -102,7 +120,7 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
     // Seulement APRÈS avoir déclaré tous vos hooks, placez votre condition
     if (!bill) return null;
 
-    const statusColor = STATUS_COLORS[bill.status];
+    const statusColor = getBillStatusColor(bill);
     const paymentLabel = bill.paymentMethod
       ? getPaymentMethodLabel(bill.paymentMethod)
       : '';
@@ -188,46 +206,85 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
                 </View>
               )}
 
-              <View style={styles.billSummary}>
-                <View style={styles.billRow}>
-                  <Text style={styles.billLabel}>Articles:</Text>
-                  <Text style={styles.billValue}>
-                    {hasDetailedItems
-                      ? bill.paidItems?.length ?? 0
-                      : bill.items}
-                  </Text>
-                </View>
+              {(() => {
+                const originalAmount = calculateOriginalAmount(bill);
+                const isCustomSplit =
+                  bill.paymentType === 'custom' &&
+                  bill.status === 'split' &&
+                  originalAmount > bill.amount;
+                const totalAmount = isCustomSplit
+                  ? originalAmount
+                  : bill.amount;
+                const paidAmount = bill.amount;
 
-                {bill.offeredAmount && bill.offeredAmount > 0 && (
-                  <View style={styles.billRow}>
-                    <Text style={styles.billOfferedLabel}>
-                      Articles offerts:
-                    </Text>
-                    <Text style={styles.billOfferedValue}>
-                      {bill.offeredAmount.toFixed(2)} €
-                    </Text>
-                  </View>
-                )}
+                return (
+                  <View style={styles.billSummary}>
+                    <View style={styles.billRow}>
+                      <Text style={styles.billLabel}>Articles:</Text>
+                      <Text style={styles.billValue}>
+                        {hasDetailedItems
+                          ? bill.paidItems?.length ?? 0
+                          : bill.items}
+                      </Text>
+                    </View>
 
-                <View style={styles.billRow}>
-                  <Text style={styles.billLabel}>Montant:</Text>
-                  <Text style={styles.billAmount}>
-                    {bill.amount.toFixed(2)} €
-                  </Text>
-                </View>
-                <View style={styles.billRow}>
-                  <Text style={styles.billLabel}>Statut:</Text>
-                  <Text style={[styles.billStatus, { color: statusColor }]}>
-                    {bill.status}
-                  </Text>
-                </View>
-                {paymentLabel && (
-                  <View style={styles.billRow}>
-                    <Text style={styles.billLabel}>Paiement:</Text>
-                    <Text style={styles.billValue}>{paymentLabel}</Text>
+                    {bill.offeredAmount && bill.offeredAmount > 0 && (
+                      <View style={styles.billRow}>
+                        <Text style={styles.billOfferedLabel}>
+                          Articles offerts:
+                        </Text>
+                        <Text style={styles.billOfferedValue}>
+                          {bill.offeredAmount.toFixed(2)} €
+                        </Text>
+                      </View>
+                    )}
+
+                    {isCustomSplit ? (
+                      <>
+                        <View style={styles.billRow}>
+                          <Text style={styles.billLabel}>Total addition:</Text>
+                          <Text style={styles.billAmount}>
+                            {totalAmount.toFixed(2)} €
+                          </Text>
+                        </View>
+                        <View style={[styles.billRow, styles.paidAmountRow]}>
+                          <Text style={styles.billPaidLabel}>
+                            Montant payé:
+                          </Text>
+                          <Text style={styles.billPaidAmount}>
+                            {paidAmount.toFixed(2)} €
+                          </Text>
+                        </View>
+                        <View style={styles.splitNotice}>
+                          <Text style={styles.splitNoticeText}>
+                            (Paiement partiel - Addition partagée)
+                          </Text>
+                        </View>
+                      </>
+                    ) : (
+                      <View style={styles.billRow}>
+                        <Text style={styles.billLabel}>Montant:</Text>
+                        <Text style={styles.billAmount}>
+                          {totalAmount.toFixed(2)} €
+                        </Text>
+                      </View>
+                    )}
+
+                    <View style={styles.billRow}>
+                      <Text style={styles.billLabel}>Statut:</Text>
+                      <Text style={[styles.billStatus, { color: statusColor }]}>
+                        {bill.status}
+                      </Text>
+                    </View>
+                    {paymentLabel && (
+                      <View style={styles.billRow}>
+                        <Text style={styles.billLabel}>Paiement:</Text>
+                        <Text style={styles.billValue}>{paymentLabel}</Text>
+                      </View>
+                    )}
                   </View>
-                )}
-              </View>
+                );
+              })()}
 
               <View style={styles.receiptDivider} />
 
@@ -503,7 +560,7 @@ const BillListItem = memo<BillListItemProps>(
     }, [bill, onSelect]);
 
     // ✅ Améliorer la comparaison pour éviter les faux positifs
-    const statusColor = STATUS_COLORS[bill.status] || STATUS_COLORS.default;
+    const statusColor = getBillStatusColor(bill);
 
     const formattedDate = useMemo(() => {
       const date = new Date(bill.timestamp);
@@ -524,7 +581,11 @@ const BillListItem = memo<BillListItemProps>(
         <View style={styles.billItemDetails}>
           <Text style={styles.billItemAmount}>{bill.amount.toFixed(2)} €</Text>
           <Text style={[styles.billItemStatus, { color: statusColor }]}>
-            {bill.status}
+            {bill.status === 'split' && bill.paymentType === 'custom'
+              ? 'Custom'
+              : bill.status === 'split' && bill.paymentType === 'split'
+              ? 'Split'
+              : bill.status}
           </Text>
         </View>
         <Text style={styles.billItemDate}>{formattedDate}</Text>
@@ -545,7 +606,7 @@ export default function BillsScreen() {
   const [searchText, setSearchText] = useState('');
   const [dateFilter, setDateFilter] = useState<Date | null>(null);
   const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(10); 
+  const [pageSize, setPageSize] = useState(10);
   const [totalPages, setTotalPages] = useState(0);
   const [totalBills, setTotalBills] = useState(0);
   const [hasMorePages, setHasMorePages] = useState(false);
@@ -555,7 +616,6 @@ export default function BillsScreen() {
   >(null);
   const toast = useToast();
   const { paymentMethods } = useSettings();
-  
 
   const loadBills = useCallback(async () => {
     setLoading(true);
@@ -826,7 +886,7 @@ export default function BillsScreen() {
   }, []);
 
   const getStatusColor = useCallback(
-    (status: Bill['status']) => STATUS_COLORS[status],
+    (bill: Bill) => getBillStatusColor(bill),
     []
   );
 
@@ -930,165 +990,219 @@ export default function BillsScreen() {
     // Vérifier si nous avons des articles détaillés
     const hasDetailedItems = bill.paidItems && bill.paidItems.length > 0;
 
+    // Calculer le total de l'addition pour les paiements custom
+    const calculateTotalAmount = () => {
+      if (bill.paymentType === 'custom' && hasDetailedItems) {
+        // Pour les paiements custom, le total = somme des prix originaux des articles
+        return (
+          bill.paidItems?.reduce((sum, item) => {
+            if (item.offered) return sum; // Les articles offerts ne comptent pas
+            return sum + item.price * item.quantity;
+          }, 0) || bill.amount
+        );
+      }
+      return bill.amount;
+    };
+
+    // Déterminer les montants pour l'affichage
+    const isCustomSplit =
+      bill.paymentType === 'custom' && bill.status === 'split';
+    const totalAmount = calculateTotalAmount();
+    const paidAmount = bill.amount;
+
     // Générer le HTML des articles si disponibles
     let itemsHTML = '';
     if (hasDetailedItems) {
       itemsHTML = `
-        <div class="items-section">
-          <table style="width: 100%; border-collapse: collapse; margin: 5mm 0;">
-            <tr>
-              <th style="text-align: left;">Qté</th>
-              <th style="text-align: left;">Article</th>
-              <th style="text-align: right;">Prix</th>
+      <div class="items-section">
+        <table style="width: 100%; border-collapse: collapse; margin: 5mm 0;">
+          <tr>
+            <th style="text-align: left;">Qté</th>
+            <th style="text-align: left;">Article</th>
+            <th style="text-align: right;">Prix</th>
+          </tr>
+          ${(bill.paidItems ?? [])
+            .map(
+              (item) => `
+            <tr ${
+              item.offered ? 'style="font-style: italic; color: #FF9800;"' : ''
+            }>
+              <td>${item.quantity}x</td>
+              <td>${item.name}${item.offered ? ' (Offert)' : ''}</td>
+              <td style="text-align: right;">${(
+                item.price * item.quantity
+              ).toFixed(2)}€</td>
             </tr>
-            ${(bill.paidItems ?? [])
-              .map(
-                (item) => `
-              <tr ${
-                item.offered
-                  ? 'style="font-style: italic; color: #FF9800;"'
-                  : ''
-              }>
-                <td>${item.quantity}x</td>
-                <td>${item.name}${item.offered ? ' (Offert)' : ''}</td>
-                <td style="text-align: right;">${(
-                  item.price * item.quantity
-                ).toFixed(2)}€</td>
-              </tr>
-            `
-              )
-              .join('')}
-          </table>
-        </div>
-      `;
+          `
+            )
+            .join('')}
+        </table>
+      </div>
+    `;
     }
 
     // Inclure les articles offerts si présents
     let offeredHTML = '';
     if (bill.offeredAmount && bill.offeredAmount > 0) {
       offeredHTML = `
-        <div class="total-line" style="color: #FF9800; font-style: italic;">
-          <span>Articles offerts:</span>
-          <span>${bill.offeredAmount.toFixed(2)}€</span>
+      <div class="total-line" style="color: #FF9800; font-style: italic;">
+        <span>Articles offerts:</span>
+        <span>${bill.offeredAmount.toFixed(2)}€</span>
+      </div>
+    `;
+    }
+
+    // Section des totaux adaptée pour les paiements partagés
+    let totalsSection = '';
+    if (isCustomSplit && totalAmount > paidAmount) {
+      totalsSection = `
+      <div class="totals">
+        <div class="total-line">
+          <span>Articles:</span>
+          <span>${
+            hasDetailedItems ? bill.paidItems?.length ?? 0 : bill.items
+          }</span>
         </div>
-      `;
+        ${offeredHTML}
+        <div class="total-line">
+          <span>TOTAL ADDITION:</span>
+          <span>${totalAmount.toFixed(2)}€</span>
+        </div>
+        <div class="total-amount" style="border-top: 1px dashed #000; padding-top: 2mm; margin-top: 2mm;">
+          MONTANT PAYÉ: ${paidAmount.toFixed(2)}€
+        </div>
+        <div style="text-align: center; font-size: 12pt; color: #666; margin-top: 2mm;">
+          (Paiement partiel - Addition partagée)
+        </div>
+      </div>
+    `;
+    } else {
+      totalsSection = `
+      <div class="totals">
+        <div class="total-line">
+          <span>Articles:</span>
+          <span>${
+            hasDetailedItems ? bill.paidItems?.length ?? 0 : bill.items
+          }</span>
+        </div>
+        ${offeredHTML}
+        <div class="total-amount">
+          TOTAL: ${(isCustomSplit ? paidAmount : totalAmount).toFixed(2)}€
+        </div>
+      </div>
+    `;
     }
 
     return `
-      <html>
-        <head>
-          <meta name="viewport" content="width=device-width, initial-scale=1.0">
-          <style>
-            @page { size: 80mm auto; margin: 0mm; }
-            body { 
-              font-family: 'Courier New', monospace; 
-              width: 80mm;
-              padding: 5mm;
-              margin: 0;
-              font-size: 14pt;
-            }
-            .header, .footer { 
-              text-align: center; 
-              margin-bottom: 5mm;
-            }
-            .header h1 {
-              font-size: 18pt;
-              margin: 0 0 2mm 0;
-            }
-            .header p, .footer p {
-              margin: 0 0 1mm 0;
-              font-size: 14pt;
-            }
-            .divider {
-              border-bottom: 1px dashed #000;
-              margin: 3mm 0;
-            }
-            .info {
-              margin-bottom: 3mm;
-            }
-            .info p {
-              margin: 0 0 1mm 0;
-            }
-            .totals {
-              margin: 2mm 0;
-            }
-            .total-line {
-              display: flex;
-              justify-content: space-between;
-              margin: 1mm 0;
-              font-size: 16pt;
-            }
-            .total-amount {
-              font-weight: bold;
-              font-size: 16pt;
-              text-align: right;
-              margin: 2mm 0;
-            }
-            .payment-info {
-              text-align: center;
-              margin: 3mm 0;
-              font-size: 14pt;
-            }
-            .payment-info p {
-              margin: 0 0 1mm 0;
-            }
-            th, td {
-              padding: 1mm 0;
-              font-size: 14pt;
-            }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <h1>${restaurantInfo.name}</h1>
-            <p>${restaurantInfo.address}</p>
-            <p>${restaurantInfo.phone}</p>
-          </div>
-  
-          <div class="divider"></div>
-          
-          <div class="info">
-            <p><strong>${
-              bill.tableName || `Table ${bill.tableNumber}`
-            }</strong></p>
-            <p>Date: ${dateFormatted} ${timeFormatted}</p>
-            ${bill.section ? `<p>Section: ${bill.section}</p>` : ''}
-          </div>
-  
-          <div class="divider"></div>
-  
-          ${itemsHTML}
-  
-          <div class="totals">
-            <div class="total-line">
-              <span>Articles:</span>
-              <span>${
-                hasDetailedItems ? bill.paidItems?.length ?? 0 : bill.items
-              }</span>
-            </div>
-            ${offeredHTML}
-            <div class="total-amount">
-              TOTAL: ${bill.amount.toFixed(2)}€
-            </div>
-          </div>
-  
-          <div class="divider"></div>
-  
-          <div class="payment-info">
-            <p>Paiement: ${bill.paymentMethod ? getPaymentMethodLabel(bill.paymentMethod) : ''}</p>
-            <p>Statut: ${bill.status}</p>
-          </div>
-  
-          <div class="divider"></div>
-  
-          <div class="footer">
-            <p>${taxInfo}</p>
-            <p>Merci de votre visite!</p>
-            <p>À bientôt, ${restaurantInfo.owner}</p>
-          </div>
-        </body>
-      </html>
-    `;
+    <html>
+      <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+          @page { size: 80mm auto; margin: 0mm; }
+          body { 
+            font-family: 'Courier New', monospace; 
+            width: 80mm;
+            padding: 5mm;
+            margin: 0;
+            font-size: 14pt;
+          }
+          .header, .footer { 
+            text-align: center; 
+            margin-bottom: 5mm;
+          }
+          .header h1 {
+            font-size: 18pt;
+            margin: 0 0 2mm 0;
+          }
+          .header p, .footer p {
+            margin: 0 0 1mm 0;
+            font-size: 14pt;
+          }
+          .divider {
+            border-bottom: 1px dashed #000;
+            margin: 3mm 0;
+          }
+          .info {
+            margin-bottom: 3mm;
+          }
+          .info p {
+            margin: 0 0 1mm 0;
+          }
+          .totals {
+            margin: 2mm 0;
+          }
+          .total-line {
+            display: flex;
+            justify-content: space-between;
+            margin: 1mm 0;
+            font-size: 16pt;
+          }
+          .total-amount {
+            font-weight: bold;
+            font-size: 16pt;
+            text-align: right;
+            margin: 2mm 0;
+          }
+          .payment-info {
+            text-align: center;
+            margin: 3mm 0;
+            font-size: 14pt;
+          }
+          .payment-info p {
+            margin: 0 0 1mm 0;
+          }
+          th, td {
+            padding: 1mm 0;
+            font-size: 14pt;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>${restaurantInfo.name}</h1>
+          <p>${restaurantInfo.address}</p>
+          <p>${restaurantInfo.phone}</p>
+        </div>
+
+        <div class="divider"></div>
+        
+        <div class="info">
+          <p><strong>${
+            bill.tableName || `Table ${bill.tableNumber}`
+          }</strong></p>
+          <p>Date: ${dateFormatted} ${timeFormatted}</p>
+          ${bill.section ? `<p>Section: ${bill.section}</p>` : ''}
+        </div>
+
+        <div class="divider"></div>
+
+        ${itemsHTML}
+
+        ${totalsSection}
+
+        <div class="divider"></div>
+
+        <div class="payment-info">
+          <p>Paiement: ${
+            bill.paymentMethod ? getPaymentMethodLabel(bill.paymentMethod) : ''
+          }</p>
+          <p>Statut: ${
+            bill.status === 'split' && bill.paymentType === 'custom'
+              ? 'Custom'
+              : bill.status
+          }</p>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="footer">
+          <p>${taxInfo}</p>
+          <p>Merci de votre visite!</p>
+          <p>À bientôt, ${restaurantInfo.owner}</p>
+        </div>
+      </body>
+    </html>
+  `;
   }, []);
 
   const renderPagination = () => (
@@ -1156,7 +1270,6 @@ export default function BillsScreen() {
       </View>
     </View>
   );
-  
 
   const handlePrint = useCallback(async () => {
     if (!selectedBill) {
@@ -1397,10 +1510,16 @@ export default function BillsScreen() {
                     <Text
                       style={[
                         styles.selectedBillStatus,
-                        { color: getStatusColor(selectedBill.status) },
+                        { color: getStatusColor(selectedBill) },
                       ]}
                     >
-                      {selectedBill.status}
+                      {selectedBill.status === 'split' &&
+                      selectedBill.paymentType === 'custom'
+                        ? 'Custom'
+                        : selectedBill.status === 'split' &&
+                          selectedBill.paymentType === 'split'
+                        ? 'Split'
+                        : selectedBill.status}
                     </Text>
                   </View>
 
@@ -2068,5 +2187,33 @@ const styles = StyleSheet.create({
   },
   currentPageText: {
     color: 'white',
+  },
+  paidAmountRow: {
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
+    paddingTop: 12,
+    marginTop: 8,
+  },
+  billPaidLabel: {
+    fontSize: 16,
+    color: '#2196F3',
+    fontWeight: '600',
+  },
+  billPaidAmount: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#2196F3',
+  },
+  splitNotice: {
+    marginTop: 8,
+    padding: 8,
+    backgroundColor: '#E3F2FD',
+    borderRadius: 4,
+  },
+  splitNoticeText: {
+    fontSize: 12,
+    color: '#1976D2',
+    textAlign: 'center',
+    fontStyle: 'italic',
   },
 });
