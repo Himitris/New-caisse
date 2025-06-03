@@ -539,6 +539,7 @@ export const deleteCustomMenuItem = async (itemId: number): Promise<void> => {
 // ====== CLASSES DE COMPATIBILITÉ (SIMPLIFIÉES) ======
 
 export class StorageManager {
+
   static async isFirstLaunch(): Promise<boolean> {
     const value = await AsyncStorage.getItem('manjo_carn_first_launch');
     return value === null;
@@ -547,10 +548,58 @@ export class StorageManager {
   static async markAppLaunched(): Promise<void> {
     await AsyncStorage.setItem('manjo_carn_first_launch', 'false');
   }
+
+  static async performMaintenance(): Promise<void> {
+    // Fonction simplifiée de maintenance
+    try {
+      // Nettoyer les anciennes données si nécessaire
+      const lastCleanup = await AsyncStorage.getItem('last_cleanup_date');
+      const now = new Date().toISOString();
+
+      // Si aucun nettoyage n'a été fait ou si le dernier nettoyage date de plus de 7 jours
+      if (
+        !lastCleanup ||
+        new Date(lastCleanup).getTime() < Date.now() - 7 * 24 * 60 * 60 * 1000
+      ) {
+        await AsyncStorage.setItem('last_cleanup_date', now);
+      }
+    } catch (error) {
+      console.error('Error during maintenance:', error);
+    }
+  }
+
+  static async resetApplicationData(): Promise<void> {
+    // Réinitialiser certaines données de l'application
+    try {
+      await saveBills([]);
+      await saveMenuAvailability([]);
+      await resetAllTables();
+    } catch (error) {
+      console.error('Error resetting application data:', error);
+    }
+  }
 }
 
 export class TableManager {
+  static async getTables(): Promise<Table[]> {
+    return getTables();
+  }
+
+  static async saveTables(tables: Table[]): Promise<void> {
+    await saveTables(tables);
+  }
+
   static async cleanupOrphanedTableData(): Promise<void> {
     // Fonction vide maintenue pour compatibilité
+  }
+}
+
+export const saveTables = async (tables: Table[]): Promise<void> => {
+  await save(STORAGE_KEYS.TABLES, tables);
+};
+
+export class BillManager {
+  static async clearAllBills(): Promise<void> {
+    await saveBills([]);
   }
 }

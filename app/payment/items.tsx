@@ -1,10 +1,11 @@
+// app/payment/items.tsx - Version sans événements
 import { useSettings } from '@/utils/useSettings';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ArrowLeft,
   CreditCard,
   Edit3,
-  Gift, // Ajout de l'icône Gift
+  Gift,
   Minus,
   Plus,
   ShoppingCart,
@@ -19,7 +20,6 @@ import {
   Text,
   View,
 } from 'react-native';
-import { EVENT_TYPES, events } from '../../utils/events';
 import {
   addBill,
   getTable,
@@ -36,7 +36,7 @@ interface MenuItem {
   price: number;
   total: number;
   notes?: string;
-  offered?: boolean; // Ajout de la propriété offered
+  offered?: boolean;
 }
 
 interface SelectedMenuItem extends MenuItem {
@@ -276,7 +276,7 @@ export default function ItemsPaymentScreen() {
   const [tableSection, setTableSection] = useState('');
   const [processing, setProcessing] = useState(false);
   const [allOriginalItems, setAllOriginalItems] = useState<MenuItem[]>([]);
-  const [totalOffered, setTotalOffered] = useState(0); // Ajout de l'état pour les articles offerts
+  const [totalOffered, setTotalOffered] = useState(0);
   const { paymentMethods } = useSettings();
   const enabledMethods = paymentMethods.filter((method) => method.enabled);
 
@@ -341,7 +341,7 @@ export default function ItemsPaymentScreen() {
           price: item.price,
           total: item.price * item.quantity,
           notes: item.notes,
-          offered: item.offered, // Préserver l'état offert
+          offered: item.offered,
         }));
         setAvailableItems(items);
         setAllOriginalItems(items);
@@ -405,12 +405,9 @@ export default function ItemsPaymentScreen() {
           };
           return updatedSelectedItems;
         } else {
-          // Correction: Garder l'ID original mais ajouter une propriété originalId
           const newSelectedItem: SelectedMenuItem = {
             ...item,
-            // Garder l'ID original
             id: item.id,
-            // Ajouter une propriété pour rendre l'item unique dans la liste si nécessaire
             uniqueKey: `${item.id}-${Date.now()}`,
             selectedQuantity: quantityToAdd,
             offered: item.offered,
@@ -446,7 +443,7 @@ export default function ItemsPaymentScreen() {
             total:
               availableItem.price *
               (availableItem.quantity + itemToRemove.selectedQuantity),
-            offered: itemToRemove.offered, // Préserver l'état offert
+            offered: itemToRemove.offered,
           };
           return updatedAvailableItems;
         } else {
@@ -463,7 +460,7 @@ export default function ItemsPaymentScreen() {
                 price: originalItem.price,
                 total: originalItem.price * itemToRemove.selectedQuantity,
                 notes: originalItem.notes,
-                offered: itemToRemove.offered, // Préserver l'état offert
+                offered: itemToRemove.offered,
               },
             ];
           }
@@ -483,13 +480,11 @@ export default function ItemsPaymentScreen() {
               const currentQuantity = item.selectedQuantity;
               const newQuantity = increment
                 ? currentQuantity + 1
-                : Math.max(0, currentQuantity - 1); // Permettre 0 au lieu de blocage à 1
+                : Math.max(0, currentQuantity - 1);
 
-              // Si la quantité devient 0, on va supprimer l'item
               if (newQuantity === 0) {
-                // On doit restaurer l'item dans les disponibles
                 updateAvailableItemsQuantity(itemId, 1);
-                return null; // Marquer pour suppression
+                return null;
               }
 
               return {
@@ -499,10 +494,9 @@ export default function ItemsPaymentScreen() {
             }
             return item;
           })
-          .filter((item): item is SelectedMenuItem => item !== null); // Supprimer les items null avec type guard
+          .filter((item): item is SelectedMenuItem => item !== null);
       });
 
-      // Si on ne décrémente pas à 0, on met à jour les disponibles normalement
       if (!increment) {
         const itemToCheck = selectedItems.find((item) => item.id === itemId);
         if ((itemToCheck?.selectedQuantity ?? 0) > 1) {
@@ -548,7 +542,7 @@ export default function ItemsPaymentScreen() {
                 price: originalItem.price,
                 total: originalItem.price * change,
                 notes: originalItem.notes,
-                offered: originalItem.offered, // Préserver l'état offert
+                offered: originalItem.offered,
               },
             ];
           }
@@ -583,17 +577,13 @@ export default function ItemsPaymentScreen() {
           return;
         }
 
-        // Problème 1: Les IDs des articles sélectionnés ne correspondent pas aux IDs originaux
-        // Solution: Récupérer les IDs originaux pour les articles sélectionnés
         const paidItems = selectedItems.map((item) => {
-          // Trouver l'article original correspondant pour récupérer l'ID correct
           const originalItem = allOriginalItems.find(
             (origItem) =>
               origItem.name === item.name && origItem.price === item.price
           );
 
           return {
-            // Utiliser l'ID original si disponible, sinon garder l'ID actuel
             id: originalItem ? originalItem.id : item.id,
             name: item.name,
             quantity: item.selectedQuantity,
@@ -623,22 +613,16 @@ export default function ItemsPaymentScreen() {
 
         await addBill(bill);
 
-        // Problème 2: La mise à jour des articles de la commande n'utilise pas les bons identifiants
-        // Solution: Améliorer la logique de mise à jour des articles dans la commande
         let updatedOrderItems = [...currentTable.order.items];
 
         for (const selectedItem of selectedItems) {
-          // Trouver l'article original correspondant
           const originalItem = allOriginalItems.find(
             (origItem) =>
               origItem.name === selectedItem.name &&
               origItem.price === selectedItem.price
           );
 
-          // Utiliser l'ID original pour chercher dans la commande
           const itemIdToFind = originalItem ? originalItem.id : selectedItem.id;
-
-          // Chercher l'article dans la commande actuelle
           const orderItemIndex = updatedOrderItems.findIndex(
             (item) => item.id === itemIdToFind
           );
@@ -649,10 +633,8 @@ export default function ItemsPaymentScreen() {
               orderItem.quantity - selectedItem.selectedQuantity;
 
             if (remainingQuantity <= 0) {
-              // Supprimer complètement l'article
               updatedOrderItems.splice(orderItemIndex, 1);
             } else {
-              // Mettre à jour la quantité
               updatedOrderItems[orderItemIndex] = {
                 ...orderItem,
                 quantity: remainingQuantity,
@@ -662,7 +644,6 @@ export default function ItemsPaymentScreen() {
           }
         }
 
-        // Calculer le nouveau total en excluant les articles offerts
         const newTotal = updatedOrderItems.reduce((sum, item) => {
           if (!item.offered) {
             return sum + item.price * item.quantity;
@@ -671,20 +652,16 @@ export default function ItemsPaymentScreen() {
         }, 0);
 
         if (updatedOrderItems.length === 0 || newTotal <= 0) {
-          // Table complètement payée, s'assurer qu'elle est correctement fermée
           await resetTable(tableIdNum);
 
-          // Vérification supplémentaire pour s'assurer que la table est bien réinitialisée
           const checkTable = await getTable(tableIdNum);
           if (checkTable && (checkTable.order || checkTable.guests)) {
             console.warn(
               'Table non correctement réinitialisée, forçage du nettoyage'
             );
 
-            // Méthode 1: Réessayer la réinitialisation
             await resetTable(tableIdNum);
 
-            // Méthode 2: Forcer une mise à jour directe si nécessaire
             const verifyReset = await getTable(tableIdNum);
             if (verifyReset && (verifyReset.order || verifyReset.guests)) {
               const forcedCleanTable = {
@@ -697,10 +674,7 @@ export default function ItemsPaymentScreen() {
             }
           }
 
-          // Émettre l'événement pour mettre à jour l'interface
-          events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
           router.push('/');
-
           toast.showToast('Tous les articles ont été payés.', 'success');
         } else {
           const updatedTable = {
@@ -713,15 +687,7 @@ export default function ItemsPaymentScreen() {
           };
 
           await updateTable(updatedTable);
-
-          // Émettre l'événement pour mettre à jour l'interface
-          events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
-
-          // Problème 3: La liste des articles disponibles n'est pas correctement mise à jour
-          // Solution: Vider les articles sélectionnés et recharger complètement la table
           setSelectedItems([]);
-
-          // Recharger complètement les données de la table au lieu de manipuler l'état local
           await loadTable();
 
           toast.showToast(
@@ -749,7 +715,7 @@ export default function ItemsPaymentScreen() {
       tableSection,
       loadTable,
       router,
-      allOriginalItems, // Ajout de cette dépendance importante
+      allOriginalItems,
     ]
   );
 
@@ -781,7 +747,7 @@ export default function ItemsPaymentScreen() {
       const newSelectedItems = availableItems.map((item) => ({
         ...item,
         selectedQuantity: item.quantity,
-        offered: item.offered, // Préserver l'état offert
+        offered: item.offered,
       }));
       return [...prevSelectedItems, ...newSelectedItems];
     });
@@ -795,7 +761,7 @@ export default function ItemsPaymentScreen() {
         ...item,
         quantity: item.selectedQuantity,
         total: item.price * item.selectedQuantity,
-        offered: item.offered, // Préserver l'état offert
+        offered: item.offered,
       }));
       return [...prevAvailableItems, ...newAvailableItems];
     });
@@ -1080,7 +1046,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#4CAF50',
   },
-  // Styles pour les articles offerts
   offeredRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1165,7 +1130,6 @@ const styles = StyleSheet.create({
   selectedItemCard: {
     backgroundColor: '#f9fff9',
   },
-  // Styles pour les articles offerts
   offeredItemCard: {
     backgroundColor: '#FFF8E1',
     borderLeftWidth: 2,
@@ -1282,7 +1246,6 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: '#F44336',
   },
-  // Bouton pour offrir/annuler l'offre
   offerButton: {
     padding: 4,
     marginLeft: 4,

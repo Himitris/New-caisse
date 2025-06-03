@@ -212,14 +212,6 @@ export const formatDate = (date: Date): string => {
   });
 };
 
-export const getPaymentMethodLabel = (
-  method: string,
-  paymentMethods: PaymentMethod[]
-): string => {
-  const foundMethod = paymentMethods.find((m) => m.id === method);
-  return foundMethod ? foundMethod.name : 'Autre';
-};
-
 export const getPaymentTypeLabel = (type: string): string => {
   switch (type) {
     case 'full':
@@ -233,4 +225,18 @@ export const getPaymentTypeLabel = (type: string): string => {
     default:
       return 'Autre';
   }
+};
+
+export const getPaymentMethodLabel = (method: string): string => {
+  const PAYMENT_METHOD_LABELS = {
+    card: 'Carte bancaire',
+    cash: 'Espèces',
+    check: 'Chèque',
+    ticket: 'Ticket Restaurant',
+  } as const;
+
+  return (
+    PAYMENT_METHOD_LABELS[method as keyof typeof PAYMENT_METHOD_LABELS] ||
+    'Autre'
+  );
 };

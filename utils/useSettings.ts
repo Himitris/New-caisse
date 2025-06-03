@@ -1,4 +1,4 @@
-// utils/useSettings.ts
+// utils/useSettings.ts - Erreur de syntaxe corrigée
 import {
   CreditCard,
   Database,
@@ -8,7 +8,7 @@ import {
   Wallet,
   Edit3,
   RefreshCw,
-} from 'lucide-react-native'; // Importez les icônes nécessaires
+} from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
 import { settingsService } from './SettingsService';
 import {
@@ -64,7 +64,7 @@ const configToSettings = (config: ConfigData): Setting[] => {
       value: false,
       icon: Lock,
     },
-    
+
     // Catégorie Sécurité donnée
     {
       id: 'cleanStorage',
@@ -197,7 +197,25 @@ export function useSettings() {
     } finally {
       setIsSaving(false);
     }
-  }, [])
+  }, []);
+
+  // Fonction pour mettre à jour les paramètres d'impression
+  const updatePrintSettings = useCallback(
+    async (settings: ConfigData['printSettings']) => {
+      setIsSaving(true);
+      try {
+        await settingsService.updatePrintSettings(settings);
+      } catch (error) {
+        console.error(
+          "Erreur lors de la mise à jour des paramètres d'impression:",
+          error
+        );
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    []
+  );
 
   return {
     settings,
@@ -214,6 +232,6 @@ export function useSettings() {
     updateRestaurantInfo,
     updateOpeningHours,
     updatePaymentMethods,
+    updatePrintSettings,
   };
 }
-

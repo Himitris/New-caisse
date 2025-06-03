@@ -1,4 +1,5 @@
-// app/(tabs)/settings.tsx
+// app/(tabs)/settings.tsx - Système de stockage simplifié
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Trash2 } from 'lucide-react-native';
 import React, { useCallback, useState } from 'react';
 import {
@@ -17,7 +18,13 @@ import {
   RestaurantInfo,
   settingsCategories,
 } from '../../utils/settingsTypes';
-import { BillManager, StorageManager, TableManager } from '../../utils/storage';
+import {
+  getBills,
+  getTables,
+  resetAllTables,
+  saveBills,
+  saveMenuAvailability
+} from '../../utils/storage';
 import { useToast } from '../../utils/ToastContext';
 import PasswordModal from '../components/PasswordModal';
 import {
@@ -73,26 +80,36 @@ export default function SettingsScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              // Récupérer d'abord les tables pour conserver leur configuration
-              const tables = await TableManager.getTables();
+              setProcessingAction(true);
 
-              // Réinitialiser les tables en conservant leur nom et section
-              // mais en effaçant leur statut, commandes, etc.
-              const resetTables = tables.map((table: any) => ({
-                ...table,
-                status: 'available' as const,
-                guests: undefined,
-                order: undefined,
-              }));
+              // Récupérer les tables pour conserver leur configuration
+              const tables = await getTables();
 
-              // Sauvegarder les tables réinitialisées
-              await TableManager.saveTables(resetTables);
+              // Réinitialiser toutes les tables (elles seront remises aux valeurs par défaut)
+              await resetAllTables();
 
               // Supprimer tout l'historique des factures
-              await BillManager.clearAllBills();
+              await saveBills([]);
 
-              // Réinitialiser les autres données (disponibilité du menu, etc.)
-              await StorageManager.resetApplicationData();
+              // Réinitialiser les données du menu (disponibilité)
+              await saveMenuAvailability([]);
+
+              // Optionnel : Réinitialiser les items personnalisés du menu
+              // await saveCustomMenuItems([]);
+
+              // Nettoyer les autres données si nécessaire
+              const keysToRemove = [
+                'manjo_carn_menu_availability',
+                // Ajoutez d'autres clés à nettoyer si nécessaire
+              ];
+
+              for (const key of keysToRemove) {
+                try {
+                  await AsyncStorage.removeItem(key);
+                } catch (error) {
+                  console.warn(`Impossible de supprimer la clé ${key}:`, error);
+                }
+              }
 
               toast.showToast(
                 'Toutes les données ont été réinitialisées avec succès.',
@@ -107,6 +124,8 @@ export default function SettingsScreen() {
                 'Une erreur est survenue lors de la réinitialisation des données.',
                 'error'
               );
+            } finally {
+              setProcessingAction(false);
             }
           },
         },
@@ -114,54 +133,84 @@ export default function SettingsScreen() {
     );
   }, [toast]);
 
-  const handleSettingAction = useCallback((id: string) => {
-    switch (id) {
-      case 'restaurant':
-        setRestaurantInfoModalVisible(true);
-        break;
-      case 'hours':
-        setHoursModalVisible(true);
-        break;
-      case 'payment':
-        setPaymentModalVisible(true);
-        break;
-      case 'changePassword':
-        setPasswordModalVisible(true);
-        break;
-      case 'printSettings':
-        setPrintSettingsModalVisible(true);
-        break;
-      case 'cleanStorage':
-        Alert.alert(
-          'Nettoyer les données',
-          'Cette action supprimera les anciennes factures et les données temporaires. Continuer?',
-          [
-            { text: 'Annuler', style: 'cancel' },
-            {
-              text: 'Nettoyer',
-              onPress: async () => {
-                setProcessingAction(true);
-                try {
-                  await StorageManager.performMaintenance();
-                  toast.showToast('Nettoyage des données réussi', 'success');
-                } catch (error) {
-                  console.error('Erreur lors du nettoyage:', error);
-                  toast.showToast(
-                    'Erreur lors du nettoyage des données',
-                    'error'
-                  );
-                } finally {
-                  setProcessingAction(false);
-                }
-              },
-            },
-          ]
-        );
-        break;
-      default:
-        break;
+  const handleCleanStorage = useCallback(async () => {
+    setProcessingAction(true);
+    try {
+      // Nettoyer les anciennes factures (garder seulement les 30 derniers jours)
+      const bills = await getBills();
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+      const recentBills = bills.filter(
+        (bill) => new Date(bill.timestamp) > thirtyDaysAgo
+      );
+
+      await saveBills(recentBills);
+
+      // Nettoyer les données temporaires et le cache
+      const allKeys = await AsyncStorage.getAllKeys();
+      const tempKeys = allKeys.filter(
+        (key) =>
+          key.includes('temp_') ||
+          key.includes('cache_') ||
+          key.includes('_backup')
+      );
+
+      if (tempKeys.length > 0) {
+        await AsyncStorage.multiRemove(tempKeys);
+      }
+
+      toast.showToast(
+        `Nettoyage terminé. ${
+          bills.length - recentBills.length
+        } anciennes factures supprimées.`,
+        'success'
+      );
+    } catch (error) {
+      console.error('Erreur lors du nettoyage:', error);
+      toast.showToast('Erreur lors du nettoyage des données', 'error');
+    } finally {
+      setProcessingAction(false);
     }
-  }, []);
+  }, [toast]);
+
+  const handleSettingAction = useCallback(
+    (id: string) => {
+      switch (id) {
+        case 'restaurant':
+          setRestaurantInfoModalVisible(true);
+          break;
+        case 'hours':
+          setHoursModalVisible(true);
+          break;
+        case 'payment':
+          setPaymentModalVisible(true);
+          break;
+        case 'changePassword':
+          setPasswordModalVisible(true);
+          break;
+        case 'printSettings':
+          setPrintSettingsModalVisible(true);
+          break;
+        case 'cleanStorage':
+          Alert.alert(
+            'Nettoyer les données',
+            'Cette action supprimera les anciennes factures (+ de 30 jours) et les données temporaires. Continuer?',
+            [
+              { text: 'Annuler', style: 'cancel' },
+              {
+                text: 'Nettoyer',
+                onPress: handleCleanStorage,
+              },
+            ]
+          );
+          break;
+        default:
+          break;
+      }
+    },
+    [handleCleanStorage]
+  );
 
   // Gestionnaires pour les modals
   const handleSaveRestaurantInfo = useCallback(
@@ -187,6 +236,7 @@ export default function SettingsScreen() {
     },
     [updatePaymentMethods, toast]
   );
+
   const handleCancel = useCallback(() => {
     setPasswordModalVisible(false);
   }, []);
@@ -302,10 +352,13 @@ export default function SettingsScreen() {
               <Pressable
                 style={styles.dangerButton}
                 onPress={handleResetAppData}
+                disabled={processingAction}
               >
                 <Trash2 size={24} color="white" />
                 <Text style={styles.dangerButtonText}>
-                  Réinitialiser toutes les données
+                  {processingAction
+                    ? 'Réinitialisation...'
+                    : 'Réinitialiser toutes les données'}
                 </Text>
               </Pressable>
               <Text style={styles.resetDescription}>
@@ -350,10 +403,14 @@ export default function SettingsScreen() {
       />
 
       {/* Indicateur de sauvegarde */}
-      {isSaving && (
+      {(isSaving || processingAction) && (
         <View style={styles.savingOverlay}>
           <ActivityIndicator size="large" color="white" />
-          <Text style={styles.savingText}>Sauvegarde en cours...</Text>
+          <Text style={styles.savingText}>
+            {processingAction
+              ? 'Traitement en cours...'
+              : 'Sauvegarde en cours...'}
+          </Text>
         </View>
       )}
     </View>
