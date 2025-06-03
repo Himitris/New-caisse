@@ -1,16 +1,14 @@
-// app/(tabs)/index.tsx - Version optimisée et corrigée
+// app/(tabs)/index.tsx - Version simplifiée
 
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Coffee, Filter, RefreshCcw, Users } from 'lucide-react-native';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
   Animated,
-  Dimensions,
-  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -21,67 +19,26 @@ import { useTableContext } from '../../utils/TableContext';
 import { useToast } from '../../utils/ToastContext';
 import {
   resetAllTables,
-  saveTables,
   Table,
   TABLE_SECTIONS,
-  updateTable
+  updateTable,
 } from '../../utils/storage';
 import CoversSelectionModal from '../components/CoversSelectionModal';
 import CustomCoversModal from '../components/CustomCoversModal';
 
-// Mise en cache des couleurs et gradients des tables
+// Couleurs des tables
 const TABLE_COLORS = {
   available: ['#4CAF50', '#2E7D32'],
   occupied: ['#F44336', '#C62828'],
   reserved: ['#FFC107', '#FFA000'],
-  default: ['#E0E0E0', '#9E9E9E'],
 } as const;
-
-// Constantes optimisées
-const LOADING_DELAY = 200; // ms
-const REFRESH_DEBOUNCE = 300; // ms
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const ANIMATION_DURATION = 300; // ms
-
-// Système de cache mémoire pour les tables (version corrigée et simplifiée)
-const tableCache = {
-  data: null as Table[] | null,
-  timestamp: 0,
-  expiry: 10000, // 10 secondes
-  isValid: function () {
-    return this.data !== null && Date.now() - this.timestamp < this.expiry;
-  },
-  set: function (data: Table[]) {
-    this.data = [...data]; // Copie profonde pour éviter les références
-    this.timestamp = Date.now();
-  },
-  get: function (): Table[] | null {
-    return this.isValid() ? this.data : null;
-  },
-  invalidate: function () {
-    this.timestamp = 0;
-  },
-};
 
 export default function TablesScreen() {
   const router = useRouter();
-  const {
-    tables,
-    isLoading: tablesLoading,
-    refreshTables,
-    refreshSingleTable,
-  } = useTableContext();
-  const [loading, setLoading] = useState(true); // Garder cette variable pour compatibilité
+  const { tables, isLoading, refreshTables } = useTableContext();
   const [refreshing, setRefreshing] = useState(false);
   const [activeSection, setActiveSection] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [lastRefresh, setLastRefresh] = useState<Date>(new Date());
   const toast = useToast();
-
-  // Animations
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(50)).current;
-  const refreshRotation = useRef(new Animated.Value(0)).current;
 
   // États pour les modals
   const [customCoversModalVisible, setCustomCoversModalVisible] =
@@ -90,94 +47,33 @@ export default function TablesScreen() {
     useState(false);
   const [selectedTable, setSelectedTable] = useState<Table | null>(null);
 
-  // Mémoïzation des sections
-  const sections = useMemo(() => Object.values(TABLE_SECTIONS || {}), []);
+  const sections = useMemo(() => Object.values(TABLE_SECTIONS), []);
 
-  // Mémoïzation des tables par section
   const tablesBySection = useMemo(() => {
     return sections.reduce((acc, section) => {
-      acc[section] = tables.filter((table) => {
-        if (!table.section) return false;
-        return table.section.toLowerCase() === section.toLowerCase();
-      });
+      acc[section] = tables.filter(
+        (table) => table.section?.toLowerCase() === section.toLowerCase()
+      );
       return acc;
     }, {} as Record<string, Table[]>);
   }, [tables, sections]);
 
-  // Animation de rotation pour le bouton de rafraîchissement
-  const spinRefreshIcon = useCallback(() => {
-    refreshRotation.setValue(0);
-    Animated.timing(refreshRotation, {
-      toValue: 1,
-      duration: 800,
-      useNativeDriver: true,
-    }).start();
-  }, [refreshRotation]);
+  const sectionsToDisplay = useMemo(() => {
+    return activeSection ? [activeSection] : sections;
+  }, [activeSection, sections]);
 
-  // Transformation de rotation
-  const spin = refreshRotation.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '360deg'],
-  });
-
-  // Animation d'entrée
-  useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim, {
-        toValue: 1,
-        duration: ANIMATION_DURATION,
-        useNativeDriver: true,
-      }),
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: ANIMATION_DURATION,
-        useNativeDriver: true,
-      }),
-    ]).start();
-  }, [fadeAnim, slideAnim]);
-
-  useEffect(() => {
-    setLoading(tablesLoading);
-  }, [tablesLoading]);
-
-  useFocusEffect(
-    useCallback(() => {
-      console.log('Plan du restaurant en focus');
-
-      // Animation d'entrée à chaque focus
-      fadeAnim.setValue(0.8);
-      slideAnim.setValue(10);
-
-      Animated.parallel([
-        Animated.timing(fadeAnim, {
-          toValue: 1,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-      ]).start();
-
-      return () => {
-        // Fonction de nettoyage
-      };
-    }, [fadeAnim, slideAnim])
-  );
-
-  // Fonction de rafraîchissement
-  const handleRefreshTables = useCallback(() => {
+  // Rafraîchir les tables
+  const handleRefreshTables = useCallback(async () => {
     setRefreshing(true);
-    spinRefreshIcon();
-    refreshTables().finally(() => {
-      setRefreshing(false);
-      setLastRefresh(new Date());
-    });
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-  }, [refreshTables, spinRefreshIcon]);
+    try {
+      await refreshTables();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshTables]);
 
+  // Réinitialiser toutes les tables
   const handleResetAllTables = useCallback(() => {
     Alert.alert(
       'Réinitialiser Toutes les Tables',
@@ -188,12 +84,10 @@ export default function TablesScreen() {
           text: 'Réinitialiser',
           style: 'destructive',
           onPress: async () => {
-            setLoading(true);
-            // Retour haptique sur action destructive
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             try {
               await resetAllTables();
-              await refreshTables(); // Au lieu de tableCache.invalidate() et loadTables(true)
+              await refreshTables();
               toast.showToast(
                 'Toutes les tables ont été réinitialisées.',
                 'success'
@@ -201,11 +95,9 @@ export default function TablesScreen() {
             } catch (error) {
               console.error('Error resetting tables:', error);
               toast.showToast(
-                'Un problème est survenu lors de la réinitialisation des tables.',
+                'Un problème est survenu lors de la réinitialisation.',
                 'error'
               );
-            } finally {
-              setLoading(false);
             }
           },
         },
@@ -213,9 +105,9 @@ export default function TablesScreen() {
     );
   }, [refreshTables, toast]);
 
+  // Ouvrir une table
   const openTable = useCallback(
     (table: Table) => {
-      // Retour haptique léger lorsqu'on touche une table
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
       if (table.status === 'available') {
@@ -234,7 +126,7 @@ export default function TablesScreen() {
               onPress: async () => {
                 const updatedTable = { ...table, status: 'available' as const };
                 await updateTable(updatedTable);
-                refreshTables(); // Rafraîchir les tables via le context
+                await refreshTables();
               },
             },
             {
@@ -248,41 +140,12 @@ export default function TablesScreen() {
     [router, refreshTables]
   );
 
-  // Gérer le nombre de couverts personnalisé
-  const handleCustomCovers = useCallback(
-    (covers: number) => {
-      if (selectedTable) {
-        processOpenTable(selectedTable, covers);
-      }
-    },
-    [selectedTable]
-  );
-
-  // Gérer la sélection d'un nombre de couverts prédéfini
-  const handleSelectCovers = useCallback(
-    (covers: number) => {
-      if (selectedTable) {
-        setCoversSelectionModalVisible(false);
-        processOpenTable(selectedTable, covers);
-      }
-    },
-    [selectedTable]
-  );
-
-  // Ouvrir le modal de couverts personnalisés
-  const handleCustomCoversOpen = useCallback(() => {
-    setCoversSelectionModalVisible(false);
-    setCustomCoversModalVisible(true);
-  }, []);
-
-  // Traiter l'ouverture d'une table avec un nombre spécifique de couverts
+  // Traiter l'ouverture d'une table avec couverts
   const processOpenTable = useCallback(
     async (table: Table, guestNumber: number) => {
       try {
-        // Retour haptique de succès
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-        // Mettre à jour le statut de la table
         const updatedTable: Table = {
           ...table,
           status: 'occupied',
@@ -297,15 +160,8 @@ export default function TablesScreen() {
           },
         };
 
-        // Mise à jour dans le stockage
-        await saveTables([
-          ...tables.map((t) => (t.id === table.id ? updatedTable : t)),
-        ]);
-
-        // Rafraîchir les tables via le context
+        await updateTable(updatedTable);
         await refreshTables();
-
-        // Naviguer vers la page de détail de la table
         router.push(`/table/${table.id}`);
       } catch (error) {
         console.error('Error opening table:', error);
@@ -315,36 +171,53 @@ export default function TablesScreen() {
         );
       }
     },
-    [tables, router, toast, refreshTables]
+    [router, toast, refreshTables]
   );
 
-  const getTableColors = useCallback((status: Table['status']) => {
-    return TABLE_COLORS[status] || TABLE_COLORS.default;
+  // Gérer la sélection des couverts
+  const handleSelectCovers = useCallback(
+    (covers: number) => {
+      if (selectedTable) {
+        setCoversSelectionModalVisible(false);
+        processOpenTable(selectedTable, covers);
+      }
+    },
+    [selectedTable, processOpenTable]
+  );
+
+  const handleCustomCoversOpen = useCallback(() => {
+    setCoversSelectionModalVisible(false);
+    setCustomCoversModalVisible(true);
   }, []);
 
-  // Toggle section filtering
-  const toggleSection = useCallback((section: string) => {
-    // Retour haptique léger sur changement de section
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+  const handleCustomCovers = useCallback(
+    (covers: number) => {
+      if (selectedTable) {
+        processOpenTable(selectedTable, covers);
+      }
+    },
+    [selectedTable, processOpenTable]
+  );
 
-    // Animation simplifiée
+  const toggleSection = useCallback((section: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setActiveSection((current) => (current === section ? null : section));
   }, []);
 
-  // Show all sections or just the active one
-  const sectionsToDisplay = useMemo(() => {
-    return activeSection ? [activeSection] : sections;
-  }, [activeSection, sections]);
+  const getTableColors = useCallback((status: Table['status']) => {
+    return TABLE_COLORS[status] || TABLE_COLORS.available;
+  }, []);
 
-  // Rendu simplifié des tables
+  // Rafraîchir quand on revient sur cette page
+  useFocusEffect(
+    useCallback(() => {
+      refreshTables();
+    }, [refreshTables])
+  );
+
   const renderTableItem = useCallback(
     (table: Table) => {
       const colorGradient = getTableColors(table.status);
-      const tableStatusIcons = {
-        available: null,
-        occupied: <Coffee size={16} color="white" style={styles.statusIcon} />,
-        reserved: null,
-      };
 
       return (
         <Pressable
@@ -370,7 +243,9 @@ export default function TablesScreen() {
             </View>
 
             <View style={styles.tableContent}>
-              {tableStatusIcons[table.status]}
+              {table.status === 'occupied' && (
+                <Coffee size={16} color="white" style={styles.statusIcon} />
+              )}
             </View>
 
             <View style={styles.tableFooter}>
@@ -399,10 +274,6 @@ export default function TablesScreen() {
             <Text style={styles.noTablesText}>
               Aucune table dans cette section
             </Text>
-            <Text style={styles.noTablesDetails}>
-              Platform: {Platform.OS}, Total Tables: {tables.length}, Section:{' '}
-              {section}
-            </Text>
             <Pressable
               style={({ pressed }) => [
                 styles.sectionResetButton,
@@ -424,10 +295,10 @@ export default function TablesScreen() {
         </View>
       );
     },
-    [tablesBySection, tables.length, handleResetAllTables, renderTableItem]
+    [tablesBySection, handleResetAllTables, renderTableItem]
   );
 
-  if (loading) {
+  if (isLoading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#4CAF50" />
@@ -436,35 +307,8 @@ export default function TablesScreen() {
     );
   }
 
-  if (error || tables.length === 0) {
-    return (
-      <View style={styles.loadingContainer}>
-        {error && <Text style={styles.errorText}>{error}</Text>}
-        {tables.length === 0 && (
-          <Text style={styles.errorText}>
-            Aucune table trouvée. Veuillez initialiser la base de données.
-          </Text>
-        )}
-
-        <Pressable
-          style={({ pressed }) => [
-            styles.resetButton,
-            pressed && styles.buttonPressed,
-          ]}
-          onPress={handleResetAllTables}
-        >
-          <RefreshCcw size={20} color="white" />
-          <Text style={styles.resetButtonText}>
-            Réinitialiser Toutes les Tables
-          </Text>
-        </Pressable>
-      </View>
-    );
-  }
-
   return (
     <View style={styles.container}>
-      {/* Modal pour le choix du nombre de couverts */}
       <CoversSelectionModal
         visible={coversSelectionModalVisible}
         onClose={() => setCoversSelectionModalVisible(false)}
@@ -473,7 +317,6 @@ export default function TablesScreen() {
         tableName={selectedTable?.name || ''}
       />
 
-      {/* Modal pour le nombre de couverts personnalisé */}
       <CustomCoversModal
         visible={customCoversModalVisible}
         onClose={() => setCustomCoversModalVisible(false)}
@@ -498,9 +341,7 @@ export default function TablesScreen() {
             ]}
             onPress={handleRefreshTables}
           >
-            <Animated.View style={{ transform: [{ rotate: spin }] }}>
-              <RefreshCcw size={20} color="#2196F3" />
-            </Animated.View>
+            <RefreshCcw size={20} color="#2196F3" />
             <Text style={styles.refreshButtonText}>Rafraîchir</Text>
           </Pressable>
           <Pressable
@@ -576,6 +417,7 @@ export default function TablesScreen() {
   );
 }
 
+// Styles identiques à l'original
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -592,13 +434,6 @@ const styles = StyleSheet.create({
     marginTop: 16,
     fontSize: 16,
     color: '#666',
-    fontWeight: '500',
-  },
-  errorText: {
-    fontSize: 16,
-    color: '#F44336',
-    textAlign: 'center',
-    marginBottom: 20,
     fontWeight: '500',
   },
   header: {
@@ -753,12 +588,6 @@ const styles = StyleSheet.create({
     marginBottom: 8,
     fontWeight: 'bold',
   },
-  noTablesDetails: {
-    textAlign: 'center',
-    color: '#856404',
-    fontSize: 12,
-    marginBottom: 10,
-  },
   sectionResetButton: {
     backgroundColor: '#F44336',
     paddingVertical: 8,
@@ -785,10 +614,7 @@ const styles = StyleSheet.create({
     height: 150,
     borderRadius: 12,
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 3,
-    },
+    shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.15,
     shadowRadius: 5,
     elevation: 5,

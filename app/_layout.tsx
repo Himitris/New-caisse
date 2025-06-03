@@ -36,8 +36,6 @@ export default function RootLayout() {
           console.log('App en arrière-plan - sauvegarde forcée des données');
 
           try {
-            // NOUVEAU : Forcer l'écriture de toutes les données en attente
-            await StorageManager.flushPendingWrites();
 
             // Récupérer et sauvegarder les tables (sauvegarde de sécurité)
             const tables = await getTables();
@@ -90,9 +88,6 @@ export default function RootLayout() {
           new Date(lastCleanup).getTime() < Date.now() - 7 * 24 * 60 * 60 * 1000
         ) {
           console.log('Exécution du nettoyage automatique...');
-          // Effectuer un nettoyage léger
-          StorageManager.memoryCache.clear();
-          await AsyncStorage.removeItem(STORAGE_KEYS.CACHE);
           await AsyncStorage.setItem('last_cleanup_date', now);
         }
 
