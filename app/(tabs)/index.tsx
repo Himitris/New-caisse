@@ -214,12 +214,6 @@ export default function TablesScreen() {
     return TABLE_COLORS[status] || TABLE_COLORS.available;
   }, []);
 
-  // Rafraîchir quand on revient sur cette page - SIMPLIFIÉ
-  useFocusEffect(
-    useCallback(() => {
-      refreshTables();
-    }, [refreshTables])
-  );
 
   const renderTableItem = useCallback(
     (table: Table) => {

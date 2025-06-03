@@ -1,4 +1,4 @@
-// app/table/[id].tsx - Version ultra-simplifiée
+// app/table/[id].tsx - Version COMPLÈTE optimisée anti-fuite mémoire
 
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
@@ -13,7 +13,7 @@ import {
   Users,
   X,
 } from 'lucide-react-native';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -38,6 +38,34 @@ import {
 import { useTableContext } from '../../utils/TableContext';
 import { useToast } from '../../utils/ToastContext';
 import SplitSelectionModal from '../components/SplitSelectionModal';
+
+// Hook de nettoyage mémoire - À ajouter dans utils/useMemoryCleanup.ts
+const useMemoryCleanup = () => {
+  const cleanupFuncs = useRef<(() => void)[]>([]);
+  const isMountedRef = useRef(true);
+
+  const addCleanup = useCallback((cleanupFunc: () => void) => {
+    cleanupFuncs.current.push(cleanupFunc);
+  }, []);
+
+  const isStillMounted = useCallback(() => isMountedRef.current, []);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      cleanupFuncs.current.forEach((cleanup) => {
+        try {
+          cleanup();
+        } catch (error) {
+          console.warn('Cleanup error:', error);
+        }
+      });
+      cleanupFuncs.current = [];
+    };
+  }, []);
+
+  return { addCleanup, isStillMounted };
+};
 
 interface MenuItem {
   id: number;
@@ -125,8 +153,12 @@ export default function TableScreen() {
   const tableId = parseInt(id as string, 10);
   const router = useRouter();
   const toast = useToast();
-  const { refreshTables } = useTableContext();
+  const { refreshTables, getTableById, updateTableData } = useTableContext();
 
+  // 🆕 Hook de nettoyage mémoire
+  const { addCleanup, isStillMounted } = useMemoryCleanup();
+
+  // États locaux MINIMISÉS - éviter l'accumulation
   const [table, setTable] = useState<Table | null>(null);
   const [loading, setLoading] = useState(true);
   const [guestCount, setGuestCount] = useState(1);
@@ -138,24 +170,13 @@ export default function TableScreen() {
   );
   const [splitModalVisible, setSplitModalVisible] = useState(false);
 
-  // Charger les données de la table - SIMPLIFIÉ
-  const loadTable = useCallback(async () => {
-    setLoading(true);
-    try {
-      const tableData = await getTable(tableId);
-      if (tableData) {
-        setTable(tableData);
-        setGuestCount(tableData.guests || 1);
-      }
-    } catch (error) {
-      console.error('Error loading table:', error);
-    } finally {
-      setLoading(false);
-    }
-  }, [tableId]);
+  // Refs pour éviter les re-créations et fuites
+  const updateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isUpdatingRef = useRef(false);
+  const lastTableIdRef = useRef<number | null>(null);
 
-  // Charger les données du menu - SIMPLIFIÉ
-  const loadMenuData = useCallback(async () => {
+  // Charger les données du menu UNE SEULE FOIS - pas de recharge
+  const loadMenuData = async () => {
     try {
       const [customItems, menuAvailability] = await Promise.all([
         getCustomMenuItems(),
@@ -188,165 +209,293 @@ export default function TableScreen() {
         color: CATEGORY_COLORS[item.category] || '#757575',
       }));
 
-      setMenuItems([...standardItems, ...customMenuItems]);
+      const allMenuItems = [...standardItems, ...customMenuItems];
 
       // Définir les items indisponibles
       const unavailable = menuAvailability
         .filter((item) => !item.available)
         .map((item) => item.id);
-      setUnavailableItems(unavailable);
+
+      if (isStillMounted()) {
+        setMenuItems(allMenuItems);
+        setUnavailableItems(unavailable);
+      }
     } catch (error) {
       console.error('Error loading menu data:', error);
     }
-  }, []);
+  };
 
-  // Charger les données au démarrage
+  // Charger SEULEMENT la table - optimisé avec cache du contexte
+  const loadTable = async () => {
+    if (!isStillMounted()) return;
+
+    try {
+      // D'abord essayer depuis le contexte (plus rapide)
+      let tableData = getTableById(tableId);
+
+      // Si pas trouvé dans le contexte, charger depuis storage
+      if (!tableData) {
+        const loadedTable = await getTable(tableId);
+        tableData = loadedTable === null ? undefined : loadedTable;
+      }
+
+      if (tableData && isStillMounted()) {
+        setTable(tableData);
+        setGuestCount(tableData.guests || 1);
+      }
+    } catch (error) {
+      console.error('Error loading table:', error);
+    } finally {
+      if (isStillMounted()) {
+        setLoading(false);
+      }
+    }
+  };
+
+  // Charger les données au démarrage - OPTIMISÉ
   useEffect(() => {
-    loadTable();
-    loadMenuData();
-  }, [loadTable, loadMenuData]);
+    // Éviter de recharger si c'est la même table
+    if (lastTableIdRef.current === tableId) {
+      setLoading(false);
+      return;
+    }
 
-  // Rafraîchir quand on revient sur cette page
+    lastTableIdRef.current = tableId;
+
+    const initializeData = async () => {
+      setLoading(true);
+
+      // Charger en parallèle seulement si nécessaire
+      const promises = [loadTable()];
+
+      // Charger le menu seulement si pas encore chargé
+      if (menuItems.length === 0) {
+        promises.push(loadMenuData());
+      }
+
+      await Promise.all(promises);
+
+      if (isStillMounted()) {
+        setLoading(false);
+      }
+    };
+
+    initializeData();
+  }, [tableId]); // SEULEMENT tableId en dépendance
+
+  // Rafraîchir SEULEMENT la table quand on revient
   useFocusEffect(
     useCallback(() => {
-      loadTable();
-    }, [loadTable])
+      // Seulement si on revient sur la même table et qu'on n'est pas en train de charger
+      if (lastTableIdRef.current === tableId && !loading) {
+        loadTable();
+      }
+    }, [tableId, loading])
   );
 
-  // Gérer le bouton retour
+  // Nettoyage des timeouts
+  useEffect(() => {
+    addCleanup(() => {
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current);
+        updateTimeoutRef.current = null;
+      }
+      isUpdatingRef.current = false;
+    });
+  }, [addCleanup]);
+
+  // Gérer le bouton retour - OPTIMISÉ
   useEffect(() => {
     const backHandler = BackHandler.addEventListener(
       'hardwareBackPress',
       () => {
+        // Nettoyer l'état si nécessaire
+        lastTableIdRef.current = null;
         router.push('/');
         return true;
       }
     );
-    return () => backHandler.remove();
+
+    return () => {
+      backHandler.remove();
+    };
   }, [router]);
 
-  // Calculer le total de la commande
-  const calculateTotal = useCallback((items: OrderItem[]): number => {
+  // Fonction de calcul de total SIMPLE - pas de useCallback
+  const calculateTotal = (items: OrderItem[]): number => {
     return items.reduce((sum, item) => {
       if (!item.offered) {
         return sum + item.price * item.quantity;
       }
       return sum;
     }, 0);
-  }, []);
+  };
 
-  // Ajouter un article à la commande - SIMPLIFIÉ
-  const addItemToOrder = useCallback(
-    async (item: MenuItem) => {
-      if (!table) return;
+  // Ajouter un article à la commande - OPTIMISÉ sans useCallback complexe
+  const addItemToOrder = async (item: MenuItem) => {
+    if (!table || !isStillMounted() || isUpdatingRef.current) return;
 
-      try {
-        const updatedTable = { ...table };
+    isUpdatingRef.current = true;
 
-        if (!updatedTable.order) {
-          updatedTable.order = {
-            id: Date.now(),
-            items: [],
-            guests: guestCount,
-            status: 'active',
-            timestamp: new Date().toISOString(),
-            total: 0,
-          };
-        }
+    try {
+      const updatedTable = { ...table };
 
-        const existingItemIndex = updatedTable.order.items.findIndex(
-          (orderItem) =>
-            orderItem.name === item.name && orderItem.price === item.price
-        );
-
-        if (existingItemIndex >= 0) {
-          updatedTable.order.items[existingItemIndex].quantity += 1;
-        } else {
-          updatedTable.order.items.push({
-            id: Date.now() + Math.random(),
-            name: item.name,
-            price: item.price,
-            quantity: 1,
-          });
-        }
-
-        updatedTable.order.total = calculateTotal(updatedTable.order.items);
-
-        await updateTable(updatedTable);
-        setTable(updatedTable);
-        // Optionnel: rafraîchir dans le contexte
-        refreshTables();
-      } catch (error) {
-        console.error('Error adding item to order:', error);
-        toast.showToast("Erreur lors de l'ajout de l'article", 'error');
+      if (!updatedTable.order) {
+        updatedTable.order = {
+          id: Date.now(),
+          items: [],
+          guests: guestCount,
+          status: 'active',
+          timestamp: new Date().toISOString(),
+          total: 0,
+        };
       }
-    },
-    [table, guestCount, calculateTotal, refreshTables, toast]
-  );
 
-  // Mettre à jour la quantité d'un article - SIMPLIFIÉ
-  const updateItemQuantity = useCallback(
-    async (itemId: number, increment: boolean) => {
-      if (!table || !table.order) return;
+      const existingItemIndex = updatedTable.order.items.findIndex(
+        (orderItem) =>
+          orderItem.name === item.name && orderItem.price === item.price
+      );
 
-      try {
-        const updatedTable = { ...table };
-        if (!updatedTable.order) return;
-
-        const updatedItems = updatedTable.order.items
-          .map((item) => {
-            if (item.id !== itemId) return item;
-            const newQuantity = increment
-              ? item.quantity + 1
-              : Math.max(0, item.quantity - 1);
-            return { ...item, quantity: newQuantity };
-          })
-          .filter((item) => item.quantity > 0);
-
-        updatedTable.order.items = updatedItems;
-        updatedTable.order.total = calculateTotal(updatedItems);
-
-        await updateTable(updatedTable);
-        setTable(updatedTable);
-        refreshTables();
-      } catch (error) {
-        console.error('Error updating item quantity:', error);
-        toast.showToast('Erreur lors de la mise à jour', 'error');
-      }
-    },
-    [table, calculateTotal, refreshTables, toast]
-  );
-
-  // Basculer l'état offert d'un article - SIMPLIFIÉ
-  const toggleItemOffered = useCallback(
-    async (itemId: number) => {
-      if (!table || !table.order) return;
-
-      try {
-        const updatedTable = { ...table };
-        if (!updatedTable.order) return;
-
-        const updatedItems = updatedTable.order.items.map((item) => {
-          if (item.id !== itemId) return item;
-          return { ...item, offered: !item.offered };
+      if (existingItemIndex >= 0) {
+        updatedTable.order.items[existingItemIndex].quantity += 1;
+      } else {
+        updatedTable.order.items.push({
+          id: Date.now() + Math.random(),
+          name: item.name,
+          price: item.price,
+          quantity: 1,
         });
-
-        updatedTable.order.items = updatedItems;
-        updatedTable.order.total = calculateTotal(updatedItems);
-
-        await updateTable(updatedTable);
-        setTable(updatedTable);
-        refreshTables();
-      } catch (error) {
-        console.error('Error toggling item offered:', error);
-        toast.showToast('Erreur lors de la mise à jour', 'error');
       }
-    },
-    [table, calculateTotal, refreshTables, toast]
-  );
+
+      updatedTable.order.total = calculateTotal(updatedTable.order.items);
+
+      // Mise à jour optimiste IMMÉDIATE
+      setTable(updatedTable);
+
+      // Debounce pour éviter trop d'updates
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current);
+      }
+
+      updateTimeoutRef.current = setTimeout(async () => {
+        if (isStillMounted()) {
+          try {
+            await updateTableData(tableId, updatedTable);
+          } catch (error) {
+            console.error('Error saving table:', error);
+            // Recharger en cas d'erreur
+            await loadTable();
+            toast.showToast("Erreur lors de l'ajout de l'article", 'error');
+          }
+        }
+        isUpdatingRef.current = false;
+      }, 500); // Attendre 500ms avant de sauvegarder
+    } catch (error) {
+      console.error('Error adding item to order:', error);
+      isUpdatingRef.current = false;
+      toast.showToast("Erreur lors de l'ajout de l'article", 'error');
+    }
+  };
+
+  // Mettre à jour la quantité d'un article - OPTIMISÉ
+  const updateItemQuantity = async (itemId: number, increment: boolean) => {
+    if (!table || !table.order || !isStillMounted() || isUpdatingRef.current)
+      return;
+
+    isUpdatingRef.current = true;
+
+    try {
+      const updatedTable = { ...table };
+      if (!updatedTable.order) return;
+
+      const updatedItems = updatedTable.order.items
+        .map((item) => {
+          if (item.id !== itemId) return item;
+          const newQuantity = increment
+            ? item.quantity + 1
+            : Math.max(0, item.quantity - 1);
+          return { ...item, quantity: newQuantity };
+        })
+        .filter((item) => item.quantity > 0);
+
+      updatedTable.order.items = updatedItems;
+      updatedTable.order.total = calculateTotal(updatedItems);
+
+      // Mise à jour optimiste
+      setTable(updatedTable);
+
+      // Debounce update
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current);
+      }
+
+      updateTimeoutRef.current = setTimeout(async () => {
+        if (isStillMounted()) {
+          try {
+            await updateTableData(tableId, updatedTable);
+          } catch (error) {
+            console.error('Error updating item quantity:', error);
+            await loadTable();
+            toast.showToast('Erreur lors de la mise à jour', 'error');
+          }
+        }
+        isUpdatingRef.current = false;
+      }, 500);
+    } catch (error) {
+      console.error('Error updating item quantity:', error);
+      isUpdatingRef.current = false;
+      toast.showToast('Erreur lors de la mise à jour', 'error');
+    }
+  };
+
+  // Basculer l'état offert d'un article - OPTIMISÉ
+  const toggleItemOffered = async (itemId: number) => {
+    if (!table || !table.order || !isStillMounted() || isUpdatingRef.current)
+      return;
+
+    isUpdatingRef.current = true;
+
+    try {
+      const updatedTable = { ...table };
+      if (!updatedTable.order) return;
+
+      const updatedItems = updatedTable.order.items.map((item) => {
+        if (item.id !== itemId) return item;
+        return { ...item, offered: !item.offered };
+      });
+
+      updatedTable.order.items = updatedItems;
+      updatedTable.order.total = calculateTotal(updatedItems);
+
+      // Mise à jour optimiste
+      setTable(updatedTable);
+
+      // Debounce update
+      if (updateTimeoutRef.current) {
+        clearTimeout(updateTimeoutRef.current);
+      }
+
+      updateTimeoutRef.current = setTimeout(async () => {
+        if (isStillMounted()) {
+          try {
+            await updateTableData(tableId, updatedTable);
+          } catch (error) {
+            console.error('Error toggling item offered:', error);
+            await loadTable();
+            toast.showToast('Erreur lors de la mise à jour', 'error');
+          }
+        }
+        isUpdatingRef.current = false;
+      }, 500);
+    } catch (error) {
+      console.error('Error toggling item offered:', error);
+      isUpdatingRef.current = false;
+      toast.showToast('Erreur lors de la mise à jour', 'error');
+    }
+  };
 
   // Vider la commande - SIMPLIFIÉ
-  const handleClearOrder = useCallback(() => {
+  const handleClearOrder = () => {
     if (!table || !table.order || table.order.items.length === 0) return;
 
     Alert.alert(
@@ -366,22 +515,22 @@ export default function TableScreen() {
             };
 
             try {
-              await updateTable(updatedTable);
               setTable(updatedTable);
-              refreshTables();
+              await updateTableData(tableId, updatedTable);
               toast.showToast('Commande supprimée avec succès', 'success');
             } catch (error) {
               console.error('Error clearing order:', error);
+              await loadTable();
               toast.showToast('Impossible de supprimer la commande', 'error');
             }
           },
         },
       ]
     );
-  }, [table, refreshTables, toast]);
+  };
 
-  // Fermer la table - SIMPLIFIÉ
-  const handleCloseTable = useCallback(() => {
+  // Fermer la table - OPTIMISÉ
+  const handleCloseTable = () => {
     if (!table) return;
 
     Alert.alert(
@@ -395,6 +544,13 @@ export default function TableScreen() {
           onPress: async () => {
             try {
               await resetTable(tableId);
+
+              // Nettoyer l'état local
+              setTable(null);
+              setGuestCount(1);
+              lastTableIdRef.current = null;
+
+              // Rafraîchir le contexte et naviguer
               refreshTables();
               router.push('/');
               toast.showToast(
@@ -409,10 +565,10 @@ export default function TableScreen() {
         },
       ]
     );
-  }, [table, tableId, refreshTables, router, toast]);
+  };
 
   // Prévisualiser la note
-  const handlePreviewNote = useCallback(() => {
+  const handlePreviewNote = () => {
     if (!table || !table.order || table.order.items.length === 0) {
       toast.showToast("Il n'y a pas d'articles à afficher", 'warning');
       return;
@@ -428,94 +584,86 @@ export default function TableScreen() {
         tableName: table.name,
       },
     });
-  }, [table, tableId, router, toast]);
+  };
 
   // Gérer les paiements - SIMPLIFIÉ
-  const handlePayment = useCallback(
-    (type: 'full' | 'split' | 'custom' | 'items') => {
-      if (!table || !table.order) return;
+  const handlePayment = (type: 'full' | 'split' | 'custom' | 'items') => {
+    if (!table || !table.order) return;
 
-      const total = table.order.total;
-      if (total <= 0) {
-        toast.showToast("Il n'y a pas d'articles à payer", 'warning');
+    const total = table.order.total;
+    if (total <= 0) {
+      toast.showToast("Il n'y a pas d'articles à payer", 'warning');
+      return;
+    }
+
+    const serializedItems = JSON.stringify(table.order.items);
+
+    if (type === 'full') {
+      router.push({
+        pathname: '/payment/full',
+        params: {
+          tableId: tableId.toString(),
+          total: total.toString(),
+          items: serializedItems,
+        },
+      });
+    } else if (type === 'split') {
+      if (guestCount <= 1) {
+        toast.showToast(
+          "Il faut au moins 2 convives pour partager l'addition",
+          'warning'
+        );
         return;
       }
+      setSplitModalVisible(true);
+    } else if (type === 'custom') {
+      router.push({
+        pathname: '/payment/custom',
+        params: {
+          tableId: tableId.toString(),
+          total: total.toString(),
+          items: serializedItems,
+        },
+      });
+    } else if (type === 'items') {
+      router.push({
+        pathname: '/payment/items',
+        params: { tableId: tableId.toString() },
+      });
+    }
+  };
 
-      const serializedItems = JSON.stringify(table.order.items);
+  // Mettre à jour le nombre de couverts - OPTIMISÉ
+  const updateGuestCount = async (newCount: number) => {
+    if (!table) return;
 
-      if (type === 'full') {
-        router.push({
-          pathname: '/payment/full',
-          params: {
-            tableId: tableId.toString(),
-            total: total.toString(),
-            items: serializedItems,
-          },
-        });
-      } else if (type === 'split') {
-        if (guestCount <= 1) {
-          toast.showToast(
-            "Il faut au moins 2 convives pour partager l'addition",
-            'warning'
-          );
-          return;
-        }
-        setSplitModalVisible(true);
-      } else if (type === 'custom') {
-        router.push({
-          pathname: '/payment/custom',
-          params: {
-            tableId: tableId.toString(),
-            total: total.toString(),
-            items: serializedItems,
-          },
-        });
-      } else if (type === 'items') {
-        router.push({
-          pathname: '/payment/items',
-          params: { tableId: tableId.toString() },
-        });
-      }
-    },
-    [table, guestCount, tableId, router, toast]
-  );
+    const validCount = Math.max(1, newCount);
+    setGuestCount(validCount);
 
-  // Mettre à jour le nombre de couverts - SIMPLIFIÉ
-  const updateGuestCount = useCallback(
-    async (newCount: number) => {
-      if (!table) return;
+    const updatedTable = {
+      ...table,
+      guests: validCount,
+      order: table.order ? { ...table.order, guests: validCount } : undefined,
+    };
 
-      const validCount = Math.max(1, newCount);
-      setGuestCount(validCount);
+    try {
+      setTable(updatedTable);
+      await updateTableData(tableId, updatedTable);
+    } catch (error) {
+      console.error('Error updating guest count:', error);
+    }
+  };
 
-      const updatedTable = {
-        ...table,
-        guests: validCount,
-        order: table.order ? { ...table.order, guests: validCount } : undefined,
-      };
+  // Filtrer les items du menu - SANS useMemo complexe
+  const filteredMenuItems = menuItems.filter((item) => {
+    if (unavailableItems.includes(item.id)) return false;
+    if (activeType && item.type !== activeType) return false;
+    if (activeCategory && item.category !== activeCategory) return false;
+    return true;
+  });
 
-      try {
-        await updateTable(updatedTable);
-        setTable(updatedTable);
-      } catch (error) {
-        console.error('Error updating guest count:', error);
-      }
-    },
-    [table]
-  );
-
-  // Filtrer les items du menu
-  const filteredMenuItems = useMemo(() => {
-    return menuItems.filter((item) => {
-      if (unavailableItems.includes(item.id)) return false;
-      if (activeType && item.type !== activeType) return false;
-      if (activeCategory && item.category !== activeCategory) return false;
-      return true;
-    });
-  }, [menuItems, activeType, activeCategory, unavailableItems]);
-
-  // Catégories visibles selon le type actif
-  const categories = useMemo(() => {
+  // Catégories visibles selon le type actif - SANS useMemo complexe
+  const categories = (() => {
     const allCategories = [...new Set(menuItems.map((item) => item.category))];
     if (activeType) {
       return allCategories.filter((category) =>
@@ -525,28 +673,25 @@ export default function TableScreen() {
       );
     }
     return allCategories.sort();
-  }, [menuItems, activeType]);
+  })();
 
-  // Catégoriser les articles de la commande
-  const categorizeOrderItems = useCallback(
-    (items: OrderItem[]) => {
-      const result = { plats: [] as OrderItem[], boissons: [] as OrderItem[] };
-      const menuItemMap = new Map(
-        menuItems.map((item) => [`${item.name}-${item.price}`, item.type])
-      );
+  // Catégoriser les articles de la commande - SANS useCallback complexe
+  const categorizeOrderItems = (items: OrderItem[]) => {
+    const result = { plats: [] as OrderItem[], boissons: [] as OrderItem[] };
+    const menuItemMap = new Map(
+      menuItems.map((item) => [`${item.name}-${item.price}`, item.type])
+    );
 
-      items.forEach((item) => {
-        const type = menuItemMap.get(`${item.name}-${item.price}`) || 'resto';
-        result[type === 'boisson' ? 'boissons' : 'plats'].push(item);
-      });
+    items.forEach((item) => {
+      const type = menuItemMap.get(`${item.name}-${item.price}`) || 'resto';
+      result[type === 'boisson' ? 'boissons' : 'plats'].push(item);
+    });
 
-      return result;
-    },
-    [menuItems]
-  );
+    return result;
+  };
 
-  // Calculer le total des articles offerts
-  const offeredTotal = useMemo(() => {
+  // Calculer le total des articles offerts - SANS useMemo complexe
+  const offeredTotal = (() => {
     if (!table || !table.order) return 0;
     return table.order.items.reduce((sum, item) => {
       if (item.offered) {
@@ -554,7 +699,7 @@ export default function TableScreen() {
       }
       return sum;
     }, 0);
-  }, [table]);
+  })();
 
   if (loading) {
     return (
@@ -582,7 +727,13 @@ export default function TableScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.push('/')} style={styles.backLink}>
+        <Pressable
+          onPress={() => {
+            lastTableIdRef.current = null;
+            router.push('/');
+          }}
+          style={styles.backLink}
+        >
           <ArrowLeft size={28} color="#333" />
         </Pressable>
 
@@ -1027,7 +1178,7 @@ export default function TableScreen() {
   );
 }
 
-// Styles (identiques à l'original - gardés pour maintenir le visuel)
+// Styles identiques à l'original - pas de changement nécessaire
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   loadingContainer: {

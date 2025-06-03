@@ -424,10 +424,55 @@ export const getBills = async (): Promise<Bill[]> => {
   return load<Bill[]>(STORAGE_KEYS.BILLS, []);
 };
 
+const MAX_BILLS_IN_STORAGE = 1000;
+
 export const addBill = async (bill: Bill): Promise<void> => {
   const bills = await getBills();
   bills.push(bill);
-  await save(STORAGE_KEYS.BILLS, bills);
+
+  // 🆕 Nettoyer automatiquement si trop de factures
+  if (bills.length > MAX_BILLS_IN_STORAGE) {
+    // Garder seulement les 800 plus récentes
+    const sortedBills = bills.sort(
+      (a, b) =>
+        new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+    const cleanedBills = sortedBills.slice(0, 800);
+
+    console.log(
+      `🧹 Nettoyage automatique: ${bills.length - 800} factures supprimées`
+    );
+    await save(STORAGE_KEYS.BILLS, cleanedBills);
+  } else {
+    await save(STORAGE_KEYS.BILLS, bills);
+  }
+};
+
+export const performPeriodicCleanup = async (): Promise<void> => {
+  try {
+    console.log('🧹 Nettoyage périodique du storage...');
+
+    // Nettoyer les factures anciennes (> 30 jours)
+    const bills = await getBills();
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+
+    const recentBills = bills.filter(
+      (bill) => new Date(bill.timestamp) > thirtyDaysAgo
+    );
+
+    if (recentBills.length < bills.length) {
+      await saveBills(recentBills);
+      console.log(
+        `🧹 ${bills.length - recentBills.length} factures anciennes supprimées`
+      );
+    }
+
+    // Marquer le dernier nettoyage
+    await AsyncStorage.setItem('last_cleanup_date', new Date().toISOString());
+  } catch (error) {
+    console.error('Erreur lors du nettoyage:', error);
+  }
 };
 
 export const saveBills = async (bills: Bill[]): Promise<void> => {
