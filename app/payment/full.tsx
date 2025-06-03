@@ -1,4 +1,4 @@
-// Modifications for app/payment/full.tsx
+// app/payment/full.tsx - Version simplifiée sans événements
 
 import { View, Text, StyleSheet, Pressable, Alert, Switch } from 'react-native';
 import { useState, useEffect } from 'react';
@@ -17,12 +17,13 @@ import {
   addBill,
 } from '../../utils/storage';
 import { useToast } from '../../utils/ToastContext';
-import { EVENT_TYPES, events } from '@/utils/events';
 import { useSettings } from '@/utils/useSettings';
+import { useTableContext } from '@/utils/TableContext';
 
 export default function FullPaymentScreen() {
   const { tableId, total, items } = useLocalSearchParams();
   const { paymentMethods, restaurantInfo, printSettings } = useSettings();
+  const { refreshTables } = useTableContext();
   const router = useRouter();
   const [printReceipt, setPrintReceipt] = useState(printSettings.autoPrint);
   const [processing, setProcessing] = useState(false);
@@ -87,7 +88,7 @@ export default function FullPaymentScreen() {
     }
   }
 
-  // Rest of the payment handling code...
+  // Fonction de paiement simplifiée
   const handlePayment = async (method: 'card' | 'cash' | 'check') => {
     if (processing) return;
 
@@ -115,9 +116,7 @@ export default function FullPaymentScreen() {
         section: table.section,
         paymentMethod: method,
         paymentType: 'full' as 'full',
-        // Ajouter cette ligne pour stocker les articles payés
-        paidItems: orderItems, // Ceci contiendra tous les détails des articles
-        // Ajouter le montant des articles offerts
+        paidItems: orderItems,
         offeredAmount: totalOffered,
       };
 
@@ -125,23 +124,13 @@ export default function FullPaymentScreen() {
       await addBill(bill);
 
       // Check if this payment completes the bill
-      // Dans handlePayment après le paiement réussi
       if (totalAmount >= table.order.total) {
         try {
           // Reset the table if payment covers full amount
           await resetTable(tableIdNum);
 
-          // Vérifier que la table est bien réinitialisée
-          const checkTable = await getTable(tableIdNum);
-          if (checkTable && (checkTable.order || checkTable.guests)) {
-            console.warn(
-              "La table n'a pas été correctement réinitialisée, nettoyage forcé"
-            );
-            await resetTable(tableIdNum); // Essayer à nouveau
-          }
-
-          // Émettre un événement pour s'assurer que l'interface est à jour
-          events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
+          // Rafraîchir les tables dans le contexte
+          await refreshTables();
 
           if (printReceipt) {
             router.push({
@@ -180,6 +169,7 @@ export default function FullPaymentScreen() {
         };
 
         await updateTable(updatedTable);
+        await refreshTables();
 
         if (printReceipt) {
           router.push({
@@ -201,7 +191,7 @@ export default function FullPaymentScreen() {
         toast.showToast(
           `Paiement ${method}: ${totalAmount.toFixed(
             2
-          )} €\Reste: ${remainingAmount.toFixed(2)} €`,
+          )} €\nReste: ${remainingAmount.toFixed(2)} €`,
           'success'
         );
       }
@@ -224,7 +214,6 @@ export default function FullPaymentScreen() {
         </Text>
       </View>
 
-      {/* Rest of the UI remains the same */}
       <View style={styles.content}>
         <View style={styles.amountCard}>
           <Text style={styles.amountLabel}>Montant total</Text>
@@ -253,7 +242,6 @@ export default function FullPaymentScreen() {
         </View>
 
         <View style={styles.paymentMethods}>
-          {/* Afficher uniquement les méthodes de paiement activées */}
           {availableMethods.map((method) => (
             <Pressable
               key={method.id}
@@ -276,9 +264,7 @@ export default function FullPaymentScreen() {
   );
 }
 
-// Styles remain the same
 const styles = StyleSheet.create({
-  // Existing styles...
   container: {
     flex: 1,
     backgroundColor: '#f5f5f5',

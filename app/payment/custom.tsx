@@ -1,4 +1,4 @@
-// app/payment/custom.tsx - Correction du bug des hooks
+// app/payment/custom.tsx - Version simplifiée sans événements
 
 import {
   View,
@@ -27,9 +27,9 @@ import {
   resetTable,
 } from '../../utils/storage';
 import { useToast } from '../../utils/ToastContext';
-import { EVENT_TYPES, events } from '@/utils/events';
 import { processPartialPayment } from '@/utils/payment-utils';
 import { useSettings } from '@/utils/useSettings';
+import { useTableContext } from '@/utils/TableContext';
 
 export default function CustomSplitScreen() {
   const { tableId, total, items } = useLocalSearchParams();
@@ -38,6 +38,7 @@ export default function CustomSplitScreen() {
   const totalAmount = parseFloat(total as string);
   const orderItems = items ? JSON.parse(items as string) : [];
   const toast = useToast();
+  const { refreshTables } = useTableContext();
 
   // ✅ TOUS LES HOOKS DOIVENT ÊTRE DÉCLARÉS EN PREMIER - SANS EXCEPTION
   const [processing, setProcessing] = useState(false);
@@ -269,7 +270,8 @@ export default function CustomSplitScreen() {
           }
         }
 
-        events.emit(EVENT_TYPES.TABLE_UPDATED, tableIdNum);
+        // Rafraîchir les tables dans le contexte
+        await refreshTables();
         setTableFullyPaid(true);
 
         // ✅ CORRECTION : Afficher le toast AVANT de naviguer
@@ -292,6 +294,8 @@ export default function CustomSplitScreen() {
             await resetTable(tableIdNum);
           }
 
+          // Rafraîchir les tables
+          await refreshTables();
           setTableFullyPaid(true);
 
           // ✅ Même correction ici
@@ -306,6 +310,9 @@ export default function CustomSplitScreen() {
         } else {
           const updatedTable = await getTable(tableIdNum);
           const remainingAmount = updatedTable?.order?.total || 0;
+
+          // Rafraîchir les tables
+          await refreshTables();
 
           toast.showToast(
             `Paiement(s) traité(s) avec succès. Solde restant : ${remainingAmount.toFixed(
@@ -339,6 +346,7 @@ export default function CustomSplitScreen() {
     totalOffered,
     router,
     toast,
+    refreshTables,
   ]);
 
   const processPayments = useCallback(async () => {
@@ -568,12 +576,9 @@ export default function CustomSplitScreen() {
   );
 }
 
-// Styles restent identiques
+// Styles restent identiques pour préserver l'apparence
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
+  container: { flex: 1, backgroundColor: '#f5f5f5' },
   header: {
     padding: 24,
     backgroundColor: 'white',
@@ -582,13 +587,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
-  backButton: {
-    marginRight: 20,
-  },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
+  backButton: { marginRight: 20 },
+  title: { fontSize: 24, fontWeight: 'bold' },
   sectionBadge: {
     alignSelf: 'flex-start',
     backgroundColor: '#E1F5FE',
@@ -597,26 +597,10 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     marginTop: 8,
   },
-  sectionText: {
-    color: '#0288D1',
-    fontWeight: '600',
-    fontSize: 12,
-  },
-  leftColumn: {
-    flex: 2,
-    minWidth: 400,
-  },
-  rightColumn: {
-    flex: 1,
-    flexDirection: 'column',
-    minWidth: 300,
-  },
-  content: {
-    flex: 1,
-    flexDirection: 'row',
-    padding: 24,
-    gap: 24,
-  },
+  sectionText: { color: '#0288D1', fontWeight: '600', fontSize: 12 },
+  leftColumn: { flex: 2, minWidth: 400 },
+  rightColumn: { flex: 1, flexDirection: 'column', minWidth: 300 },
+  content: { flex: 1, flexDirection: 'row', padding: 24, gap: 24 },
   totalCard: {
     backgroundColor: 'white',
     borderRadius: 12,
@@ -628,11 +612,7 @@ const styles = StyleSheet.create({
     shadowRadius: 3.84,
     elevation: 5,
   },
-  totalLabel: {
-    fontSize: 18,
-    color: '#666',
-    marginBottom: 8,
-  },
+  totalLabel: { fontSize: 18, color: '#666', marginBottom: 8 },
   totalAmount: {
     fontSize: 32,
     fontWeight: 'bold',
@@ -646,14 +626,8 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     textAlign: 'center',
   },
-  warningMessage: {
-    backgroundColor: '#FFF3CD',
-    color: '#856404',
-  },
-  infoMessage: {
-    backgroundColor: '#D1ECF1',
-    color: '#0C5460',
-  },
+  warningMessage: { backgroundColor: '#FFF3CD', color: '#856404' },
+  infoMessage: { backgroundColor: '#D1ECF1', color: '#0C5460' },
   currentTotalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -663,19 +637,9 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     marginTop: 8,
   },
-  currentTotalLabel: {
-    fontSize: 16,
-    color: '#666',
-  },
-  currentTotalAmount: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#2196F3',
-  },
-  splitAmountsList: {
-    flex: 1,
-    paddingBottom: 20,
-  },
+  currentTotalLabel: { fontSize: 16, color: '#666' },
+  currentTotalAmount: { fontSize: 20, fontWeight: 'bold', color: '#2196F3' },
+  splitAmountsList: { flex: 1, paddingBottom: 20 },
   splitRow: {
     backgroundColor: 'white',
     borderRadius: 12,
@@ -708,16 +672,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     height: 50,
   },
-  currencySymbol: {
-    fontSize: 18,
-    marginRight: 12,
-    color: '#666',
-  },
-  amountInput: {
-    flex: 1,
-    fontSize: 18,
-    height: 50,
-  },
+  currencySymbol: { fontSize: 18, marginRight: 12, color: '#666' },
+  amountInput: { flex: 1, fontSize: 18, height: 50 },
   paymentMethodsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -736,18 +692,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#f5f5f5',
     gap: 8,
   },
-  selectedMethodButton: {
-    backgroundColor: '#4CAF50',
-    borderColor: '#4CAF50',
-  },
-  methodText: {
-    color: '#333',
-    fontWeight: '500',
-    fontSize: 14,
-  },
-  selectedMethodText: {
-    color: 'white',
-  },
+  selectedMethodButton: { backgroundColor: '#4CAF50', borderColor: '#4CAF50' },
+  methodText: { color: '#333', fontWeight: '500', fontSize: 14 },
+  selectedMethodText: { color: 'white' },
   removeButton: {
     padding: 12,
     borderRadius: 8,
@@ -755,10 +702,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#f44336',
   },
-  removeButtonText: {
-    color: '#f44336',
-    fontWeight: '500',
-  },
+  removeButtonText: { color: '#f44336', fontWeight: '500' },
   actionsContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -773,11 +717,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#2196F3',
     alignItems: 'center',
   },
-  addButtonText: {
-    color: 'white',
-    fontWeight: '600',
-    fontSize: 16,
-  },
+  addButtonText: { color: 'white', fontWeight: '600', fontSize: 16 },
   calculateButton: {
     flex: 1.5,
     padding: 16,
@@ -788,15 +728,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
   },
-  calculateButtonText: {
-    color: 'white',
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  footer: {
-    marginTop: 12,
-    paddingBottom: 24,
-  },
+  calculateButtonText: { color: 'white', fontWeight: '600', fontSize: 16 },
+  footer: { marginTop: 12, paddingBottom: 24 },
   processButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -806,15 +739,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#4CAF50',
     gap: 12,
   },
-  disabledButton: {
-    backgroundColor: '#A5D6A7',
-    opacity: 0.6,
-  },
-  processButtonText: {
-    color: 'white',
-    fontSize: 18,
-    fontWeight: '600',
-  },
+  disabledButton: { backgroundColor: '#A5D6A7', opacity: 0.6 },
+  processButtonText: { color: 'white', fontSize: 18, fontWeight: '600' },
   processingOverlay: {
     position: 'absolute',
     top: 0,
@@ -826,11 +752,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 1000,
   },
-  processingText: {
-    color: 'white',
-    marginTop: 12,
-    fontSize: 16,
-  },
+  processingText: { color: 'white', marginTop: 12, fontSize: 16 },
   offeredInfoContainer: {
     backgroundColor: '#FFF8E1',
     padding: 6,
@@ -840,11 +762,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#FFD54F',
   },
-  offeredInfoText: {
-    color: '#FF9800',
-    fontWeight: '500',
-    fontSize: 13,
-  },
+  offeredInfoText: { color: '#FF9800', fontWeight: '500', fontSize: 13 },
   offeredContainer: {
     marginTop: 10,
     padding: 10,
@@ -853,9 +771,5 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#FFD54F',
   },
-  offeredText: {
-    color: '#FF9800',
-    fontWeight: '500',
-    textAlign: 'center',
-  },
+  offeredText: { color: '#FF9800', fontWeight: '500', textAlign: 'center' },
 });

@@ -1,17 +1,11 @@
-// app/_layout.tsx
+// app/_layout.tsx - Version simplifiée
+
 import { useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { View, Text, ActivityIndicator, AppState } from 'react-native';
-import {
-  getBills,
-  getTables,
-  initializeTables,
-  STORAGE_KEYS,
-  StorageManager,
-  TableManager,
-} from '../utils/storage';
+import { getBills, getTables, initializeTables } from '../utils/storage';
 import { ToastProvider } from '../utils/ToastContext';
 import { SettingsProvider } from '../utils/SettingsContext';
 import { TableProvider } from '@/utils/TableContext';
@@ -27,27 +21,25 @@ export default function RootLayout() {
   const [initialized, setInitialized] = useState(false);
 
   useEffect(() => {
-    // Sauvegarder les données lors de la mise en arrière-plan de l'app
+    // Sauvegarder les données lors de la mise en arrière-plan de l'app - SIMPLIFIÉ
     const subscription = AppState.addEventListener(
       'change',
       async (nextAppState) => {
         if (nextAppState === 'background' || nextAppState === 'inactive') {
-          // L'application passe en arrière-plan
           console.log('App en arrière-plan - sauvegarde forcée des données');
 
           try {
-
             // Récupérer et sauvegarder les tables (sauvegarde de sécurité)
             const tables = await getTables();
             await AsyncStorage.setItem(
-              STORAGE_KEYS.TABLES,
+              'manjo_carn_tables',
               JSON.stringify(tables)
             );
 
             // Récupérer et sauvegarder les factures (sauvegarde de sécurité)
             const bills = await getBills();
             await AsyncStorage.setItem(
-              STORAGE_KEYS.BILLS,
+              'manjo_carn_bills',
               JSON.stringify(bills)
             );
 
@@ -65,19 +57,22 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
-    // Initialize app data
+    // Initialize app data - SIMPLIFIÉ
     const setupApp = async () => {
       try {
         // Vérifier si c'est le premier lancement
-        const isFirstLaunch = await StorageManager.isFirstLaunch();
+        const isFirstLaunch = await AsyncStorage.getItem(
+          'manjo_carn_first_launch'
+        );
 
         // Initialiser les tables seulement si nécessaire
         await initializeTables();
 
         // Marquer l'application comme lancée si c'est le premier lancement
-        if (isFirstLaunch) {
-          await StorageManager.markAppLaunched();
+        if (isFirstLaunch === null) {
+          await AsyncStorage.setItem('manjo_carn_first_launch', 'false');
         }
+
         // Vérifier quand a eu lieu le dernier nettoyage
         const lastCleanup = await AsyncStorage.getItem('last_cleanup_date');
         const now = new Date().toISOString();
@@ -98,6 +93,7 @@ export default function RootLayout() {
         setInitialized(true);
       }
     };
+
     setupApp();
 
     // Framework callback

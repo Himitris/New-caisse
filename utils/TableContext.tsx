@@ -1,4 +1,4 @@
-// utils/TableContext.tsx - Version simplifiée
+// utils/TableContext.tsx - Version ultra-simplifiée sans événements
 
 import React, {
   createContext,
@@ -8,16 +8,17 @@ import React, {
   useEffect,
   useState,
 } from 'react';
-import { EVENT_TYPES, events } from './events';
-import { getTables, Table, updateTable } from './storage';
+import { getTables, getTable, Table, updateTable } from './storage';
 
 interface TableContextType {
   tables: Table[];
   isLoading: boolean;
   refreshTables: () => Promise<void>;
-  refreshSingleTable: (tableId: number) => Promise<void>;
+  updateTableData: (
+    tableId: number,
+    updatedData: Partial<Table>
+  ) => Promise<void>;
   getTableById: (id: number) => Table | undefined;
-  updateTableInContext: (updatedTable: Table) => Promise<void>;
 }
 
 const TableContext = createContext<TableContextType | undefined>(undefined);
@@ -26,8 +27,8 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
   const [tables, setTables] = useState<Table[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Fonction simple pour charger toutes les tables
   const loadTables = useCallback(async () => {
-    setIsLoading(true);
     try {
       const loadedTables = await getTables();
       setTables(loadedTables);
@@ -38,25 +39,41 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
     }
   }, []);
 
+  // Fonction publique pour rafraîchir les tables
   const refreshTables = useCallback(async () => {
+    setIsLoading(true);
     await loadTables();
   }, [loadTables]);
 
-  const refreshSingleTable = useCallback(async (tableId: number) => {
-    try {
-      const allTables = await getTables();
-      const updatedTable = allTables.find((t) => t.id === tableId);
+  // Fonction pour mettre à jour une table spécifique
+  const updateTableData = useCallback(
+    async (tableId: number, updatedData: Partial<Table>) => {
+      try {
+        // Récupérer la table actuelle depuis le storage
+        const currentTable = await getTable(tableId);
+        if (!currentTable) return;
 
-      if (updatedTable) {
-        setTables((prev) =>
-          prev.map((t) => (t.id === tableId ? updatedTable : t))
+        // Créer la table mise à jour
+        const updatedTable = { ...currentTable, ...updatedData };
+
+        // Sauvegarder dans le storage
+        await updateTable(updatedTable);
+
+        // Mettre à jour l'état local
+        setTables((prevTables) =>
+          prevTables.map((table) =>
+            table.id === tableId ? updatedTable : table
+          )
         );
+      } catch (error) {
+        console.error(`Error updating table ${tableId}:`, error);
+        throw error;
       }
-    } catch (error) {
-      console.error(`Error refreshing table ${tableId}:`, error);
-    }
-  }, []);
+    },
+    []
+  );
 
+  // Fonction pour obtenir une table par ID (depuis l'état local)
   const getTableById = useCallback(
     (id: number) => {
       return tables.find((table) => table.id === id);
@@ -64,58 +81,21 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
     [tables]
   );
 
-  const updateTableInContext = useCallback(async (updatedTable: Table) => {
-    try {
-      await updateTable(updatedTable);
-      setTables((prev) =>
-        prev.map((t) => (t.id === updatedTable.id ? updatedTable : t))
-      );
-    } catch (error) {
-      console.error('Error updating table in context:', error);
-      throw error;
-    }
-  }, []);
-
-  // Écouter les événements de mise à jour des tables
-  useEffect(() => {
-    const unsubscribeTablesUpdated = events.on(
-      EVENT_TYPES.TABLES_UPDATED,
-      () => {
-        refreshTables();
-      }
-    );
-
-    const unsubscribeTableUpdated = events.on(
-      EVENT_TYPES.TABLE_UPDATED,
-      (tableId: number) => {
-        refreshSingleTable(tableId);
-      }
-    );
-
-    return () => {
-      unsubscribeTablesUpdated();
-      unsubscribeTableUpdated();
-    };
-  }, [refreshTables, refreshSingleTable]);
-
   // Charger les tables au démarrage
   useEffect(() => {
     loadTables();
   }, [loadTables]);
 
+  const value = {
+    tables,
+    isLoading,
+    refreshTables,
+    updateTableData,
+    getTableById,
+  };
+
   return (
-    <TableContext.Provider
-      value={{
-        tables,
-        isLoading,
-        refreshTables,
-        refreshSingleTable,
-        getTableById,
-        updateTableInContext,
-      }}
-    >
-      {children}
-    </TableContext.Provider>
+    <TableContext.Provider value={value}>{children}</TableContext.Provider>
   );
 };
 

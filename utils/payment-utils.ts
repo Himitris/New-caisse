@@ -1,19 +1,14 @@
-// utils/payment-utils.ts - Version optimisée
+// utils/payment-utils.ts - Version simplifiée sans événements
 
-import { getTable, updateTable, resetTable, Table, OrderItem } from './storage';
-import { events, EVENT_TYPES } from './events';
+import { getTable, updateTable, resetTable } from './storage';
 
 /**
- * Fonction optimisée pour traiter un paiement partiel
- * Avec correction des bugs liés aux restes et arrondis
+ * Fonction simplifiée pour traiter un paiement partiel
  */
 export const processPartialPayment = async (
   tableId: number,
-  amountToPay: number,
-  setProcessing?: (value: boolean) => void
+  amountToPay: number
 ) => {
-  if (setProcessing) setProcessing(true);
-
   try {
     // Récupérer les données actuelles de la table
     const currentTable = await getTable(tableId);
@@ -27,9 +22,9 @@ export const processPartialPayment = async (
     const actualAmountToPay = Math.min(amountToPay, originalTotal);
 
     // Créer une copie des articles
-    const newItems = currentTable.order.items.slice();
+    const newItems = [...currentTable.order.items];
 
-    // Trier par prix croissant
+    // Trier par prix croissant pour optimiser le paiement
     newItems.sort((a, b) => a.price - b.price);
 
     let remainingAmount = actualAmountToPay;
@@ -68,7 +63,6 @@ export const processPartialPayment = async (
       }
     }
 
-    // Correction pour le problème des petits restes
     // Si le restant est très petit (< 0.01€), on considère que c'est payé
     if (remainingAmount < 0.01 && remainingAmount > 0) {
       remainingAmount = 0;
@@ -76,54 +70,31 @@ export const processPartialPayment = async (
 
     // Gestion des "restes" si le montant restant est significatif
     if (remainingAmount > 0.01) {
-      // Recherche d'un "Reste" existant
-      let resteIndex = -1;
-      for (let j = 0; j < newItems.length; j++) {
-        if (newItems[j].name.startsWith('Reste de')) {
-          resteIndex = j;
-          break;
-        }
-      }
+      // Chercher l'article le moins cher
+      const originalSorted = [...currentTable.order.items]
+        .filter((item) => !item.offered)
+        .sort((a, b) => a.price - b.price);
 
-      if (resteIndex >= 0) {
-        // Ajouter au "Reste" existant
-        newItems[resteIndex].price = Math.max(
-          0,
-          newItems[resteIndex].price - remainingAmount
+      const cheapestItem = originalSorted.length > 0 ? originalSorted[0] : null;
+
+      if (cheapestItem && cheapestItem.price > remainingAmount) {
+        const itemIndex = newItems.findIndex(
+          (item) => item.id === cheapestItem.id && !item.offered
         );
-        if (newItems[resteIndex].price <= 0.01) {
-          // Supprimer l'article si son prix devient négligeable
-          newItems.splice(resteIndex, 1);
-        }
-      } else {
-        // Chercher l'article le moins cher
-        const originalSorted = [...currentTable.order.items]
-          .filter((item) => !item.offered) // Exclure les articles offerts
-          .sort((a, b) => a.price - b.price);
 
-        const cheapestItem =
-          originalSorted.length > 0 ? originalSorted[0] : null;
+        if (itemIndex >= 0 && newItems[itemIndex].quantity > 0) {
+          // Diminuer sa quantité de 1
+          newItems[itemIndex].quantity -= 1;
 
-        if (cheapestItem && cheapestItem.price > remainingAmount) {
-          // Si l'article le moins cher coûte plus que ce qu'il nous reste à payer
-          const itemIndex = newItems.findIndex(
-            (item) => item.id === cheapestItem.id && !item.offered
-          );
-
-          if (itemIndex >= 0 && newItems[itemIndex].quantity > 0) {
-            // Diminuer sa quantité de 1
-            newItems[itemIndex].quantity -= 1;
-
-            // Créer un nouvel article "Reste" pour la différence
-            const resteAmount = cheapestItem.price - remainingAmount;
-            if (resteAmount > 0.01) {
-              newItems.push({
-                id: Date.now() + Math.random(),
-                name: `Reste de ${cheapestItem.name}`,
-                price: resteAmount,
-                quantity: 1,
-              });
-            }
+          // Créer un nouvel article "Reste" pour la différence
+          const resteAmount = cheapestItem.price - remainingAmount;
+          if (resteAmount > 0.01) {
+            newItems.push({
+              id: Date.now() + Math.random(),
+              name: `Reste de ${cheapestItem.name}`,
+              price: resteAmount,
+              quantity: 1,
+            });
           }
         }
       }
@@ -142,12 +113,8 @@ export const processPartialPayment = async (
 
     // Si le nouveau total est très petit (< 0.01€), considérer la table comme payée
     if (roundedNewTotal < 0.01) {
-      // Réinitialiser la table au lieu de juste mettre à jour
+      // Réinitialiser la table
       await resetTable(tableId);
-
-      // Émettre l'événement pour informer l'interface - la table est mise à jour
-      // avec une source indiquée pour éviter les boucles
-      events.emit(EVENT_TYPES.TABLE_UPDATED, tableId, 'paymentUtils');
 
       return {
         success: true,
@@ -168,20 +135,15 @@ export const processPartialPayment = async (
 
       await updateTable(updatedTable);
 
-      // Émettre l'événement pour informer l'interface - une table spécifique est mise à jour
-      events.emit(EVENT_TYPES.TABLE_UPDATED, tableId);
-
       return {
         success: true,
         newTotal: roundedNewTotal,
         updatedTable,
-        paidItems: currentTable.order.items, // Pour garder une référence aux articles payés
+        paidItems: currentTable.order.items,
       };
     }
   } catch (error) {
     console.error('Erreur lors du traitement du paiement partiel:', error);
     return { success: false, error };
-  } finally {
-    if (setProcessing) setProcessing(false);
   }
 };

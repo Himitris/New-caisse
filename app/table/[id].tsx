@@ -1,4 +1,4 @@
-// app/table/[id].tsx - Version simplifiée
+// app/table/[id].tsx - Version ultra-simplifiée
 
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
@@ -64,7 +64,7 @@ const CATEGORY_COLORS: { [key: string]: string } = {
   Glaces: '#00BCD4',
 };
 
-// Fonction de catégorisation
+// Fonction de catégorisation simplifiée
 const getCategoryFromName = (
   name: string,
   type: 'resto' | 'boisson'
@@ -125,7 +125,7 @@ export default function TableScreen() {
   const tableId = parseInt(id as string, 10);
   const router = useRouter();
   const toast = useToast();
-  const { refreshSingleTable } = useTableContext();
+  const { refreshTables } = useTableContext();
 
   const [table, setTable] = useState<Table | null>(null);
   const [loading, setLoading] = useState(true);
@@ -138,7 +138,7 @@ export default function TableScreen() {
   );
   const [splitModalVisible, setSplitModalVisible] = useState(false);
 
-  // Charger les données de la table
+  // Charger les données de la table - SIMPLIFIÉ
   const loadTable = useCallback(async () => {
     setLoading(true);
     try {
@@ -154,7 +154,7 @@ export default function TableScreen() {
     }
   }, [tableId]);
 
-  // Charger les données du menu
+  // Charger les données du menu - SIMPLIFIÉ
   const loadMenuData = useCallback(async () => {
     try {
       const [customItems, menuAvailability] = await Promise.all([
@@ -235,124 +235,117 @@ export default function TableScreen() {
     }, 0);
   }, []);
 
-  // Ajouter un article à la commande
+  // Ajouter un article à la commande - SIMPLIFIÉ
   const addItemToOrder = useCallback(
     async (item: MenuItem) => {
       if (!table) return;
 
-      const updatedTable = { ...table };
-
-      if (!updatedTable.order) {
-        updatedTable.order = {
-          id: Date.now(),
-          items: [],
-          guests: guestCount,
-          status: 'active',
-          timestamp: new Date().toISOString(),
-          total: 0,
-        };
-      }
-
-      const existingItemIndex = updatedTable.order.items.findIndex(
-        (orderItem) =>
-          orderItem.name === item.name && orderItem.price === item.price
-      );
-
-      if (existingItemIndex >= 0) {
-        updatedTable.order.items[existingItemIndex].quantity += 1;
-      } else {
-        updatedTable.order.items.push({
-          id: Date.now() + Math.random(),
-          name: item.name,
-          price: item.price,
-          quantity: 1,
-        });
-      }
-
-      updatedTable.order.total = calculateTotal(updatedTable.order.items);
-
       try {
+        const updatedTable = { ...table };
+
+        if (!updatedTable.order) {
+          updatedTable.order = {
+            id: Date.now(),
+            items: [],
+            guests: guestCount,
+            status: 'active',
+            timestamp: new Date().toISOString(),
+            total: 0,
+          };
+        }
+
+        const existingItemIndex = updatedTable.order.items.findIndex(
+          (orderItem) =>
+            orderItem.name === item.name && orderItem.price === item.price
+        );
+
+        if (existingItemIndex >= 0) {
+          updatedTable.order.items[existingItemIndex].quantity += 1;
+        } else {
+          updatedTable.order.items.push({
+            id: Date.now() + Math.random(),
+            name: item.name,
+            price: item.price,
+            quantity: 1,
+          });
+        }
+
+        updatedTable.order.total = calculateTotal(updatedTable.order.items);
+
         await updateTable(updatedTable);
         setTable(updatedTable);
-        await refreshSingleTable(tableId);
+        // Optionnel: rafraîchir dans le contexte
+        refreshTables();
       } catch (error) {
         console.error('Error adding item to order:', error);
         toast.showToast("Erreur lors de l'ajout de l'article", 'error');
       }
     },
-    [
-      table,
-      guestCount,
-      calculateTotal,
-      updateTable,
-      refreshSingleTable,
-      tableId,
-      toast,
-    ]
+    [table, guestCount, calculateTotal, refreshTables, toast]
   );
 
-  // Mettre à jour la quantité d'un article
+  // Mettre à jour la quantité d'un article - SIMPLIFIÉ
   const updateItemQuantity = useCallback(
     async (itemId: number, increment: boolean) => {
       if (!table || !table.order) return;
 
-      const updatedTable = { ...table };
-      if (!updatedTable.order) return;
-
-      const updatedItems = updatedTable.order.items
-        .map((item) => {
-          if (item.id !== itemId) return item;
-          const newQuantity = increment
-            ? item.quantity + 1
-            : Math.max(0, item.quantity - 1);
-          return { ...item, quantity: newQuantity };
-        })
-        .filter((item) => item.quantity > 0);
-
-      updatedTable.order.items = updatedItems;
-      updatedTable.order.total = calculateTotal(updatedItems);
-
       try {
+        const updatedTable = { ...table };
+        if (!updatedTable.order) return;
+
+        const updatedItems = updatedTable.order.items
+          .map((item) => {
+            if (item.id !== itemId) return item;
+            const newQuantity = increment
+              ? item.quantity + 1
+              : Math.max(0, item.quantity - 1);
+            return { ...item, quantity: newQuantity };
+          })
+          .filter((item) => item.quantity > 0);
+
+        updatedTable.order.items = updatedItems;
+        updatedTable.order.total = calculateTotal(updatedItems);
+
         await updateTable(updatedTable);
         setTable(updatedTable);
-        await refreshSingleTable(tableId);
+        refreshTables();
       } catch (error) {
         console.error('Error updating item quantity:', error);
         toast.showToast('Erreur lors de la mise à jour', 'error');
       }
     },
-    [table, calculateTotal, updateTable, refreshSingleTable, tableId, toast]
+    [table, calculateTotal, refreshTables, toast]
   );
 
-  // Basculer l'état offert d'un article
+  // Basculer l'état offert d'un article - SIMPLIFIÉ
   const toggleItemOffered = useCallback(
     async (itemId: number) => {
       if (!table || !table.order) return;
 
-      const updatedTable = { ...table };
-      if (!updatedTable.order) return;
-      
-      const updatedItems = updatedTable.order.items.map((item) => {
-        if (item.id !== itemId) return item;
-        return { ...item, offered: !item.offered };
-      });
-
-      updatedTable.order.items = updatedItems;
-      updatedTable.order.total = calculateTotal(updatedItems);
-
       try {
+        const updatedTable = { ...table };
+        if (!updatedTable.order) return;
+
+        const updatedItems = updatedTable.order.items.map((item) => {
+          if (item.id !== itemId) return item;
+          return { ...item, offered: !item.offered };
+        });
+
+        updatedTable.order.items = updatedItems;
+        updatedTable.order.total = calculateTotal(updatedItems);
+
         await updateTable(updatedTable);
         setTable(updatedTable);
-        await refreshSingleTable(tableId);
+        refreshTables();
       } catch (error) {
         console.error('Error toggling item offered:', error);
         toast.showToast('Erreur lors de la mise à jour', 'error');
       }
     },
-    [table, calculateTotal, updateTable, refreshSingleTable, tableId, toast]
+    [table, calculateTotal, refreshTables, toast]
   );
 
-  // Vider la commande
+  // Vider la commande - SIMPLIFIÉ
   const handleClearOrder = useCallback(() => {
     if (!table || !table.order || table.order.items.length === 0) return;
 
@@ -369,17 +362,13 @@ export default function TableScreen() {
 
             const updatedTable = {
               ...table,
-              order: {
-                ...table.order,
-                items: [],
-                total: 0,
-              },
+              order: { ...table.order, items: [], total: 0 },
             };
 
             try {
               await updateTable(updatedTable);
               setTable(updatedTable);
-              await refreshSingleTable(tableId);
+              refreshTables();
               toast.showToast('Commande supprimée avec succès', 'success');
             } catch (error) {
               console.error('Error clearing order:', error);
@@ -389,9 +378,9 @@ export default function TableScreen() {
         },
       ]
     );
-  }, [table, updateTable, refreshSingleTable, tableId, toast]);
+  }, [table, refreshTables, toast]);
 
-  // Fermer la table
+  // Fermer la table - SIMPLIFIÉ
   const handleCloseTable = useCallback(() => {
     if (!table) return;
 
@@ -406,7 +395,7 @@ export default function TableScreen() {
           onPress: async () => {
             try {
               await resetTable(tableId);
-              await refreshSingleTable(tableId);
+              refreshTables();
               router.push('/');
               toast.showToast(
                 `Table ${table.name} fermée avec succès`,
@@ -420,7 +409,7 @@ export default function TableScreen() {
         },
       ]
     );
-  }, [table, tableId, resetTable, refreshSingleTable, router, toast]);
+  }, [table, tableId, refreshTables, router, toast]);
 
   // Prévisualiser la note
   const handlePreviewNote = useCallback(() => {
@@ -441,7 +430,7 @@ export default function TableScreen() {
     });
   }, [table, tableId, router, toast]);
 
-  // Gérer les paiements
+  // Gérer les paiements - SIMPLIFIÉ
   const handlePayment = useCallback(
     (type: 'full' | 'split' | 'custom' | 'items') => {
       if (!table || !table.order) return;
@@ -491,7 +480,7 @@ export default function TableScreen() {
     [table, guestCount, tableId, router, toast]
   );
 
-  // Mettre à jour le nombre de couverts
+  // Mettre à jour le nombre de couverts - SIMPLIFIÉ
   const updateGuestCount = useCallback(
     async (newCount: number) => {
       if (!table) return;
@@ -512,7 +501,7 @@ export default function TableScreen() {
         console.error('Error updating guest count:', error);
       }
     },
-    [table, updateTable]
+    [table]
   );
 
   // Filtrer les items du menu
@@ -1038,12 +1027,9 @@ export default function TableScreen() {
   );
 }
 
-// Styles (identiques à l'original mais simplifiés)
+// Styles (identiques à l'original - gardés pour maintenir le visuel)
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
+  container: { flex: 1, backgroundColor: '#f5f5f5' },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -1051,21 +1037,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#F9F9F9',
     padding: 20,
   },
-  loadingText: {
-    marginTop: 15,
-    fontSize: 16,
-    color: '#333',
-  },
+  loadingText: { marginTop: 15, fontSize: 16, color: '#333' },
   backButton: {
     marginTop: 20,
     padding: 10,
     backgroundColor: '#2196F3',
     borderRadius: 8,
   },
-  backButtonText: {
-    color: 'white',
-    fontWeight: '600',
-  },
+  backButtonText: { color: 'white', fontWeight: '600' },
   header: {
     padding: 12,
     backgroundColor: 'white',
@@ -1089,27 +1068,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerTitleContainer: {
-    flex: 3,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginRight: 8,
-  },
+  headerTitleContainer: { flex: 3, flexDirection: 'row', alignItems: 'center' },
+  title: { fontSize: 20, fontWeight: 'bold', marginRight: 8 },
   sectionBadge: {
     backgroundColor: '#E1F5FE',
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 16,
   },
-  sectionText: {
-    color: '#0288D1',
-    fontWeight: '600',
-    fontSize: 11,
-  },
+  sectionText: { color: '#0288D1', fontWeight: '600', fontSize: 11 },
   guestCounter: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1164,49 +1131,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 8,
   },
-  typeFilters: {
-    flexDirection: 'row',
-    gap: 6,
-  },
+  typeFilters: { flexDirection: 'row', gap: 6 },
   typeFilterButton: {
     paddingVertical: 4,
     paddingHorizontal: 10,
     borderRadius: 16,
     backgroundColor: '#f0f0f0',
   },
-  activeTypeButton: {
-    backgroundColor: '#2196F3',
-  },
-  typeFilterText: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: '#666',
-  },
-  activeTypeText: {
-    color: 'white',
-    fontWeight: '600',
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  emptyOrder: {
-    flex: 1,
-    textAlign: 'center',
-    color: '#666',
-    paddingTop: 40,
-  },
-  orderColumns: {
-    flexDirection: 'row',
-    gap: 12,
-    flex: 1,
-    minHeight: 0,
-  },
-  orderColumn: {
-    flex: 1,
-    minHeight: 0,
-  },
+  activeTypeButton: { backgroundColor: '#2196F3' },
+  typeFilterText: { fontSize: 13, fontWeight: '500', color: '#666' },
+  activeTypeText: { color: 'white', fontWeight: '600' },
+  sectionTitle: { fontSize: 18, fontWeight: '600', marginBottom: 8 },
+  emptyOrder: { flex: 1, textAlign: 'center', color: '#666', paddingTop: 40 },
+  orderColumns: { flexDirection: 'row', gap: 12, flex: 1, minHeight: 0 },
+  orderColumn: { flex: 1, minHeight: 0 },
   columnTitle: {
     fontSize: 14,
     fontWeight: '600',
@@ -1215,10 +1153,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
   },
-  orderColumnScroll: {
-    maxHeight: '93%',
-    marginTop: 8,
-  },
+  orderColumnScroll: { maxHeight: '93%', marginTop: 8 },
   orderItem: {
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
@@ -1245,24 +1180,10 @@ const styles = StyleSheet.create({
     gap: 4,
     marginRight: 6,
   },
-  itemName: {
-    fontSize: 12,
-    fontWeight: '500',
-    flex: 1,
-  },
-  offeredItemText: {
-    fontStyle: 'italic',
-    color: '#FF9800',
-  },
-  itemPrice: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#4CAF50',
-  },
-  offeredPrice: {
-    textDecorationLine: 'line-through',
-    color: '#FF9800',
-  },
+  itemName: { fontSize: 12, fontWeight: '500', flex: 1 },
+  offeredItemText: { fontStyle: 'italic', color: '#FF9800' },
+  itemPrice: { fontSize: 13, fontWeight: '600', color: '#4CAF50' },
+  offeredPrice: { textDecorationLine: 'line-through', color: '#FF9800' },
   itemActions: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1299,10 +1220,7 @@ const styles = StyleSheet.create({
     borderColor: '#FF9800',
     borderRadius: 4,
   },
-  offerButtonText: {
-    fontSize: 10,
-    color: '#FF9800',
-  },
+  offerButtonText: { fontSize: 10, color: '#FF9800' },
   totalSection: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1318,31 +1236,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 8,
   },
-  totalLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    alignItems: 'center',
-  },
-  totalAmount: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#4CAF50',
-  },
+  totalLabel: { fontSize: 16, fontWeight: '600', alignItems: 'center' },
+  totalAmount: { fontSize: 20, fontWeight: 'bold', color: '#4CAF50' },
   offeredTotalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  offeredTotalLabel: {
-    fontSize: 14,
-    color: '#FF9800',
-    fontWeight: '500',
-  },
-  offeredTotalAmount: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#FF9800',
-  },
+  offeredTotalLabel: { fontSize: 14, color: '#FF9800', fontWeight: '500' },
+  offeredTotalAmount: { fontSize: 16, fontWeight: '600', color: '#FF9800' },
   paymentActions: {
     flexDirection: 'column',
     gap: 1,
@@ -1372,10 +1274,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     paddingLeft: 6,
   },
-  categoryTabs: {
-    marginBottom: 8,
-    flexGrow: 0,
-  },
+  categoryTabs: { marginBottom: 8, flexGrow: 0 },
   categoryTab: {
     paddingHorizontal: 8,
     paddingVertical: 5,
@@ -1386,28 +1285,12 @@ const styles = StyleSheet.create({
     minWidth: 70,
     alignSelf: 'flex-start',
   },
-  activeCategoryTab: {
-    borderBottomWidth: 2,
-    borderBottomColor: '#2196F3',
-  },
-  categoryTabText: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: '#666',
-  },
-  activeCategoryTabText: {
-    fontWeight: '600',
-    color: '#2196F3',
-  },
-  menuItems: {
-    flex: 1,
-  },
-  menuItemsScroll: {
-    flex: 1,
-  },
-  categorySection: {
-    marginBottom: 20,
-  },
+  activeCategoryTab: { borderBottomWidth: 2, borderBottomColor: '#2196F3' },
+  categoryTabText: { fontSize: 13, fontWeight: '500', color: '#666' },
+  activeCategoryTabText: { fontWeight: '600', color: '#2196F3' },
+  menuItems: { flex: 1 },
+  menuItemsScroll: { flex: 1 },
+  categorySection: { marginBottom: 20 },
   categoryHeaderText: {
     fontSize: 16,
     fontWeight: '600',
@@ -1416,11 +1299,7 @@ const styles = StyleSheet.create({
     paddingLeft: 8,
     color: '#333',
   },
-  categoryItems: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
+  categoryItems: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   menuItem: {
     width: '31%',
     minWidth: 90,
@@ -1433,14 +1312,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 5,
   },
-  menuItemName: {
-    fontSize: 11,
-    fontWeight: '500',
-    marginBottom: 2,
-  },
-  menuItemPrice: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#4CAF50',
-  },
+  menuItemName: { fontSize: 11, fontWeight: '500', marginBottom: 2 },
+  menuItemPrice: { fontSize: 11, fontWeight: '600', color: '#4CAF50' },
 });

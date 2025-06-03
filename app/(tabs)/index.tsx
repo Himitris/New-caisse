@@ -1,4 +1,4 @@
-// app/(tabs)/index.tsx - Version simplifiée
+// app/(tabs)/index.tsx - Version ultra-simplifiée
 
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -8,7 +8,6 @@ import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Animated,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -62,18 +61,21 @@ export default function TablesScreen() {
     return activeSection ? [activeSection] : sections;
   }, [activeSection, sections]);
 
-  // Rafraîchir les tables
+  // Rafraîchir les tables - SIMPLIFIÉ
   const handleRefreshTables = useCallback(async () => {
     setRefreshing(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     try {
       await refreshTables();
+      toast.showToast('Tables mises à jour', 'success');
+    } catch (error) {
+      toast.showToast('Erreur lors de la mise à jour', 'error');
     } finally {
       setRefreshing(false);
     }
-  }, [refreshTables]);
+  }, [refreshTables, toast]);
 
-  // Réinitialiser toutes les tables
+  // Réinitialiser toutes les tables - SIMPLIFIÉ
   const handleResetAllTables = useCallback(() => {
     Alert.alert(
       'Réinitialiser Toutes les Tables',
@@ -94,10 +96,7 @@ export default function TablesScreen() {
               );
             } catch (error) {
               console.error('Error resetting tables:', error);
-              toast.showToast(
-                'Un problème est survenu lors de la réinitialisation.',
-                'error'
-              );
+              toast.showToast('Erreur lors de la réinitialisation.', 'error');
             }
           },
         },
@@ -105,7 +104,7 @@ export default function TablesScreen() {
     );
   }, [refreshTables, toast]);
 
-  // Ouvrir une table
+  // Ouvrir une table - SIMPLIFIÉ
   const openTable = useCallback(
     (table: Table) => {
       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -124,9 +123,16 @@ export default function TablesScreen() {
             {
               text: 'Rendre Disponible',
               onPress: async () => {
-                const updatedTable = { ...table, status: 'available' as const };
-                await updateTable(updatedTable);
-                await refreshTables();
+                try {
+                  const updatedTable = {
+                    ...table,
+                    status: 'available' as const,
+                  };
+                  await updateTable(updatedTable);
+                  await refreshTables();
+                } catch (error) {
+                  toast.showToast('Erreur lors de la mise à jour', 'error');
+                }
               },
             },
             {
@@ -137,10 +143,10 @@ export default function TablesScreen() {
         );
       }
     },
-    [router, refreshTables]
+    [router, refreshTables, toast]
   );
 
-  // Traiter l'ouverture d'une table avec couverts
+  // Traiter l'ouverture d'une table avec couverts - SIMPLIFIÉ
   const processOpenTable = useCallback(
     async (table: Table, guestNumber: number) => {
       try {
@@ -208,7 +214,7 @@ export default function TablesScreen() {
     return TABLE_COLORS[status] || TABLE_COLORS.available;
   }, []);
 
-  // Rafraîchir quand on revient sur cette page
+  // Rafraîchir quand on revient sur cette page - SIMPLIFIÉ
   useFocusEffect(
     useCallback(() => {
       refreshTables();
@@ -417,7 +423,7 @@ export default function TablesScreen() {
   );
 }
 
-// Styles identiques à l'original
+// Styles (identiques à l'original)
 const styles = StyleSheet.create({
   container: {
     flex: 1,

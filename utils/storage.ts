@@ -1,7 +1,6 @@
-// utils/storage.ts - Version simplifiée et optimisée
+// utils/storage.ts - Version ultra-simplifiée
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { events, EVENT_TYPES } from './events';
 
 // Types (inchangés)
 export interface Table {
@@ -43,18 +42,7 @@ export interface Bill {
   section?: string;
   paymentMethod?: 'card' | 'cash' | 'check';
   paymentType?: 'full' | 'split' | 'custom' | 'items';
-  paidItems?: {
-    id: number;
-    name: string;
-    price: number;
-    quantity: number;
-    notes?: string;
-    offered?: boolean;
-    paymentPercentage?: number;
-    customAmount?: number;
-    splitPart?: number;
-    totalParts?: number;
-  }[];
+  paidItems?: any[];
   offeredAmount?: number;
 }
 
@@ -74,20 +62,20 @@ export interface CustomMenuItem {
   available: boolean;
 }
 
-// Constantes simplifiées
+// Constantes
 export const TABLE_SECTIONS = {
   EAU: 'Eau',
   BUIS: 'Buis',
 } as const;
 
-export const STORAGE_KEYS = {
+const STORAGE_KEYS = {
   TABLES: 'manjo_carn_tables',
   BILLS: 'manjo_carn_bills',
   MENU_AVAILABILITY: 'manjo_carn_menu_availability',
   CUSTOM_MENU_ITEMS: 'manjo_carn_custom_menu_items',
 } as const;
 
-// Tables par défaut (inchangées)
+// Tables par défaut (liste complète maintenue)
 export const defaultTables: Table[] = [
   // EAU Section
   {
@@ -353,8 +341,9 @@ export const defaultTables: Table[] = [
   },
 ];
 
-// Fonctions utilitaires simplifiées
-const saveToStorage = async (key: string, data: any): Promise<void> => {
+// ====== FONCTIONS UTILITAIRES SIMPLIFIÉES ======
+
+const save = async (key: string, data: any) => {
   try {
     await AsyncStorage.setItem(key, JSON.stringify(data));
   } catch (error) {
@@ -363,7 +352,7 @@ const saveToStorage = async (key: string, data: any): Promise<void> => {
   }
 };
 
-const loadFromStorage = async <T>(key: string, defaultValue: T): Promise<T> => {
+const load = async <T>(key: string, defaultValue: T): Promise<T> => {
   try {
     const data = await AsyncStorage.getItem(key);
     return data ? JSON.parse(data) : defaultValue;
@@ -373,27 +362,17 @@ const loadFromStorage = async <T>(key: string, defaultValue: T): Promise<T> => {
   }
 };
 
-// ====== TABLES ======
-export const initializeTables = async (): Promise<Table[]> => {
-  const existingTables = await loadFromStorage<Table[]>(
-    STORAGE_KEYS.TABLES,
-    []
-  );
-  if (existingTables.length > 0) {
-    return existingTables;
-  }
+// ====== TABLES - TOUTES LES FONCTIONS NÉCESSAIRES ======
 
-  await saveToStorage(STORAGE_KEYS.TABLES, defaultTables);
-  return defaultTables;
+export const initializeTables = async (): Promise<void> => {
+  const existingTables = await load<Table[]>(STORAGE_KEYS.TABLES, []);
+  if (existingTables.length === 0) {
+    await save(STORAGE_KEYS.TABLES, defaultTables);
+  }
 };
 
 export const getTables = async (): Promise<Table[]> => {
-  return loadFromStorage<Table[]>(STORAGE_KEYS.TABLES, defaultTables);
-};
-
-export const saveTables = async (tables: Table[]): Promise<void> => {
-  await saveToStorage(STORAGE_KEYS.TABLES, tables);
-  events.emit(EVENT_TYPES.TABLES_UPDATED);
+  return load<Table[]>(STORAGE_KEYS.TABLES, defaultTables);
 };
 
 export const getTable = async (id: number): Promise<Table | null> => {
@@ -404,32 +383,25 @@ export const getTable = async (id: number): Promise<Table | null> => {
 export const updateTable = async (updatedTable: Table): Promise<void> => {
   const tables = await getTables();
   const index = tables.findIndex((table) => table.id === updatedTable.id);
-
   if (index >= 0) {
     tables[index] = updatedTable;
-    await saveTables(tables);
-    events.emit(EVENT_TYPES.TABLE_UPDATED, updatedTable.id);
+    await save(STORAGE_KEYS.TABLES, tables);
   }
 };
 
 export const resetTable = async (tableId: number): Promise<void> => {
   const tables = await getTables();
   const index = tables.findIndex((table) => table.id === tableId);
-
   if (index >= 0) {
     const defaultTable = defaultTables.find((t) => t.id === tableId);
-    tables[index] = {
-      ...defaultTable!,
-      id: tableId,
-      name: tables[index].name,
-      section: tables[index].section,
-      status: 'available',
-      guests: undefined,
-      order: undefined,
-    };
-
-    await saveTables(tables);
-    events.emit(EVENT_TYPES.TABLE_UPDATED, tableId);
+    if (defaultTable) {
+      tables[index] = {
+        ...defaultTable,
+        name: tables[index].name,
+        section: tables[index].section,
+      };
+      await save(STORAGE_KEYS.TABLES, tables);
+    }
   }
 };
 
@@ -443,72 +415,51 @@ export const resetAllTables = async (): Promise<void> => {
       section: existing?.section || defaultTable.section,
     };
   });
-
-  await saveTables(resetTables);
+  await save(STORAGE_KEYS.TABLES, resetTables);
 };
 
-// ====== BILLS ======
+// ====== BILLS - FONCTIONS SIMPLIFIÉES ======
+
 export const getBills = async (): Promise<Bill[]> => {
-  return loadFromStorage<Bill[]>(STORAGE_KEYS.BILLS, []);
-};
-
-export const saveBills = async (bills: Bill[]): Promise<void> => {
-  await saveToStorage(STORAGE_KEYS.BILLS, bills);
+  return load<Bill[]>(STORAGE_KEYS.BILLS, []);
 };
 
 export const addBill = async (bill: Bill): Promise<void> => {
   const bills = await getBills();
   bills.push(bill);
-  await saveBills(bills);
-  events.emit(EVENT_TYPES.PAYMENT_ADDED, bill.tableNumber);
+  await save(STORAGE_KEYS.BILLS, bills);
 };
 
-export const getPaginatedBills = async (
-  page: number = 0,
-  pageSize: number = 20
-): Promise<{
-  bills: Bill[];
-  total: number;
-  currentPage: number;
-  totalPages: number;
-  hasMore: boolean;
-}> => {
+export const saveBills = async (bills: Bill[]): Promise<void> => {
+  await save(STORAGE_KEYS.BILLS, bills);
+};
+
+// Pagination simplifiée pour les bills
+export const getBillsPage = async (page: number = 0, pageSize: number = 20) => {
   const allBills = await getBills();
-  const sortedBills = [...allBills].sort(
+  const sorted = [...allBills].sort(
     (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
   );
 
-  const startIndex = page * pageSize;
-  const endIndex = startIndex + pageSize;
-  const paginatedBills = sortedBills.slice(startIndex, endIndex);
+  const start = page * pageSize;
+  const end = start + pageSize;
 
   return {
-    bills: paginatedBills,
-    total: sortedBills.length,
-    currentPage: page,
-    totalPages: Math.ceil(sortedBills.length / pageSize),
-    hasMore: endIndex < sortedBills.length,
+    bills: sorted.slice(start, end),
+    total: sorted.length,
+    hasMore: end < sorted.length,
   };
 };
 
-export const getFilteredPaginatedBills = async (
-  filters: {
-    dateRange?: { start: Date; end: Date };
-    paymentMethod?: string;
-    searchText?: string;
-  },
-  page: number = 0,
-  pageSize: number = 20
-): Promise<{
-  bills: Bill[];
-  total: number;
-  currentPage: number;
-  totalPages: number;
-  hasMore: boolean;
-}> => {
+// Filtrage simplifié pour les bills
+export const getFilteredBills = async (filters: {
+  searchText?: string;
+  dateRange?: { start: Date; end: Date };
+  paymentMethod?: string;
+}) => {
   const allBills = await getBills();
 
-  const filteredBills = allBills.filter((bill) => {
+  return allBills.filter((bill) => {
     if (filters.dateRange) {
       const billDate = new Date(bill.timestamp);
       if (
@@ -524,58 +475,40 @@ export const getFilteredPaginatedBills = async (
     }
 
     if (filters.searchText) {
-      const searchLower = filters.searchText.toLowerCase();
+      const search = filters.searchText.toLowerCase();
       const tableName = bill.tableName || `Table ${bill.tableNumber}`;
       return (
-        tableName.toLowerCase().includes(searchLower) ||
-        bill.amount.toString().includes(searchLower)
+        tableName.toLowerCase().includes(search) ||
+        bill.amount.toString().includes(search)
       );
     }
 
     return true;
   });
-
-  const sortedBills = [...filteredBills].sort(
-    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-  );
-
-  const startIndex = page * pageSize;
-  const endIndex = startIndex + pageSize;
-  const paginatedBills = sortedBills.slice(startIndex, endIndex);
-
-  return {
-    bills: paginatedBills,
-    total: sortedBills.length,
-    currentPage: page,
-    totalPages: Math.ceil(sortedBills.length / pageSize),
-    hasMore: endIndex < sortedBills.length,
-  };
 };
 
-// ====== MENU ======
+// ====== MENU - FONCTIONS SIMPLIFIÉES ======
+
 export const getMenuAvailability = async (): Promise<
   MenuItemAvailability[]
 > => {
-  return loadFromStorage<MenuItemAvailability[]>(
-    STORAGE_KEYS.MENU_AVAILABILITY,
-    []
-  );
+  return load<MenuItemAvailability[]>(STORAGE_KEYS.MENU_AVAILABILITY, []);
 };
 
 export const saveMenuAvailability = async (
   items: MenuItemAvailability[]
 ): Promise<void> => {
-  await saveToStorage(STORAGE_KEYS.MENU_AVAILABILITY, items);
+  await save(STORAGE_KEYS.MENU_AVAILABILITY, items);
 };
 
 export const getCustomMenuItems = async (): Promise<CustomMenuItem[]> => {
-  return loadFromStorage<CustomMenuItem[]>(STORAGE_KEYS.CUSTOM_MENU_ITEMS, []);
+  return load<CustomMenuItem[]>(STORAGE_KEYS.CUSTOM_MENU_ITEMS, []);
 };
 
 export const saveCustomMenuItems = async (
   items: CustomMenuItem[]
 ): Promise<void> => {
-  await saveToStorage(STORAGE_KEYS.CUSTOM_MENU_ITEMS, items);
+  await save(STORAGE_KEYS.CUSTOM_MENU_ITEMS, items);
 };
 
 export const addCustomMenuItem = async (
@@ -599,11 +532,12 @@ export const updateCustomMenuItem = async (
 
 export const deleteCustomMenuItem = async (itemId: number): Promise<void> => {
   const items = await getCustomMenuItems();
-  const updatedItems = items.filter((item) => item.id !== itemId);
-  await saveCustomMenuItems(updatedItems);
+  const filtered = items.filter((item) => item.id !== itemId);
+  await saveCustomMenuItems(filtered);
 };
 
-// Maintien de compatibilité pour les classes (vides maintenant)
+// ====== CLASSES DE COMPATIBILITÉ (SIMPLIFIÉES) ======
+
 export class StorageManager {
   static async isFirstLaunch(): Promise<boolean> {
     const value = await AsyncStorage.getItem('manjo_carn_first_launch');
@@ -617,6 +551,6 @@ export class StorageManager {
 
 export class TableManager {
   static async cleanupOrphanedTableData(): Promise<void> {
-    // Fonction vide pour maintenir la compatibilité
+    // Fonction vide maintenue pour compatibilité
   }
 }

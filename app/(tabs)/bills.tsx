@@ -1,3 +1,5 @@
+// app/(tabs)/bills.tsx - Version simplifiée sans événements
+
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -35,8 +37,8 @@ import {
   Bill,
   getBills,
   saveBills,
-  getPaginatedBills,
-  getFilteredPaginatedBills,
+  getBillsPage,
+  getFilteredBills,
 } from '../../utils/storage';
 import { useToast } from '../../utils/ToastContext';
 import { useSettings } from '@/utils/useSettings';
@@ -67,7 +69,6 @@ const PAYMENT_METHOD_LABELS = {
 
 const ITEM_HEIGHT = 80;
 const PAGE_SIZE = 20;
-const MAX_BILLS_IN_STORAGE = 1000;
 
 const getBillStatusColor = (bill: Bill) => {
   if (bill.status === 'split' && bill.paymentType === 'custom') {
@@ -76,10 +77,9 @@ const getBillStatusColor = (bill: Bill) => {
   return STATUS_COLORS[bill.status] || STATUS_COLORS.default;
 };
 
-// Modal pour voir le reçu - Mémoïzé
+// Modal pour voir le reçu - Simplifié
 const ViewReceiptModal = memo<ViewReceiptModalProps>(
   ({ visible, bill, onClose, onPrint, onShare, onDelete }) => {
-    // D'abord, déclarez tous vos hooks
     const { restaurantInfo, paymentMethods } = useSettings();
 
     const getPaymentMethodLabel = useCallback(
@@ -94,10 +94,9 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
       const hasDetailedItems = bill.paidItems && bill.paidItems.length > 0;
 
       if (bill.paymentType === 'custom' && hasDetailedItems) {
-        // Pour les paiements custom, le total = somme des prix originaux des articles
         return (
           bill.paidItems?.reduce((sum, item) => {
-            if (item.offered) return sum; // Les articles offerts ne comptent pas
+            if (item.offered) return sum;
             return sum + item.price * item.quantity;
           }, 0) || bill.amount
         );
@@ -117,7 +116,6 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
       );
     }, [onDelete]);
 
-    // Seulement APRÈS avoir déclaré tous vos hooks, placez votre condition
     if (!bill) return null;
 
     const statusColor = getBillStatusColor(bill);
@@ -125,7 +123,6 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
       ? getPaymentMethodLabel(bill.paymentMethod)
       : '';
 
-    // Vérifier si nous avons des articles payés détaillés
     const hasDetailedItems = bill.paidItems && bill.paidItems.length > 0;
 
     return (
@@ -318,7 +315,7 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
   }
 );
 
-// Composant pour le filtrage - Amélioré avec les nouveaux filtres
+// Composant pour le filtrage - Simplifié
 interface FilterBarProps {
   onSearch: (text: string) => void;
   onDateChange: (date: Date | null) => void;
@@ -336,7 +333,6 @@ interface FilterBarProps {
 
 const FilterBar = memo<FilterBarProps>(
   ({
-    onFilter,
     onSearch,
     onDateChange,
     sortOrder,
@@ -420,7 +416,7 @@ const FilterBar = memo<FilterBarProps>(
     const paymentMethodLabel = useMemo(() => {
       if (!selectedPaymentMethod) return 'Mode de paiement';
       return getPaymentMethodLabel(selectedPaymentMethod);
-    }, [selectedPaymentMethod]);
+    }, [selectedPaymentMethod, getPaymentMethodLabel]);
 
     return (
       <View style={styles.filterBar}>
@@ -546,7 +542,7 @@ const FilterBar = memo<FilterBarProps>(
   }
 );
 
-// Composant pour un item de facture - Mémoïzé
+// Composant pour un item de facture - Simplifié
 interface BillListItemProps {
   bill: Bill;
   isSelected: boolean;
@@ -559,7 +555,6 @@ const BillListItem = memo<BillListItemProps>(
       onSelect(bill);
     }, [bill, onSelect]);
 
-    // ✅ Améliorer la comparaison pour éviter les faux positifs
     const statusColor = getBillStatusColor(bill);
 
     const formattedDate = useMemo(() => {
@@ -600,23 +595,17 @@ export default function BillsScreen() {
   const [loading, setLoading] = useState(true);
   const [selectedBill, setSelectedBill] = useState<Bill | null>(null);
   const [viewModalVisible, setViewModalVisible] = useState(false);
-  const [processingAction, setProcessingAction] = useState(false);
+  const [processing, setProcessing] = useState(false);
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc' | 'none'>('desc');
-  const { restaurantInfo } = useSettings();
+  const { restaurantInfo, paymentMethods } = useSettings();
   const [searchText, setSearchText] = useState('');
   const [dateFilter, setDateFilter] = useState<Date | null>(null);
-  const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(10);
-  const [totalPages, setTotalPages] = useState(0);
-  const [totalBills, setTotalBills] = useState(0);
-  const [hasMorePages, setHasMorePages] = useState(false);
-  const [isFirstRender, setIsFirstRender] = useState(true);
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<
     Bill['paymentMethod'] | null
   >(null);
   const toast = useToast();
-  const { paymentMethods } = useSettings();
 
+  // Charger les factures - SIMPLIFIÉ
   const loadBills = useCallback(async () => {
     setLoading(true);
     try {
@@ -632,25 +621,11 @@ export default function BillsScreen() {
           paymentMethod: paymentMethodFilter || undefined,
         };
 
-        const result = await getFilteredPaginatedBills(filters, page, pageSize);
-
-        // ✅ Assurer l'unicité des IDs
-        const uniqueBills = ensureUniqueBillIds(result.bills);
-
-        setFilteredBills(uniqueBills);
-        setTotalPages(result.totalPages);
-        setTotalBills(result.total);
-        setHasMorePages(result.hasMore);
+        const filtered = await getFilteredBills(filters);
+        setFilteredBills(filtered);
       } else {
-        const result = await getPaginatedBills(page, pageSize);
-
-        // ✅ Assurer l'unicité des IDs
-        const uniqueBills = ensureUniqueBillIds(result.bills);
-
-        setFilteredBills(uniqueBills);
-        setTotalPages(result.totalPages);
-        setTotalBills(result.total);
-        setHasMorePages(result.hasMore);
+        const allBills = await getBills();
+        setFilteredBills(allBills);
       }
     } catch (error) {
       console.error('Error loading bills:', error);
@@ -658,56 +633,24 @@ export default function BillsScreen() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, searchText, dateFilter, paymentMethodFilter, toast]);
+  }, [searchText, dateFilter, paymentMethodFilter, toast]);
 
-  // Fonction pour charger la page suivante
-  const loadNextPage = useCallback(() => {
-    if (hasMorePages) {
-      setPage((prevPage) => prevPage + 1);
-    }
-  }, [hasMorePages]);
-
-  // Fonction pour charger la page précédente
-  const loadPreviousPage = useCallback(() => {
-    if (page > 0) {
-      setPage((prevPage) => prevPage - 1);
-    }
-  }, [page]);
-
-  // Fonction pour aller à une page spécifique
-  const goToPage = useCallback(
-    (pageNum: number) => {
-      if (pageNum >= 0 && pageNum < totalPages) {
-        setPage(pageNum);
-      }
-    },
-    [totalPages]
-  );
-
-  // Réinitialiser la pagination lors d'un changement de filtre
+  // Charger toutes les factures
   useEffect(() => {
-    setPage(0);
-  }, [searchText, dateFilter, paymentMethodFilter]);
-
-  // Charger les factures quand la page change
-  useEffect(() => {
-    loadBills();
-  }, [loadBills, page]);
-
-  useEffect(() => {
-    async function loadAllBills() {
+    const loadAllBills = async () => {
       try {
         const allBills = await getBills();
         setBills(allBills);
       } catch (error) {
         console.error('Error loading all bills:', error);
       }
-    }
+    };
 
     loadAllBills();
-  }, []);
+    loadBills();
+  }, [loadBills]);
 
-  // Tri des factures par date - Mémoïzé
+  // Tri des factures par date - SIMPLIFIÉ
   const sortBillsByDate = useCallback(
     (billsToSort: Bill[], order: 'desc' | 'asc' | 'none' = 'desc') => {
       if (order === 'none') return billsToSort;
@@ -729,6 +672,7 @@ export default function BillsScreen() {
     [paymentMethods]
   );
 
+  // Supprimer les factures filtrées - SIMPLIFIÉ
   const handleDeleteFiltered = useCallback(() => {
     if (filteredBills.length === 0) {
       toast.showToast('Aucune facture à supprimer.', 'info');
@@ -745,9 +689,8 @@ export default function BillsScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              setProcessingAction(true);
+              setProcessing(true);
 
-              // On garde les factures qui ne font pas partie des factures filtrées
               const billIdsToDelete = new Set(
                 filteredBills.map((bill) => bill.id)
               );
@@ -755,19 +698,10 @@ export default function BillsScreen() {
                 (bill) => !billIdsToDelete.has(bill.id)
               );
 
-              // Sauvegarde des factures dans le stockage
               await saveBills(remainingBills);
-
-              // Mise à jour groupée des états pour éviter les rendus partiels
-              setPage(0); // Réinitialiser la pagination
               setBills(remainingBills);
-
-              // Utilisez une fonction callback pour setFilteredBills pour s'assurer qu'elle a accès à la dernière valeur de remainingBills
-              // Remplacer cette ligne par une fonction vide temporairement
               setFilteredBills([]);
 
-              // Mettre à jour le selectedBill une fois que les autres états sont mis à jour
-              // pour éviter de sélectionner une facture qui n'existe plus
               if (
                 remainingBills.length > 0 &&
                 selectedBill &&
@@ -778,11 +712,7 @@ export default function BillsScreen() {
                 setSelectedBill(null);
               }
 
-              // Utiliser requestAnimationFrame pour attendre que le DOM soit mis à jour
-              requestAnimationFrame(() => {
-                // Recharger les factures filtrées après la suppression
-                loadBills();
-              });
+              await loadBills();
 
               toast.showToast(
                 `${billIdsToDelete.size} facture(s) supprimée(s) avec succès.`,
@@ -795,17 +725,17 @@ export default function BillsScreen() {
                 'error'
               );
             } finally {
-              setProcessingAction(false);
+              setProcessing(false);
             }
           },
         },
       ]
     );
-  }, [filteredBills, bills, selectedBill, loadBills]);
+  }, [filteredBills, bills, selectedBill, loadBills, toast]);
 
-  // Filtrage optimisé avec useMemo
+  // Filtrage et tri - SIMPLIFIÉ
   const appliedFilters = useMemo(() => {
-    let filtered = bills;
+    let filtered = [...filteredBills];
 
     if (searchText.trim()) {
       const lowerCaseText = searchText.toLowerCase();
@@ -821,41 +751,10 @@ export default function BillsScreen() {
       });
     }
 
-    if (dateFilter) {
-      const selectedDate = new Date(dateFilter);
-      selectedDate.setHours(0, 0, 0, 0);
-      const nextDay = new Date(selectedDate);
-      nextDay.setDate(selectedDate.getDate() + 1);
-
-      filtered = filtered.filter((bill) => {
-        const billDate = new Date(bill.timestamp);
-        return billDate >= selectedDate && billDate < nextDay;
-      });
-    }
-
-    if (paymentMethodFilter) {
-      filtered = filtered.filter(
-        (bill) => bill.paymentMethod === paymentMethodFilter
-      );
-    }
-
     return sortBillsByDate(filtered, sortOrder);
-  }, [
-    bills,
-    searchText,
-    dateFilter,
-    paymentMethodFilter,
-    sortOrder,
-    sortBillsByDate,
-  ]);
+  }, [filteredBills, searchText, sortOrder, sortBillsByDate]);
 
-  // Mise à jour des filtres avec debounce
-  useEffect(() => {
-    setFilteredBills(appliedFilters);
-    setPage(0);
-    setHasMorePages(appliedFilters.length > PAGE_SIZE);
-  }, [appliedFilters]);
-
+  // Handlers simplifiés
   const handleSearch = useCallback((text: string) => {
     setSearchText(text);
   }, []);
@@ -885,20 +784,15 @@ export default function BillsScreen() {
     setSortOrder('desc');
   }, []);
 
-  const getStatusColor = useCallback(
-    (bill: Bill) => getBillStatusColor(bill),
-    []
-  );
-
   const handleSelectBill = useCallback(
     (bill: Bill) => {
-      // Vérifier si la facture n'est pas déjà sélectionnée
       if (selectedBill?.id !== bill.id) {
         setSelectedBill(bill);
       }
     },
     [selectedBill?.id]
   );
+
   const handleView = useCallback(() => {
     if (selectedBill) {
       setViewModalVisible(true);
@@ -908,7 +802,7 @@ export default function BillsScreen() {
         'info'
       );
     }
-  }, [selectedBill]);
+  }, [selectedBill, toast]);
 
   const handleDeleteAll = useCallback(() => {
     Alert.alert(
@@ -921,7 +815,7 @@ export default function BillsScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
-              setProcessingAction(true);
+              setProcessing(true);
               await saveBills([]);
               setBills([]);
               setFilteredBills([]);
@@ -934,19 +828,19 @@ export default function BillsScreen() {
               console.error('Erreur lors de la suppression:', error);
               toast.showToast('Impossible de supprimer les factures.', 'error');
             } finally {
-              setProcessingAction(false);
+              setProcessing(false);
             }
           },
         },
       ]
     );
-  }, []);
+  }, [toast]);
 
   const handleDeleteBill = useCallback(async () => {
     if (!selectedBill) return;
 
     try {
-      setProcessingAction(true);
+      setProcessing(true);
       const updatedBills = bills.filter((bill) => bill.id !== selectedBill.id);
       await saveBills(updatedBills);
       setBills(updatedBills);
@@ -964,56 +858,51 @@ export default function BillsScreen() {
       console.error('Erreur lors de la suppression:', error);
       toast.showToast('Impossible de supprimer la facture.', 'error');
     } finally {
-      setProcessingAction(false);
+      setProcessing(false);
     }
-  }, [selectedBill, bills, sortOrder, sortBillsByDate]);
+  }, [selectedBill, bills, sortOrder, sortBillsByDate, toast]);
 
-  const generateHTML = useCallback((bill: Bill) => {
-    const paymentLabel = bill.paymentMethod
-      ? getPaymentMethodLabel(bill.paymentMethod)
-      : '';
+  // Générer HTML pour impression - SIMPLIFIÉ
+  const generateHTML = useCallback(
+    (bill: Bill) => {
+      const paymentLabel = bill.paymentMethod
+        ? getPaymentMethodLabel(bill.paymentMethod)
+        : '';
+      const taxInfo = 'TVA non applicable - art.293B du CGI';
 
-    const taxInfo = 'TVA non applicable - art.293B du CGI';
+      const dateObj = new Date(bill.timestamp);
+      const dateFormatted = dateObj.toLocaleDateString('fr-FR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
+      const timeFormatted = dateObj.toLocaleTimeString('fr-FR', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
 
-    // Formater la date
-    const dateObj = new Date(bill.timestamp);
-    const dateFormatted = dateObj.toLocaleDateString('fr-FR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-    });
-    const timeFormatted = dateObj.toLocaleTimeString('fr-FR', {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
+      const hasDetailedItems = bill.paidItems && bill.paidItems.length > 0;
 
-    // Vérifier si nous avons des articles détaillés
-    const hasDetailedItems = bill.paidItems && bill.paidItems.length > 0;
+      const calculateTotalAmount = () => {
+        if (bill.paymentType === 'custom' && hasDetailedItems) {
+          return (
+            bill.paidItems?.reduce((sum, item) => {
+              if (item.offered) return sum;
+              return sum + item.price * item.quantity;
+            }, 0) || bill.amount
+          );
+        }
+        return bill.amount;
+      };
 
-    // Calculer le total de l'addition pour les paiements custom
-    const calculateTotalAmount = () => {
-      if (bill.paymentType === 'custom' && hasDetailedItems) {
-        // Pour les paiements custom, le total = somme des prix originaux des articles
-        return (
-          bill.paidItems?.reduce((sum, item) => {
-            if (item.offered) return sum; // Les articles offerts ne comptent pas
-            return sum + item.price * item.quantity;
-          }, 0) || bill.amount
-        );
-      }
-      return bill.amount;
-    };
+      const isCustomSplit =
+        bill.paymentType === 'custom' && bill.status === 'split';
+      const totalAmount = calculateTotalAmount();
+      const paidAmount = bill.amount;
 
-    // Déterminer les montants pour l'affichage
-    const isCustomSplit =
-      bill.paymentType === 'custom' && bill.status === 'split';
-    const totalAmount = calculateTotalAmount();
-    const paidAmount = bill.amount;
-
-    // Générer le HTML des articles si disponibles
-    let itemsHTML = '';
-    if (hasDetailedItems) {
-      itemsHTML = `
+      let itemsHTML = '';
+      if (hasDetailedItems) {
+        itemsHTML = `
       <div class="items-section">
         <table style="width: 100%; border-collapse: collapse; margin: 5mm 0;">
           <tr>
@@ -1039,23 +928,21 @@ export default function BillsScreen() {
         </table>
       </div>
     `;
-    }
+      }
 
-    // Inclure les articles offerts si présents
-    let offeredHTML = '';
-    if (bill.offeredAmount && bill.offeredAmount > 0) {
-      offeredHTML = `
+      let offeredHTML = '';
+      if (bill.offeredAmount && bill.offeredAmount > 0) {
+        offeredHTML = `
       <div class="total-line" style="color: #FF9800; font-style: italic;">
         <span>Articles offerts:</span>
         <span>${bill.offeredAmount.toFixed(2)}€</span>
       </div>
     `;
-    }
+      }
 
-    // Section des totaux adaptée pour les paiements partagés
-    let totalsSection = '';
-    if (isCustomSplit && totalAmount > paidAmount) {
-      totalsSection = `
+      let totalsSection = '';
+      if (isCustomSplit && totalAmount > paidAmount) {
+        totalsSection = `
       <div class="totals">
         <div class="total-line">
           <span>Articles:</span>
@@ -1076,8 +963,8 @@ export default function BillsScreen() {
         </div>
       </div>
     `;
-    } else {
-      totalsSection = `
+      } else {
+        totalsSection = `
       <div class="totals">
         <div class="total-line">
           <span>Articles:</span>
@@ -1091,9 +978,9 @@ export default function BillsScreen() {
         </div>
       </div>
     `;
-    }
+      }
 
-    return `
+      return `
     <html>
       <head>
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -1203,72 +1090,8 @@ export default function BillsScreen() {
       </body>
     </html>
   `;
-  }, []);
-
-  const renderPagination = () => (
-    <View style={styles.paginationContainer}>
-      <Text style={styles.paginationInfo}>
-        {totalBills > 0
-          ? `Affichage de ${page * pageSize + 1}-${Math.min(
-              (page + 1) * pageSize,
-              totalBills
-            )} sur ${totalBills}`
-          : 'Aucune facture'}
-      </Text>
-
-      <View style={styles.paginationControls}>
-        <Pressable
-          style={[styles.paginationButton, page === 0 && styles.disabledButton]}
-          onPress={loadPreviousPage}
-          disabled={page === 0}
-        >
-          <Text style={styles.paginationButtonText}>Précédent</Text>
-        </Pressable>
-
-        {(() => {
-          const pageButtons = [];
-
-          // N'afficher que la page courante et la page suivante (si disponible)
-          pageButtons.push(
-            <Pressable
-              key={`page-${page}`}
-              style={[styles.pageNumberButton, styles.currentPageButton]}
-              onPress={() => goToPage(page)}
-            >
-              <Text style={[styles.pageNumberText, styles.currentPageText]}>
-                {page + 1}
-              </Text>
-            </Pressable>
-          );
-
-          // Afficher la page suivante uniquement si elle existe
-          if (page + 1 < totalPages) {
-            pageButtons.push(
-              <Pressable
-                key={`page-${page + 1}`}
-                style={[styles.pageNumberButton]}
-                onPress={() => goToPage(page + 1)}
-              >
-                <Text style={styles.pageNumberText}>{page + 2}</Text>
-              </Pressable>
-            );
-          }
-
-          return pageButtons;
-        })()}
-
-        <Pressable
-          style={[
-            styles.paginationButton,
-            !hasMorePages && styles.disabledButton,
-          ]}
-          onPress={loadNextPage}
-          disabled={!hasMorePages}
-        >
-          <Text style={styles.paginationButtonText}>Suivant</Text>
-        </Pressable>
-      </View>
-    </View>
+    },
+    [getPaymentMethodLabel, restaurantInfo]
   );
 
   const handlePrint = useCallback(async () => {
@@ -1277,7 +1100,7 @@ export default function BillsScreen() {
       return;
     }
 
-    setProcessingAction(true);
+    setProcessing(true);
     try {
       await Print.printAsync({
         html: generateHTML(selectedBill),
@@ -1290,9 +1113,9 @@ export default function BillsScreen() {
         'error'
       );
     } finally {
-      setProcessingAction(false);
+      setProcessing(false);
     }
-  }, [selectedBill, generateHTML]);
+  }, [selectedBill, generateHTML, toast]);
 
   const handleShare = useCallback(async () => {
     if (!selectedBill) {
@@ -1300,7 +1123,7 @@ export default function BillsScreen() {
       return;
     }
 
-    setProcessingAction(true);
+    setProcessing(true);
     try {
       const { uri } = await Print.printToFileAsync({
         html: generateHTML(selectedBill),
@@ -1315,9 +1138,9 @@ export default function BillsScreen() {
       console.error('Erreur de partage:', error);
       toast.showToast('Impossible de partager le reçu.', 'error');
     } finally {
-      setProcessingAction(false);
+      setProcessing(false);
     }
-  }, [selectedBill, generateHTML]);
+  }, [selectedBill, generateHTML, toast]);
 
   const handleExport = useCallback(async () => {
     if (!selectedBill) {
@@ -1325,7 +1148,7 @@ export default function BillsScreen() {
       return;
     }
 
-    setProcessingAction(true);
+    setProcessing(true);
     try {
       const { uri } = await Print.printToFileAsync({
         html: generateHTML(selectedBill),
@@ -1342,59 +1165,11 @@ export default function BillsScreen() {
       console.error("Erreur d'export:", error);
       toast.showToast("Impossible d'exporter le reçu.", 'error');
     } finally {
-      setProcessingAction(false);
+      setProcessing(false);
     }
-  }, [selectedBill, generateHTML]);
-
-  // Pagination pour FlatList
-  const paginatedBills = useMemo(() => {
-    // Vérifier s'il y a des doublons avant de paginer
-    const uniqueFilteredBills = filteredBills.filter(
-      (bill, index, arr) => arr.findIndex((b) => b.id === bill.id) === index
-    );
-
-    const start = 0;
-    const end = (page + 1) * PAGE_SIZE;
-    return uniqueFilteredBills.slice(start, end);
-  }, [filteredBills, page]);
-
-  const handleLoadMore = useCallback(() => {
-    if (
-      hasMorePages &&
-      !loading &&
-      (page + 1) * PAGE_SIZE < filteredBills.length
-    ) {
-      setPage((prevPage) => prevPage + 1);
-    }
-  }, [hasMorePages, loading, page, filteredBills.length]);
-
-  const getItemLayout = useCallback(
-    (data: any, index: number) => ({
-      length: ITEM_HEIGHT,
-      offset: ITEM_HEIGHT * index,
-      index,
-    }),
-    []
-  );
-
-  const ensureUniqueBillIds = (bills: Bill[]): Bill[] => {
-    const seenIds = new Set<string>();
-    const uniqueBills: Bill[] = [];
-
-    bills.forEach((bill, index) => {
-      if (!bill.id || seenIds.has(bill.id.toString())) {
-        // Générer un nouvel ID unique si manquant ou dupliqué
-        bill.id = Date.now() + Math.random() * 1000 + index;
-      }
-      seenIds.add(bill.id.toString());
-      uniqueBills.push(bill);
-    });
-
-    return uniqueBills;
-  };
+  }, [selectedBill, generateHTML, toast]);
 
   const keyExtractor = useCallback((item: Bill, index: number) => {
-    // S'assurer que l'ID existe et est unique
     return item.id ? `bill-${item.id}` : `bill-index-${index}`;
   }, []);
 
@@ -1409,17 +1184,7 @@ export default function BillsScreen() {
     [selectedBill?.id, handleSelectBill]
   );
 
-  const renderListFooter = useCallback(() => {
-    if (!loading || page === 0) return null;
-    return (
-      <View style={styles.loadingMore}>
-        <ActivityIndicator size="small" color="#2196F3" />
-        <Text style={styles.loadingMoreText}>Chargement...</Text>
-      </View>
-    );
-  }, [loading, page]);
-
-  if (loading && page === 0) {
+  if (loading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#2196F3" />
@@ -1451,7 +1216,7 @@ export default function BillsScreen() {
             sortOrder={sortOrder}
             onSortChange={handleSortChange}
             onDeleteAll={handleDeleteAll}
-            onDeleteFiltered={handleDeleteFiltered} // Nouvelle prop
+            onDeleteFiltered={handleDeleteFiltered}
             searchText={searchText}
             selectedDate={dateFilter}
             onPaymentMethodChange={handlePaymentMethodFilter}
@@ -1460,36 +1225,27 @@ export default function BillsScreen() {
           />
 
           <View style={styles.content}>
-            {/* Liste des factures à gauche */}
             <View style={styles.billsList}>
               <Text style={styles.listTitle}>Historique des Factures</Text>
               <Text style={styles.billCount}>
-                {filteredBills.length} facture(s){' '}
-                {filteredBills.length !== bills.length
+                {appliedFilters.length} facture(s){' '}
+                {appliedFilters.length !== bills.length
                   ? `(sur ${bills.length} total)`
                   : ''}
               </Text>
               <FlatList
-                data={paginatedBills}
+                data={appliedFilters}
                 renderItem={renderBillItem}
                 keyExtractor={keyExtractor}
-                getItemLayout={getItemLayout}
                 initialNumToRender={10}
                 maxToRenderPerBatch={8}
                 windowSize={15}
                 removeClippedSubviews={true}
                 updateCellsBatchingPeriod={50}
-                onEndReachedThreshold={0.5}
-                onEndReached={handleLoadMore}
-                ListFooterComponent={renderListFooter}
-                maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
                 extraData={selectedBill?.id}
-                key={`flatlist-${filteredBills.length}`}
               />
-              {renderPagination()}
             </View>
 
-            {/* Détails de la facture sélectionnée */}
             <View style={styles.billDetails}>
               {selectedBill ? (
                 <>
@@ -1510,7 +1266,7 @@ export default function BillsScreen() {
                     <Text
                       style={[
                         styles.selectedBillStatus,
-                        { color: getStatusColor(selectedBill) },
+                        { color: getBillStatusColor(selectedBill) },
                       ]}
                     >
                       {selectedBill.status === 'split' &&
@@ -1608,6 +1364,7 @@ export default function BillsScreen() {
           </View>
         </View>
       )}
+
       <ViewReceiptModal
         visible={viewModalVisible}
         bill={selectedBill}
@@ -1617,7 +1374,7 @@ export default function BillsScreen() {
         onDelete={handleDeleteBill}
       />
 
-      {processingAction && (
+      {processing && (
         <View style={styles.processingOverlay}>
           <ActivityIndicator size="large" color="white" />
           <Text style={styles.processingText}>Traitement en cours...</Text>
@@ -1627,34 +1384,18 @@ export default function BillsScreen() {
   );
 }
 
-// Styles mis à jour pour inclure les nouveaux éléments
+// Styles (identiques pour préserver l'apparence)
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#f5f5f5',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: '#666',
-  },
+  container: { flex: 1, backgroundColor: '#f5f5f5' },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingText: { marginTop: 12, fontSize: 16, color: '#666' },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 40,
   },
-  emptyText: {
-    marginTop: 20,
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#666',
-  },
+  emptyText: { marginTop: 20, fontSize: 18, fontWeight: 'bold', color: '#666' },
   emptySubtext: {
     marginTop: 8,
     fontSize: 16,
@@ -1669,18 +1410,9 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     flexDirection: 'row',
   },
-  title: {
-    fontSize: 24,
-    fontWeight: 'bold',
-  },
-  mainContainer: {
-    flex: 1,
-    flexDirection: 'column',
-  },
-  content: {
-    flex: 1,
-    flexDirection: 'row',
-  },
+  title: { fontSize: 24, fontWeight: 'bold' },
+  mainContainer: { flex: 1, flexDirection: 'column' },
+  content: { flex: 1, flexDirection: 'row' },
   filterBar: {
     padding: 12,
     backgroundColor: 'white',
@@ -1695,11 +1427,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     marginBottom: 12,
   },
-  searchInput: {
-    flex: 1,
-    height: 40,
-    marginLeft: 8,
-  },
+  searchInput: { flex: 1, height: 40, marginLeft: 8 },
   filterActions: {
     flexDirection: 'row',
     justifyContent: 'flex-start',
@@ -1715,11 +1443,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     minWidth: 120,
   },
-  filterButtonText: {
-    marginLeft: 8,
-    color: '#2196F3',
-    fontWeight: '500',
-  },
+  filterButtonText: { marginLeft: 8, color: '#2196F3', fontWeight: '500' },
   billsList: {
     width: 300,
     backgroundColor: 'white',
@@ -1727,16 +1451,8 @@ const styles = StyleSheet.create({
     borderRightColor: '#e0e0e0',
     padding: 16,
   },
-  listTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  billCount: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 16,
-  },
+  listTitle: { fontSize: 18, fontWeight: '600', marginBottom: 8 },
+  billCount: { fontSize: 14, color: '#666', marginBottom: 16 },
   billListItem: {
     padding: 12,
     borderBottomWidth: 1,
@@ -1749,29 +1465,19 @@ const styles = StyleSheet.create({
     backgroundColor: '#e3f2fd',
     borderBottomColor: '#2196F3',
   },
-  billItemTable: {
-    fontSize: 16,
-    fontWeight: '500',
-    marginBottom: 4,
-  },
+  billItemTable: { fontSize: 16, fontWeight: '500', marginBottom: 4 },
   billItemDetails: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginBottom: 4,
   },
-  billItemAmount: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
+  billItemAmount: { fontSize: 14, fontWeight: '600' },
   billItemStatus: {
     fontSize: 14,
     fontWeight: '500',
     textTransform: 'uppercase',
   },
-  billItemDate: {
-    fontSize: 12,
-    color: '#666',
-  },
+  billItemDate: { fontSize: 12, color: '#666' },
   billDetails: {
     flex: 1,
     padding: 20,
@@ -1779,24 +1485,13 @@ const styles = StyleSheet.create({
     margin: 16,
     borderRadius: 12,
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 3.84,
     elevation: 5,
   },
-  noBillSelected: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  noBillText: {
-    fontSize: 16,
-    color: '#666',
-    fontStyle: 'italic',
-  },
+  noBillSelected: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  noBillText: { fontSize: 16, color: '#666', fontStyle: 'italic' },
   selectedBillHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1806,11 +1501,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
   },
-  selectedBillTitle: {
-    fontSize: 24,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
+  selectedBillTitle: { fontSize: 24, fontWeight: '600', marginBottom: 8 },
   sectionBadge: {
     marginLeft: 12,
     backgroundColor: '#E1F5FE',
@@ -1819,19 +1510,13 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignSelf: 'flex-start',
   },
-  sectionText: {
-    color: '#0288D1',
-    fontWeight: '600',
-    fontSize: 12,
-  },
+  sectionText: { color: '#0288D1', fontWeight: '600', fontSize: 12 },
   selectedBillStatus: {
     fontSize: 16,
     fontWeight: '600',
     textTransform: 'uppercase',
   },
-  billDetailsContent: {
-    marginBottom: 20,
-  },
+  billDetailsContent: { marginBottom: 20 },
   detailRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1839,19 +1524,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
-  detailLabel: {
-    fontSize: 16,
-    color: '#666',
-  },
-  detailValue: {
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  detailAmount: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#4CAF50',
-  },
+  detailLabel: { fontSize: 16, color: '#666' },
+  detailValue: { fontSize: 16, fontWeight: '500' },
+  detailAmount: { fontSize: 18, fontWeight: '600', color: '#4CAF50' },
   actionsContainer: {
     flexDirection: 'row',
     justifyContent: 'center',
@@ -1868,10 +1543,7 @@ const styles = StyleSheet.create({
     minWidth: 120,
     justifyContent: 'center',
   },
-  actionText: {
-    fontSize: 16,
-    fontWeight: '500',
-  },
+  actionText: { fontSize: 16, fontWeight: '500' },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -1884,10 +1556,7 @@ const styles = StyleSheet.create({
     height: '80%',
     borderRadius: 8,
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     elevation: 5,
@@ -1899,82 +1568,28 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 16,
   },
-  modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  closeButton: {
-    padding: 5,
-  },
-  receiptContent: {
-    flex: 1,
-  },
-  restaurantInfo: {
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  restaurantName: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  restaurantAddress: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 2,
-  },
-  restaurantPhone: {
-    fontSize: 14,
-    color: '#666',
-  },
-  receiptDivider: {
-    height: 1,
-    backgroundColor: '#ddd',
-    marginVertical: 16,
-  },
-  billInfo: {
-    marginBottom: 16,
-  },
-  billTable: {
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  billDate: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 4,
-  },
-  billSection: {
-    fontSize: 14,
-    color: '#0288D1',
-  },
-  billSummary: {
-    marginBottom: 16,
-  },
+  modalTitle: { fontSize: 20, fontWeight: 'bold' },
+  closeButton: { padding: 5 },
+  receiptContent: { flex: 1 },
+  restaurantInfo: { alignItems: 'center', marginBottom: 20 },
+  restaurantName: { fontSize: 20, fontWeight: 'bold', marginBottom: 4 },
+  restaurantAddress: { fontSize: 14, color: '#666', marginBottom: 2 },
+  restaurantPhone: { fontSize: 14, color: '#666' },
+  receiptDivider: { height: 1, backgroundColor: '#ddd', marginVertical: 16 },
+  billInfo: { marginBottom: 16 },
+  billTable: { fontSize: 18, fontWeight: '600', marginBottom: 4 },
+  billDate: { fontSize: 14, color: '#666', marginBottom: 4 },
+  billSection: { fontSize: 14, color: '#0288D1' },
+  billSummary: { marginBottom: 16 },
   billRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginBottom: 8,
   },
-  billLabel: {
-    fontSize: 16,
-    color: '#666',
-  },
-  billValue: {
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  billAmount: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#4CAF50',
-  },
-  billStatus: {
-    fontSize: 16,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-  },
+  billLabel: { fontSize: 16, color: '#666' },
+  billValue: { fontSize: 16, fontWeight: '500' },
+  billAmount: { fontSize: 18, fontWeight: '600', color: '#4CAF50' },
+  billStatus: { fontSize: 16, fontWeight: '600', textTransform: 'uppercase' },
   receiptFooter: {
     fontSize: 16,
     fontWeight: '500',
@@ -1997,10 +1612,7 @@ const styles = StyleSheet.create({
     gap: 8,
     padding: 10,
   },
-  receiptActionText: {
-    fontSize: 16,
-    fontWeight: '500',
-  },
+  receiptActionText: { fontSize: 16, fontWeight: '500' },
   processingOverlay: {
     position: 'absolute',
     top: 0,
@@ -2011,35 +1623,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  processingText: {
-    color: 'white',
-    marginTop: 12,
-    fontSize: 16,
-  },
-  noResultsContainer: {
-    padding: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  noResultsText: {
-    color: '#666',
-    fontStyle: 'italic',
-    textAlign: 'center',
-  },
-  loadingMore: {
-    padding: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  loadingMoreText: {
-    marginTop: 5,
-    color: '#666',
-  },
-  // Nouveaux styles ajoutés
-  clearButton: {
-    marginLeft: 8,
-    padding: 4,
-  },
+  processingText: { color: 'white', marginTop: 12, fontSize: 16 },
+  clearButton: { marginLeft: 8, padding: 4 },
   resetButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2059,35 +1644,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#e0e0e0',
     shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
+    shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 3.84,
     elevation: 5,
     zIndex: 1000,
     minWidth: 200,
   },
-  paymentButtonContainer: {
-    position: 'relative', // Élément parent avec position relative
-    marginRight: 8, // Marge pour l'alignement cohérent avec les autres boutons
-  },
+  paymentButtonContainer: { position: 'relative', marginRight: 8 },
   paymentOption: {
     padding: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
   },
-  selectedPaymentOption: {
-    backgroundColor: '#E3F2FD',
-  },
-  paymentOptionText: {
-    fontSize: 16,
-    color: '#333',
-  },
-  itemsContainer: {
-    marginBottom: 16,
-  },
+  selectedPaymentOption: { backgroundColor: '#E3F2FD' },
+  paymentOptionText: { fontSize: 16, color: '#333' },
+  itemsContainer: { marginBottom: 16 },
   itemsHeader: {
     fontSize: 16,
     fontWeight: '600',
@@ -2102,108 +1674,22 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
   },
-  itemDetails: {
-    flexDirection: 'row',
-    flex: 1,
-    alignItems: 'center',
-  },
-  itemQuantity: {
-    fontSize: 14,
-    marginRight: 8,
-    width: 30,
-  },
-  itemName: {
-    fontSize: 14,
-    flex: 1,
-  },
-  itemPrice: {
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  offeredItemText: {
-    fontStyle: 'italic',
-    color: '#FF9800',
-  },
-  offeredItemPrice: {
-    textDecorationLine: 'line-through',
-    color: '#FF9800',
-  },
-  billOfferedLabel: {
-    fontSize: 14,
-    color: '#FF9800',
-    fontWeight: '500',
-  },
-  billOfferedValue: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#FF9800',
-  },
-  paginationContainer: {
-    padding: 16,
-    backgroundColor: 'white',
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-  },
-  paginationInfo: {
-    fontSize: 14,
-    color: '#666',
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  paginationControls: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-  },
-  paginationButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    backgroundColor: '#2196F3',
-    borderRadius: 8,
-  },
-  disabledButton: {
-    backgroundColor: '#bdbdbd',
-    opacity: 0.7,
-  },
-  paginationButtonText: {
-    color: 'white',
-    fontWeight: '600',
-  },
-  pageNumberButton: {
-    width: 36,
-    height: 36,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderRadius: 18,
-    backgroundColor: '#f5f5f5',
-  },
-  currentPageButton: {
-    backgroundColor: '#2196F3',
-  },
-  pageNumberText: {
-    fontWeight: '600',
-    color: '#666',
-  },
-  currentPageText: {
-    color: 'white',
-  },
+  itemDetails: { flexDirection: 'row', flex: 1, alignItems: 'center' },
+  itemQuantity: { fontSize: 14, marginRight: 8, width: 30 },
+  itemName: { fontSize: 14, flex: 1 },
+  itemPrice: { fontSize: 14, fontWeight: '500' },
+  offeredItemText: { fontStyle: 'italic', color: '#FF9800' },
+  offeredItemPrice: { textDecorationLine: 'line-through', color: '#FF9800' },
+  billOfferedLabel: { fontSize: 14, color: '#FF9800', fontWeight: '500' },
+  billOfferedValue: { fontSize: 14, fontWeight: '600', color: '#FF9800' },
   paidAmountRow: {
     borderTopWidth: 1,
     borderTopColor: '#e0e0e0',
     paddingTop: 12,
     marginTop: 8,
   },
-  billPaidLabel: {
-    fontSize: 16,
-    color: '#2196F3',
-    fontWeight: '600',
-  },
-  billPaidAmount: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#2196F3',
-  },
+  billPaidLabel: { fontSize: 16, color: '#2196F3', fontWeight: '600' },
+  billPaidAmount: { fontSize: 18, fontWeight: '600', color: '#2196F3' },
   splitNotice: {
     marginTop: 8,
     padding: 8,
