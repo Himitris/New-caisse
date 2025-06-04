@@ -1,6 +1,7 @@
 // app/payment/items.tsx - Version sans événements
 import { useSettings } from '@/utils/useSettings';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useTableContext } from '@/utils/TableContext';
 import {
   ArrowLeft,
   CreditCard,
@@ -268,6 +269,7 @@ export default function ItemsPaymentScreen() {
   const router = useRouter();
   const tableIdNum = parseInt(tableId as string, 10);
   const toast = useToast();
+  const { refreshTables } = useTableContext();
 
   const [table, setTable] = useState<any>(null);
   const [availableItems, setAvailableItems] = useState<MenuItem[]>([]);
@@ -554,6 +556,8 @@ export default function ItemsPaymentScreen() {
     [allOriginalItems]
   );
 
+  // Dans app/payment/items.tsx - Fonction handlePayment corrigée
+
   const handlePayment = useCallback(
     async (method: 'card' | 'cash' | 'check') => {
       if (selectedItems.length === 0) {
@@ -652,27 +656,44 @@ export default function ItemsPaymentScreen() {
         }, 0);
 
         if (updatedOrderItems.length === 0 || newTotal <= 0) {
+          // ✅ CORRECTION CRITIQUE : Réinitialisation complète et robuste
           await resetTable(tableIdNum);
 
-          const checkTable = await getTable(tableIdNum);
-          if (checkTable && (checkTable.order || checkTable.guests)) {
+          // ✅ Vérification immédiate avec nettoyage forcé si nécessaire
+          let verificationAttempts = 0;
+          let tableClean = false;
+
+          while (!tableClean && verificationAttempts < 3) {
+            const checkTable = await getTable(tableIdNum);
+
+            if (!checkTable || (!checkTable.order && !checkTable.guests)) {
+              tableClean = true;
+              break;
+            }
+
             console.warn(
-              'Table non correctement réinitialisée, forçage du nettoyage'
+              `Tentative ${
+                verificationAttempts + 1
+              } - Table non réinitialisée, forçage du nettoyage`
             );
 
-            await resetTable(tableIdNum);
+            // Nettoyage forcé plus agressif
+            const forcedCleanTable = {
+              ...checkTable,
+              status: 'available' as 'available',
+              guests: undefined,
+              order: undefined,
+            };
 
-            const verifyReset = await getTable(tableIdNum);
-            if (verifyReset && (verifyReset.order || verifyReset.guests)) {
-              const forcedCleanTable = {
-                ...verifyReset,
-                status: 'available' as 'available',
-                guests: undefined,
-                order: undefined,
-              };
-              await updateTable(forcedCleanTable);
-            }
+            await updateTable(forcedCleanTable);
+            verificationAttempts++;
+
+            // Petit délai pour laisser le temps à la base de se mettre à jour
+            await new Promise((resolve) => setTimeout(resolve, 50));
           }
+
+          // ✅ AJOUT MANQUANT : Rafraîchir le contexte des tables
+          await refreshTables();
 
           router.push('/');
           toast.showToast('Tous les articles ont été payés.', 'success');
@@ -687,6 +708,10 @@ export default function ItemsPaymentScreen() {
           };
 
           await updateTable(updatedTable);
+
+          // ✅ AJOUT : Rafraîchir aussi dans le cas partiel
+          await refreshTables();
+
           setSelectedItems([]);
           await loadTable();
 
@@ -716,6 +741,7 @@ export default function ItemsPaymentScreen() {
       loadTable,
       router,
       allOriginalItems,
+      refreshTables, // ✅ Ajout de la dépendance
     ]
   );
 

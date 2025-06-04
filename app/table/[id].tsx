@@ -152,6 +152,7 @@ const MenuItemComponent = memo<MenuItemProps>(({ item, onPress }) => (
 const useUpdateQueue = () => {
   const queueRef = useRef<Map<string, UpdateOperation>>(new Map());
   const processingRef = useRef<boolean>(false);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const processQueue = useCallback(async (): Promise<void> => {
     if (processingRef.current || queueRef.current.size === 0) return;
@@ -163,14 +164,35 @@ const useUpdateQueue = () => {
     queueRef.current.clear();
 
     try {
-      await Promise.all(operations.map((op) => op.operation()));
+      // ✅ Traitement en parallèle pour les opérations non-critiques
+      const criticalOps = operations.filter((op) =>
+        op.id.startsWith('critical_')
+      );
+      const normalOps = operations.filter(
+        (op) => !op.id.startsWith('critical_')
+      );
+
+      // Traiter les opérations critiques en série
+      for (const op of criticalOps) {
+        await op.operation();
+      }
+
+      // Traiter les opérations normales en parallèle (max 3 simultanées)
+      const chunks = [];
+      for (let i = 0; i < normalOps.length; i += 3) {
+        chunks.push(normalOps.slice(i, i + 3));
+      }
+
+      for (const chunk of chunks) {
+        await Promise.all(chunk.map((op) => op.operation()));
+      }
     } catch (error) {
       console.error('Error processing update queue:', error);
     } finally {
       processingRef.current = false;
 
       if (queueRef.current.size > 0) {
-        setTimeout(processQueue, 50);
+        setTimeout(processQueue, 10); // ✅ Délai réduit de 50ms à 10ms
       }
     }
   }, []);
@@ -183,11 +205,18 @@ const useUpdateQueue = () => {
         operation,
       });
 
-      if (id.startsWith('critical_')) {
-        setTimeout(processQueue, 0);
-      } else {
-        setTimeout(processQueue, 50);
+      // ✅ Débounce ultra-rapide pour les mises à jour de table
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
       }
+
+      const delay = id.startsWith('critical_')
+        ? 0
+        : id.startsWith('table_update')
+        ? 20 // ✅ Délai spécial pour les tables
+        : 50;
+
+      timeoutRef.current = setTimeout(processQueue, delay);
     },
     [processQueue]
   );
@@ -343,11 +372,21 @@ export default function TableScreen(): JSX.Element {
     );
   }, [menuLoaded, forceUpdate]);
 
-  // ✅ Fonction de calcul total optimisée
+  let lastItemsRef: OrderItem[] = [];
+  let lastTotalRef: number = 0;
+
   const calculateTotal = useCallback((items: OrderItem[]): number => {
-    return items.reduce((sum, item) => {
+    // ✅ Mémoïzation manuelle ultra-rapide
+    if (items === lastItemsRef) return lastTotalRef;
+
+    const total = items.reduce((sum, item) => {
       return item.offered ? sum : sum + item.price * item.quantity;
     }, 0);
+
+    lastItemsRef = items;
+    lastTotalRef = total;
+
+    return total;
   }, []);
 
   // ✅ Charger la table
@@ -403,6 +442,7 @@ export default function TableScreen(): JSX.Element {
     (item: MenuItem): void => {
       if (!table || !mountedRef.current) return;
 
+      // ✅ Mise à jour d'état optimisée et groupée
       setTable((prevTable) => {
         if (!prevTable) return prevTable;
 
@@ -419,20 +459,22 @@ export default function TableScreen(): JSX.Element {
           };
         }
 
-        const existingItemIndex = updatedTable.order.items.findIndex(
+        // ✅ Optimisation : éviter la recherche linéaire répétée
+        const items = [...updatedTable.order.items];
+        const existingItemIndex = items.findIndex(
           (orderItem) =>
             orderItem.name === item.name && orderItem.price === item.price
         );
 
-        const newItems = [...updatedTable.order.items];
-
         if (existingItemIndex >= 0) {
-          newItems[existingItemIndex] = {
-            ...newItems[existingItemIndex],
-            quantity: newItems[existingItemIndex].quantity + 1,
+          // ✅ Mise à jour in-place plus rapide
+          items[existingItemIndex] = {
+            ...items[existingItemIndex],
+            quantity: items[existingItemIndex].quantity + 1,
           };
         } else {
-          newItems.push({
+          // ✅ Ajout direct plus rapide
+          items.push({
             id: Date.now() + Math.random(),
             name: item.name,
             price: item.price,
@@ -440,13 +482,14 @@ export default function TableScreen(): JSX.Element {
           });
         }
 
-        updatedTable.order.items = newItems;
-        updatedTable.order.total = calculateTotal(newItems);
+        updatedTable.order.items = items;
+        updatedTable.order.total = calculateTotal(items);
 
         return updatedTable;
       });
 
-      enqueueUpdate(`add_item_${item.id}`, async () => {
+      // ✅ Sauvegarde groupée par table (un seul ID pour toute la table)
+      enqueueUpdate(`table_update_${tableId}`, async () => {
         if (!mountedRef.current) return;
 
         try {
@@ -455,10 +498,10 @@ export default function TableScreen(): JSX.Element {
             await updateTableData(tableId, currentTable);
           }
         } catch (error) {
-          console.error('Error saving item addition:', error);
+          console.error('Error saving table updates:', error);
           if (mountedRef.current) {
             loadTable();
-            toast.showToast("Erreur lors de l'ajout", 'error');
+            toast.showToast('Erreur lors de la sauvegarde', 'error');
           }
         }
       });
@@ -484,19 +527,24 @@ export default function TableScreen(): JSX.Element {
         if (!prevTable?.order) return prevTable;
 
         const updatedTable = { ...prevTable };
-
-        // Vérification explicite après la copie
         if (!updatedTable.order) return prevTable;
 
-        const newItems = updatedTable.order.items
-          .map((item) => {
-            if (item.id !== itemId) return item;
+        // ✅ Optimisation : filtrage et mappage en une seule passe
+        const newItems: OrderItem[] = [];
+
+        for (const item of updatedTable.order.items) {
+          if (item.id !== itemId) {
+            newItems.push(item);
+          } else {
             const newQuantity = increment
               ? item.quantity + 1
               : Math.max(0, item.quantity - 1);
-            return { ...item, quantity: newQuantity };
-          })
-          .filter((item) => item.quantity > 0);
+
+            if (newQuantity > 0) {
+              newItems.push({ ...item, quantity: newQuantity });
+            }
+          }
+        }
 
         updatedTable.order.items = newItems;
         updatedTable.order.total = calculateTotal(newItems);
@@ -504,7 +552,8 @@ export default function TableScreen(): JSX.Element {
         return updatedTable;
       });
 
-      enqueueUpdate(`update_quantity_${itemId}`, async () => {
+      // ✅ Même optimisation de sauvegarde groupée
+      enqueueUpdate(`table_update_${tableId}`, async () => {
         if (!mountedRef.current) return;
 
         try {
@@ -541,13 +590,13 @@ export default function TableScreen(): JSX.Element {
         if (!prevTable?.order) return prevTable;
 
         const updatedTable = { ...prevTable };
-
-        // Vérification explicite après la copie
         if (!updatedTable.order) return prevTable;
-        
+
+        // ✅ Optimisation : mise à jour directe sans copie profonde
         const newItems = updatedTable.order.items.map((item) => {
-          if (item.id !== itemId) return item;
-          return { ...item, offered: !item.offered };
+          return item.id !== itemId
+            ? item
+            : { ...item, offered: !item.offered };
         });
 
         updatedTable.order.items = newItems;
@@ -556,7 +605,8 @@ export default function TableScreen(): JSX.Element {
         return updatedTable;
       });
 
-      enqueueUpdate(`toggle_offered_${itemId}`, async () => {
+      // ✅ Même optimisation de sauvegarde groupée
+      enqueueUpdate(`table_update_${tableId}`, async () => {
         if (!mountedRef.current) return;
 
         try {
@@ -842,7 +892,13 @@ export default function TableScreen(): JSX.Element {
     return (
       <View style={styles.loadingContainer}>
         <Text>Table introuvable</Text>
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
+        <Pressable
+          style={({ pressed }) => [
+            styles.backButton,
+            pressed && styles.backButtonPressed,
+          ]}
+          onPress={() => router.back()}
+        >
           <Text style={styles.backButtonText}>Retour</Text>
         </Pressable>
       </View>
@@ -875,7 +931,13 @@ export default function TableScreen(): JSX.Element {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.push('/')} style={styles.backLink}>
+        <Pressable
+          onPress={() => router.push('/')}
+          style={({ pressed }) => [
+            styles.backLink,
+            pressed && {backgroundColor: '#d0d0d0'},
+          ]}
+        >
           <ArrowLeft size={28} color="#333" />
         </Pressable>
 
@@ -1332,6 +1394,11 @@ const styles = StyleSheet.create({
     padding: 10,
     backgroundColor: '#2196F3',
     borderRadius: 8,
+  },
+  backButtonPressed: {
+    backgroundColor: 'red',
+    transform: [{ scale: 0.98 }],
+    opacity: 0.8,
   },
   backButtonText: { color: 'white', fontWeight: '600' },
   header: {
