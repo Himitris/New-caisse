@@ -1,3 +1,4 @@
+// utils/TableContext.tsx
 import React, {
   createContext,
   ReactNode,
@@ -18,48 +19,87 @@ interface TableContextType {
     updatedData: Partial<Table>
   ) => Promise<void>;
   getTableById: (id: number) => Table | undefined;
-  clearCache: () => void; // 🆕 Fonction de nettoyage
+  clearCache: () => void;
 }
 
 const TableContext = createContext<TableContextType | undefined>(undefined);
 
-// Cache avec limite automatique
-const MAX_CACHE_SIZE = 50; // Limite le nombre de tables en cache
-let tableCache = new Map<number, Table>();
+// ✅ Cache avec limite stricte et TTL automatique
+const MAX_CACHE_SIZE = 20; // RÉDUIT de 50 à 20
+const CACHE_TTL = 2 * 60 * 1000; // 2 minutes au lieu de 5
+const CLEANUP_INTERVAL = 30 * 1000; // Nettoyage toutes les 30 secondes
+
+interface CacheEntry {
+  table: Table;
+  timestamp: number;
+}
+
+let tableCache = new Map<number, CacheEntry>();
 
 export const TableProvider = ({ children }: { children: ReactNode }) => {
   const [tables, setTables] = useState<Table[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const lastCleanup = useRef(Date.now());
+  const cleanupIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(true);
 
-  // Nettoyage automatique du cache toutes les 5 minutes
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (!mountedRef.current) return;
+  // ✅ Nettoyage automatique agressif du cache
+  const cleanupCache = useCallback(() => {
+    if (!mountedRef.current) return;
 
-      const now = Date.now();
-      // Nettoyer le cache toutes les 5 minutes
-      if (now - lastCleanup.current > 5 * 60 * 1000) {
-        console.log('🧹 Nettoyage automatique du cache');
-        tableCache.clear();
-        lastCleanup.current = now;
+    const now = Date.now();
+    const keysToDelete: number[] = [];
 
-        // Forcer le garbage collection si possible
-        if (global.gc) {
-          global.gc();
-        }
+    // Supprimer les entrées expirées
+    tableCache.forEach((entry, key) => {
+      if (now - entry.timestamp > CACHE_TTL) {
+        keysToDelete.push(key);
       }
-    }, 60000); // Vérifier chaque minute
+    });
 
-    return () => {
-      clearInterval(interval);
-      mountedRef.current = false;
-    };
+    keysToDelete.forEach((key) => tableCache.delete(key));
+
+    // Si le cache est encore trop grand, supprimer les plus anciennes
+    if (tableCache.size > MAX_CACHE_SIZE) {
+      const sortedEntries = Array.from(tableCache.entries()).sort(
+        (a, b) => a[1].timestamp - b[1].timestamp
+      );
+
+      const toDelete = sortedEntries.slice(0, tableCache.size - MAX_CACHE_SIZE);
+      toDelete.forEach(([key]) => tableCache.delete(key));
+    }
+
+    // Force garbage collection si disponible
+    if (global.gc && keysToDelete.length > 0) {
+      try {
+        global.gc();
+      } catch {}
+    }
+
+    console.log(
+      `🧹 Cache nettoyé: ${keysToDelete.length} entrées supprimées, taille: ${tableCache.size}`
+    );
   }, []);
 
-  // Fonction simple pour charger toutes les tables
+  // ✅ Setup du nettoyage automatique
+  useEffect(() => {
+    // Nettoyage immédiat puis périodique
+    cleanupCache();
+    cleanupIntervalRef.current = setInterval(cleanupCache, CLEANUP_INTERVAL);
+
+    return () => {
+      mountedRef.current = false;
+      if (cleanupIntervalRef.current) {
+        clearInterval(cleanupIntervalRef.current);
+      }
+      // Vider tout le cache à la destruction
+      tableCache.clear();
+    };
+  }, [cleanupCache]);
+
+  // ✅ Fonction de chargement simplifiée
   const loadTables = useCallback(async () => {
+    if (!mountedRef.current) return;
+
     try {
       const loadedTables = await getTables();
 
@@ -67,18 +107,15 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
 
       setTables(loadedTables);
 
-      // Mettre à jour le cache avec limite
+      // Mettre à jour le cache avec TTL
+      const now = Date.now();
       loadedTables.forEach((table) => {
-        tableCache.set(table.id, table);
+        tableCache.set(table.id, { table, timestamp: now });
       });
 
-      // Limiter la taille du cache
+      // Nettoyer immédiatement si nécessaire
       if (tableCache.size > MAX_CACHE_SIZE) {
-        const keysToDelete = Array.from(tableCache.keys()).slice(
-          0,
-          tableCache.size - MAX_CACHE_SIZE
-        );
-        keysToDelete.forEach((key) => tableCache.delete(key));
+        cleanupCache();
       }
     } catch (error) {
       console.error('Error loading tables:', error);
@@ -87,39 +124,43 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
         setIsLoading(false);
       }
     }
-  }, []);
+  }, [cleanupCache]);
 
-  // Fonction publique pour rafraîchir les tables
   const refreshTables = useCallback(async () => {
     if (!mountedRef.current) return;
     setIsLoading(true);
     await loadTables();
   }, [loadTables]);
 
-  // Fonction pour mettre à jour une table spécifique
+  // ✅ Mise à jour optimisée avec cache TTL
   const updateTableData = useCallback(
     async (tableId: number, updatedData: Partial<Table>) => {
-      try {
-        // Récupérer depuis le cache d'abord
-        let currentTable = tableCache.get(tableId);
+      if (!mountedRef.current) return;
 
-        // Si pas en cache, charger depuis storage
-        if (!currentTable) {
-          const fetchedTable = await getTable(tableId);
-          if (!fetchedTable) return;
-          currentTable = fetchedTable;
+      try {
+        // Récupérer depuis le cache d'abord (avec vérification TTL)
+        const cachedEntry = tableCache.get(tableId);
+        const now = Date.now();
+
+        let currentTable: Table | null = null;
+
+        if (cachedEntry && now - cachedEntry.timestamp < CACHE_TTL) {
+          currentTable = cachedEntry.table;
+        } else {
+          // Cache expiré ou absent, charger depuis storage
+          currentTable = await getTable(tableId);
+          if (!currentTable) return;
         }
 
-        // Créer la table mise à jour
         const updatedTable = { ...currentTable, ...updatedData };
 
-        // Sauvegarder dans le storage
+        // Sauvegarder
         await updateTable(updatedTable);
 
         if (!mountedRef.current) return;
 
-        // Mettre à jour le cache
-        tableCache.set(tableId, updatedTable);
+        // Mettre à jour le cache avec nouvelle timestamp
+        tableCache.set(tableId, { table: updatedTable, timestamp: now });
 
         // Mettre à jour l'état local
         setTables((prevTables) =>
@@ -135,12 +176,16 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
     []
   );
 
-  // Fonction pour obtenir une table par ID (depuis le cache d'abord)
+  // ✅ Getter optimisé avec cache TTL
   const getTableById = useCallback(
     (id: number) => {
-      // D'abord vérifier le cache
-      const cachedTable = tableCache.get(id);
-      if (cachedTable) return cachedTable;
+      // Vérifier le cache d'abord
+      const cachedEntry = tableCache.get(id);
+      const now = Date.now();
+
+      if (cachedEntry && now - cachedEntry.timestamp < CACHE_TTL) {
+        return cachedEntry.table;
+      }
 
       // Sinon chercher dans l'état local
       return tables.find((table) => table.id === id);
@@ -148,18 +193,19 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
     [tables]
   );
 
-  // Fonction de nettoyage manuel
+  // ✅ Nettoyage manuel amélioré
   const clearCache = useCallback(() => {
-    console.log('🧹 Nettoyage manuel du cache');
+    console.log('🧹 Nettoyage manuel complet du cache');
     tableCache.clear();
-    lastCleanup.current = Date.now();
 
     if (global.gc) {
-      global.gc();
+      try {
+        global.gc();
+      } catch {}
     }
   }, []);
 
-  // Charger les tables au démarrage
+  // Charger les données au démarrage
   useEffect(() => {
     loadTables();
   }, [loadTables]);

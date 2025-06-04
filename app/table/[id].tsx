@@ -1,5 +1,4 @@
-// app/table/[id].tsx - Version COMPLÈTE optimisée anti-fuite mémoire
-
+// app/table/[id].tsx - VERSION TYPESCRIPT ULTRA-FLUIDE
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ArrowLeft,
@@ -13,7 +12,17 @@ import {
   Users,
   X,
 } from 'lucide-react-native';
-import { memo, useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useRef,
+  startTransition,
+  useDeferredValue,
+  JSX,
+} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -39,34 +48,7 @@ import { useTableContext } from '../../utils/TableContext';
 import { useToast } from '../../utils/ToastContext';
 import SplitSelectionModal from '../components/SplitSelectionModal';
 
-// Hook de nettoyage mémoire - À ajouter dans utils/useMemoryCleanup.ts
-const useMemoryCleanup = () => {
-  const cleanupFuncs = useRef<(() => void)[]>([]);
-  const isMountedRef = useRef(true);
-
-  const addCleanup = useCallback((cleanupFunc: () => void) => {
-    cleanupFuncs.current.push(cleanupFunc);
-  }, []);
-
-  const isStillMounted = useCallback(() => isMountedRef.current, []);
-
-  useEffect(() => {
-    return () => {
-      isMountedRef.current = false;
-      cleanupFuncs.current.forEach((cleanup) => {
-        try {
-          cleanup();
-        } catch (error) {
-          console.warn('Cleanup error:', error);
-        }
-      });
-      cleanupFuncs.current = [];
-    };
-  }, []);
-
-  return { addCleanup, isStillMounted };
-};
-
+// ✅ Types TypeScript
 interface MenuItem {
   id: number;
   name: string;
@@ -76,8 +58,14 @@ interface MenuItem {
   color: string;
 }
 
-// Couleurs des catégories
-const CATEGORY_COLORS: { [key: string]: string } = {
+interface UpdateOperation {
+  id: string;
+  timestamp: number;
+  operation: () => Promise<void>;
+}
+
+// ✅ Constantes typées
+const CATEGORY_COLORS: Record<string, string> = {
   'Plats Principaux': '#FF9800',
   'Plats Maxi': '#F44336',
   Salades: '#4CAF50',
@@ -90,15 +78,23 @@ const CATEGORY_COLORS: { [key: string]: string } = {
   Vins: '#9C27B0',
   Alcools: '#673AB7',
   Glaces: '#00BCD4',
-};
+} as const;
 
-// Fonction de catégorisation simplifiée
+// ✅ Cache optimisé avec types
+let menuItemsCache: Map<number, MenuItem> = new Map();
+let menuCacheArray: MenuItem[] = [];
+let unavailableItemsSet: Set<number> = new Set();
+let menuCacheLoaded = false;
+
+// ✅ Callbacks pour notifier les composants du chargement
+const menuLoadCallbacks: Set<() => void> = new Set();
+
+// ✅ Fonction utilitaire typée
 const getCategoryFromName = (
   name: string,
   type: 'resto' | 'boisson'
 ): string => {
   const lowerName = name.toLowerCase();
-
   if (type === 'resto') {
     if (lowerName.includes('salade')) return 'Salades';
     if (lowerName.includes('dessert')) return 'Desserts';
@@ -135,407 +131,546 @@ const getCategoryFromName = (
   }
 };
 
-// Composant MenuItem mémoïzé
-const MenuItemComponent = memo(
-  ({ item, onPress }: { item: MenuItem; onPress: () => void }) => (
-    <Pressable
-      style={[styles.menuItem, { borderLeftColor: item.color }]}
-      onPress={onPress}
-    >
-      <Text style={styles.menuItemName}>{item.name}</Text>
-      <Text style={styles.menuItemPrice}>{item.price.toFixed(2)} €</Text>
-    </Pressable>
-  )
-);
+// ✅ Composant MenuItem typé et optimisé
+interface MenuItemProps {
+  item: MenuItem;
+  onPress: () => void;
+}
 
-export default function TableScreen() {
-  const { id } = useLocalSearchParams();
-  const tableId = parseInt(id as string, 10);
-  const router = useRouter();
-  const toast = useToast();
-  const { refreshTables, getTableById, updateTableData } = useTableContext();
+const MenuItemComponent = memo<MenuItemProps>(({ item, onPress }) => (
+  <Pressable
+    style={[styles.menuItem, { borderLeftColor: item.color }]}
+    onPress={onPress}
+    android_ripple={{ color: 'rgba(0,0,0,0.1)' }}
+  >
+    <Text style={styles.menuItemName}>{item.name}</Text>
+    <Text style={styles.menuItemPrice}>{item.price.toFixed(2)} €</Text>
+  </Pressable>
+));
 
-  // 🆕 Hook de nettoyage mémoire
-  const { addCleanup, isStillMounted } = useMemoryCleanup();
+// ✅ Hook pour la queue d'updates typé
+const useUpdateQueue = () => {
+  const queueRef = useRef<Map<string, UpdateOperation>>(new Map());
+  const processingRef = useRef<boolean>(false);
 
-  // États locaux MINIMISÉS - éviter l'accumulation
-  const [table, setTable] = useState<Table | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [guestCount, setGuestCount] = useState(1);
-  const [menuItems, setMenuItems] = useState<MenuItem[]>([]);
-  const [unavailableItems, setUnavailableItems] = useState<number[]>([]);
-  const [activeCategory, setActiveCategory] = useState<string | null>(null);
-  const [activeType, setActiveType] = useState<'resto' | 'boisson' | null>(
-    'resto'
-  );
-  const [splitModalVisible, setSplitModalVisible] = useState(false);
+  const processQueue = useCallback(async (): Promise<void> => {
+    if (processingRef.current || queueRef.current.size === 0) return;
 
-  // Refs pour éviter les re-créations et fuites
-  const updateTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isUpdatingRef = useRef(false);
-  const lastTableIdRef = useRef<number | null>(null);
+    processingRef.current = true;
+    const operations = Array.from(queueRef.current.values()).sort(
+      (a, b) => a.timestamp - b.timestamp
+    );
+    queueRef.current.clear();
 
-  // Charger les données du menu UNE SEULE FOIS - pas de recharge
-  const loadMenuData = async () => {
     try {
-      const [customItems, menuAvailability] = await Promise.all([
-        getCustomMenuItems(),
-        getMenuAvailability(),
-      ]);
+      await Promise.all(operations.map((op) => op.operation()));
+    } catch (error) {
+      console.error('Error processing update queue:', error);
+    } finally {
+      processingRef.current = false;
 
-      // Créer les items du menu standard
-      const standardItems = priceData.map((item) => {
-        const category = getCategoryFromName(
-          item.name,
-          item.type as 'resto' | 'boisson'
-        );
-        return {
-          id: item.id,
-          name: item.name,
-          price: item.price,
-          category,
-          type: item.type as 'resto' | 'boisson',
-          color: CATEGORY_COLORS[category] || '#757575',
-        };
+      if (queueRef.current.size > 0) {
+        setTimeout(processQueue, 50);
+      }
+    }
+  }, []);
+
+  const enqueueUpdate = useCallback(
+    (id: string, operation: () => Promise<void>): void => {
+      queueRef.current.set(id, {
+        id,
+        timestamp: Date.now(),
+        operation,
       });
 
-      // Ajouter les items personnalisés
-      const customMenuItems = customItems.map((item) => ({
+      if (id.startsWith('critical_')) {
+        setTimeout(processQueue, 0);
+      } else {
+        setTimeout(processQueue, 50);
+      }
+    },
+    [processQueue]
+  );
+
+  return { enqueueUpdate };
+};
+
+// ✅ Hook pour écouter le chargement du menu
+const useMenuLoader = () => {
+  const [menuLoaded, setMenuLoaded] = useState<boolean>(menuCacheLoaded);
+  const [forceUpdate, setForceUpdate] = useState<number>(0);
+
+  useEffect(() => {
+    if (menuCacheLoaded) {
+      setMenuLoaded(true);
+      return;
+    }
+
+    // ✅ Callback pour être notifié quand le menu est chargé
+    const callback = () => {
+      console.log('🔄 Menu chargé - Forcing component update');
+      setMenuLoaded(true);
+      setForceUpdate((prev) => prev + 1); // Force le re-render
+    };
+
+    menuLoadCallbacks.add(callback);
+
+    return () => {
+      menuLoadCallbacks.delete(callback);
+    };
+  }, []);
+
+  return { menuLoaded, forceUpdate };
+};
+
+// ✅ Fonction de chargement du menu avec notification
+const loadMenuDataOnce = async (): Promise<void> => {
+  if (menuCacheLoaded) {
+    // Si déjà chargé, notifier quand même les nouveaux composants
+    setTimeout(() => {
+      menuLoadCallbacks.forEach((callback) => callback());
+    }, 0);
+    return;
+  }
+
+  try {
+    console.log('📦 Début du chargement du menu...');
+
+    const [customItems, menuAvailability] = await Promise.all([
+      getCustomMenuItems(),
+      getMenuAvailability(),
+    ]);
+
+    const standardItems: MenuItem[] = priceData.map((item: any) => {
+      const category = getCategoryFromName(
+        item.name,
+        item.type as 'resto' | 'boisson'
+      );
+      return {
+        id: item.id,
+        name: item.name,
+        price: item.price,
+        category,
+        type: item.type as 'resto' | 'boisson',
+        color: CATEGORY_COLORS[category] || '#757575',
+      };
+    });
+
+    const customMenuItems: MenuItem[] = customItems.map(
+      (item: CustomMenuItem) => ({
         id: item.id,
         name: item.name,
         price: item.price,
         category: item.category,
         type: item.type,
         color: CATEGORY_COLORS[item.category] || '#757575',
-      }));
+      })
+    );
 
-      const allMenuItems = [...standardItems, ...customMenuItems];
+    const allItems = [...standardItems, ...customMenuItems];
 
-      // Définir les items indisponibles
-      const unavailable = menuAvailability
-        .filter((item) => !item.available)
-        .map((item) => item.id);
+    // Optimisation : utiliser Map pour accès O(1)
+    menuItemsCache.clear();
+    allItems.forEach((item) => menuItemsCache.set(item.id, item));
+    menuCacheArray = allItems;
 
-      if (isStillMounted()) {
-        setMenuItems(allMenuItems);
-        setUnavailableItems(unavailable);
-      }
-    } catch (error) {
-      console.error('Error loading menu data:', error);
-    }
-  };
+    // Set pour vérifications O(1)
+    unavailableItemsSet = new Set(
+      menuAvailability
+        .filter((item: any) => !item.available)
+        .map((item: any) => item.id)
+    );
 
-  // Charger SEULEMENT la table - optimisé avec cache du contexte
-  const loadTable = async () => {
-    if (!isStillMounted()) return;
+    menuCacheLoaded = true;
+
+    console.log(`✅ Menu chargé en cache: ${allItems.length} items`);
+    console.log('📋 Categories disponibles:', [
+      ...new Set(allItems.map((item) => item.category)),
+    ]);
+
+    // ✅ Notifier tous les composants en attente
+    setTimeout(() => {
+      console.log(`🔔 Notification de ${menuLoadCallbacks.size} composant(s)`);
+      menuLoadCallbacks.forEach((callback) => callback());
+    }, 0);
+  } catch (error) {
+    console.error('❌ Error loading menu data:', error);
+  }
+};
+
+export default function TableScreen(): JSX.Element {
+  const { id } = useLocalSearchParams();
+  const tableId = parseInt(id as string, 10);
+  const router = useRouter();
+  const toast = useToast();
+  const { refreshTables, getTableById, updateTableData } = useTableContext();
+  const { enqueueUpdate } = useUpdateQueue();
+  const { menuLoaded, forceUpdate } = useMenuLoader();
+
+  // ✅ États typés
+  const [table, setTable] = useState<Table | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [guestCount, setGuestCount] = useState<number>(1);
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [activeType, setActiveType] = useState<'resto' | 'boisson' | null>(
+    'resto'
+  );
+  const [splitModalVisible, setSplitModalVisible] = useState<boolean>(false);
+
+  // ✅ État différé pour les calculs coûteux
+  const deferredTable = useDeferredValue(table);
+
+  // ✅ Refs typés
+  const mountedRef = useRef<boolean>(true);
+
+  // ✅ Nettoyage
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // ✅ Chargement du menu au démarrage
+  useEffect(() => {
+    console.log('🚀 Initialisation du chargement du menu');
+    loadMenuDataOnce();
+  }, []);
+
+  // ✅ Log pour debug
+  useEffect(() => {
+    console.log(
+      `📊 État menu: loaded=${menuLoaded}, items=${menuCacheArray.length}, forceUpdate=${forceUpdate}`
+    );
+  }, [menuLoaded, forceUpdate]);
+
+  // ✅ Fonction de calcul total optimisée
+  const calculateTotal = useCallback((items: OrderItem[]): number => {
+    return items.reduce((sum, item) => {
+      return item.offered ? sum : sum + item.price * item.quantity;
+    }, 0);
+  }, []);
+
+  // ✅ Charger la table
+  const loadTable = useCallback(async (): Promise<void> => {
+    if (!mountedRef.current) return;
 
     try {
-      // D'abord essayer depuis le contexte (plus rapide)
       let tableData = getTableById(tableId);
-
-      // Si pas trouvé dans le contexte, charger depuis storage
       if (!tableData) {
         const loadedTable = await getTable(tableId);
-        tableData = loadedTable === null ? undefined : loadedTable;
+        tableData = loadedTable || undefined;
       }
 
-      if (tableData && isStillMounted()) {
+      if (tableData && mountedRef.current) {
         setTable(tableData);
         setGuestCount(tableData.guests || 1);
       }
     } catch (error) {
       console.error('Error loading table:', error);
     } finally {
-      if (isStillMounted()) {
+      if (mountedRef.current) {
         setLoading(false);
       }
     }
-  };
+  }, [tableId, getTableById]);
 
-  // Charger les données au démarrage - OPTIMISÉ
   useEffect(() => {
-    // Éviter de recharger si c'est la même table
-    if (lastTableIdRef.current === tableId) {
-      setLoading(false);
-      return;
-    }
+    loadTable();
+  }, [loadTable]);
 
-    lastTableIdRef.current = tableId;
-
-    const initializeData = async () => {
-      setLoading(true);
-
-      // Charger en parallèle seulement si nécessaire
-      const promises = [loadTable()];
-
-      // Charger le menu seulement si pas encore chargé
-      if (menuItems.length === 0) {
-        promises.push(loadMenuData());
-      }
-
-      await Promise.all(promises);
-
-      if (isStillMounted()) {
-        setLoading(false);
-      }
-    };
-
-    initializeData();
-  }, [tableId]); // SEULEMENT tableId en dépendance
-
-  // Rafraîchir SEULEMENT la table quand on revient
   useFocusEffect(
     useCallback(() => {
-      // Seulement si on revient sur la même table et qu'on n'est pas en train de charger
-      if (lastTableIdRef.current === tableId && !loading) {
+      if (!loading) {
         loadTable();
       }
-    }, [tableId, loading])
+    }, [loading, loadTable])
   );
 
-  // Nettoyage des timeouts
-  useEffect(() => {
-    addCleanup(() => {
-      if (updateTimeoutRef.current) {
-        clearTimeout(updateTimeoutRef.current);
-        updateTimeoutRef.current = null;
-      }
-      isUpdatingRef.current = false;
-    });
-  }, [addCleanup]);
-
-  // Gérer le bouton retour - OPTIMISÉ
+  // ✅ Gestion bouton retour
   useEffect(() => {
     const backHandler = BackHandler.addEventListener(
       'hardwareBackPress',
       () => {
-        // Nettoyer l'état si nécessaire
-        lastTableIdRef.current = null;
         router.push('/');
         return true;
       }
     );
-
-    return () => {
-      backHandler.remove();
-    };
+    return () => backHandler.remove();
   }, [router]);
 
-  // Fonction de calcul de total SIMPLE - pas de useCallback
-  const calculateTotal = (items: OrderItem[]): number => {
-    return items.reduce((sum, item) => {
-      if (!item.offered) {
-        return sum + item.price * item.quantity;
-      }
-      return sum;
-    }, 0);
-  };
+  // ✅ Handlers d'actions typés
+  const addItemToOrder = useCallback(
+    (item: MenuItem): void => {
+      if (!table || !mountedRef.current) return;
 
-  // Ajouter un article à la commande - OPTIMISÉ sans useCallback complexe
-  const addItemToOrder = async (item: MenuItem) => {
-    if (!table || !isStillMounted() || isUpdatingRef.current) return;
+      setTable((prevTable) => {
+        if (!prevTable) return prevTable;
 
-    isUpdatingRef.current = true;
+        const updatedTable = { ...prevTable };
 
-    try {
-      const updatedTable = { ...table };
-
-      if (!updatedTable.order) {
-        updatedTable.order = {
-          id: Date.now(),
-          items: [],
-          guests: guestCount,
-          status: 'active',
-          timestamp: new Date().toISOString(),
-          total: 0,
-        };
-      }
-
-      const existingItemIndex = updatedTable.order.items.findIndex(
-        (orderItem) =>
-          orderItem.name === item.name && orderItem.price === item.price
-      );
-
-      if (existingItemIndex >= 0) {
-        updatedTable.order.items[existingItemIndex].quantity += 1;
-      } else {
-        updatedTable.order.items.push({
-          id: Date.now() + Math.random(),
-          name: item.name,
-          price: item.price,
-          quantity: 1,
-        });
-      }
-
-      updatedTable.order.total = calculateTotal(updatedTable.order.items);
-
-      // Mise à jour optimiste IMMÉDIATE
-      setTable(updatedTable);
-
-      // Debounce pour éviter trop d'updates
-      if (updateTimeoutRef.current) {
-        clearTimeout(updateTimeoutRef.current);
-      }
-
-      updateTimeoutRef.current = setTimeout(async () => {
-        if (isStillMounted()) {
-          try {
-            await updateTableData(tableId, updatedTable);
-          } catch (error) {
-            console.error('Error saving table:', error);
-            // Recharger en cas d'erreur
-            await loadTable();
-            toast.showToast("Erreur lors de l'ajout de l'article", 'error');
-          }
+        if (!updatedTable.order) {
+          updatedTable.order = {
+            id: Date.now(),
+            items: [],
+            guests: guestCount,
+            status: 'active',
+            timestamp: new Date().toISOString(),
+            total: 0,
+          };
         }
-        isUpdatingRef.current = false;
-      }, 500); // Attendre 500ms avant de sauvegarder
-    } catch (error) {
-      console.error('Error adding item to order:', error);
-      isUpdatingRef.current = false;
-      toast.showToast("Erreur lors de l'ajout de l'article", 'error');
-    }
-  };
 
-  // Mettre à jour la quantité d'un article - OPTIMISÉ
-  const updateItemQuantity = async (itemId: number, increment: boolean) => {
-    if (!table || !table.order || !isStillMounted() || isUpdatingRef.current)
-      return;
+        const existingItemIndex = updatedTable.order.items.findIndex(
+          (orderItem) =>
+            orderItem.name === item.name && orderItem.price === item.price
+        );
 
-    isUpdatingRef.current = true;
+        const newItems = [...updatedTable.order.items];
 
-    try {
-      const updatedTable = { ...table };
-      if (!updatedTable.order) return;
-
-      const updatedItems = updatedTable.order.items
-        .map((item) => {
-          if (item.id !== itemId) return item;
-          const newQuantity = increment
-            ? item.quantity + 1
-            : Math.max(0, item.quantity - 1);
-          return { ...item, quantity: newQuantity };
-        })
-        .filter((item) => item.quantity > 0);
-
-      updatedTable.order.items = updatedItems;
-      updatedTable.order.total = calculateTotal(updatedItems);
-
-      // Mise à jour optimiste
-      setTable(updatedTable);
-
-      // Debounce update
-      if (updateTimeoutRef.current) {
-        clearTimeout(updateTimeoutRef.current);
-      }
-
-      updateTimeoutRef.current = setTimeout(async () => {
-        if (isStillMounted()) {
-          try {
-            await updateTableData(tableId, updatedTable);
-          } catch (error) {
-            console.error('Error updating item quantity:', error);
-            await loadTable();
-            toast.showToast('Erreur lors de la mise à jour', 'error');
-          }
+        if (existingItemIndex >= 0) {
+          newItems[existingItemIndex] = {
+            ...newItems[existingItemIndex],
+            quantity: newItems[existingItemIndex].quantity + 1,
+          };
+        } else {
+          newItems.push({
+            id: Date.now() + Math.random(),
+            name: item.name,
+            price: item.price,
+            quantity: 1,
+          });
         }
-        isUpdatingRef.current = false;
-      }, 500);
-    } catch (error) {
-      console.error('Error updating item quantity:', error);
-      isUpdatingRef.current = false;
-      toast.showToast('Erreur lors de la mise à jour', 'error');
-    }
-  };
 
-  // Basculer l'état offert d'un article - OPTIMISÉ
-  const toggleItemOffered = async (itemId: number) => {
-    if (!table || !table.order || !isStillMounted() || isUpdatingRef.current)
-      return;
+        updatedTable.order.items = newItems;
+        updatedTable.order.total = calculateTotal(newItems);
 
-    isUpdatingRef.current = true;
-
-    try {
-      const updatedTable = { ...table };
-      if (!updatedTable.order) return;
-
-      const updatedItems = updatedTable.order.items.map((item) => {
-        if (item.id !== itemId) return item;
-        return { ...item, offered: !item.offered };
+        return updatedTable;
       });
 
-      updatedTable.order.items = updatedItems;
-      updatedTable.order.total = calculateTotal(updatedItems);
+      enqueueUpdate(`add_item_${item.id}`, async () => {
+        if (!mountedRef.current) return;
 
-      // Mise à jour optimiste
-      setTable(updatedTable);
+        try {
+          const currentTable = getTableById(tableId);
+          if (currentTable) {
+            await updateTableData(tableId, currentTable);
+          }
+        } catch (error) {
+          console.error('Error saving item addition:', error);
+          if (mountedRef.current) {
+            loadTable();
+            toast.showToast("Erreur lors de l'ajout", 'error');
+          }
+        }
+      });
+    },
+    [
+      table,
+      guestCount,
+      tableId,
+      enqueueUpdate,
+      updateTableData,
+      getTableById,
+      loadTable,
+      toast,
+      calculateTotal,
+    ]
+  );
 
-      // Debounce update
-      if (updateTimeoutRef.current) {
-        clearTimeout(updateTimeoutRef.current);
-      }
+  const updateItemQuantity = useCallback(
+    (itemId: number, increment: boolean): void => {
+      if (!table?.order || !mountedRef.current) return;
 
-      updateTimeoutRef.current = setTimeout(async () => {
-        if (isStillMounted()) {
-          try {
-            await updateTableData(tableId, updatedTable);
-          } catch (error) {
-            console.error('Error toggling item offered:', error);
-            await loadTable();
+      setTable((prevTable) => {
+        if (!prevTable?.order) return prevTable;
+
+        const updatedTable = { ...prevTable };
+
+        // Vérification explicite après la copie
+        if (!updatedTable.order) return prevTable;
+
+        const newItems = updatedTable.order.items
+          .map((item) => {
+            if (item.id !== itemId) return item;
+            const newQuantity = increment
+              ? item.quantity + 1
+              : Math.max(0, item.quantity - 1);
+            return { ...item, quantity: newQuantity };
+          })
+          .filter((item) => item.quantity > 0);
+
+        updatedTable.order.items = newItems;
+        updatedTable.order.total = calculateTotal(newItems);
+
+        return updatedTable;
+      });
+
+      enqueueUpdate(`update_quantity_${itemId}`, async () => {
+        if (!mountedRef.current) return;
+
+        try {
+          const currentTable = getTableById(tableId);
+          if (currentTable) {
+            await updateTableData(tableId, currentTable);
+          }
+        } catch (error) {
+          console.error('Error updating quantity:', error);
+          if (mountedRef.current) {
+            loadTable();
             toast.showToast('Erreur lors de la mise à jour', 'error');
           }
         }
-        isUpdatingRef.current = false;
-      }, 500);
-    } catch (error) {
-      console.error('Error toggling item offered:', error);
-      isUpdatingRef.current = false;
-      toast.showToast('Erreur lors de la mise à jour', 'error');
-    }
-  };
+      });
+    },
+    [
+      table?.order,
+      tableId,
+      enqueueUpdate,
+      updateTableData,
+      getTableById,
+      loadTable,
+      toast,
+      calculateTotal,
+    ]
+  );
 
-  // Vider la commande - SIMPLIFIÉ
-  const handleClearOrder = () => {
-    if (!table || !table.order || table.order.items.length === 0) return;
+  const toggleItemOffered = useCallback(
+    (itemId: number): void => {
+      if (!table?.order || !mountedRef.current) return;
+
+      setTable((prevTable) => {
+        if (!prevTable?.order) return prevTable;
+
+        const updatedTable = { ...prevTable };
+
+        // Vérification explicite après la copie
+        if (!updatedTable.order) return prevTable;
+        
+        const newItems = updatedTable.order.items.map((item) => {
+          if (item.id !== itemId) return item;
+          return { ...item, offered: !item.offered };
+        });
+
+        updatedTable.order.items = newItems;
+        updatedTable.order.total = calculateTotal(newItems);
+
+        return updatedTable;
+      });
+
+      enqueueUpdate(`toggle_offered_${itemId}`, async () => {
+        if (!mountedRef.current) return;
+
+        try {
+          const currentTable = getTableById(tableId);
+          if (currentTable) {
+            await updateTableData(tableId, currentTable);
+          }
+        } catch (error) {
+          console.error('Error toggling offered:', error);
+          if (mountedRef.current) {
+            loadTable();
+            toast.showToast('Erreur lors de la mise à jour', 'error');
+          }
+        }
+      });
+    },
+    [
+      table?.order,
+      tableId,
+      enqueueUpdate,
+      updateTableData,
+      getTableById,
+      loadTable,
+      toast,
+      calculateTotal,
+    ]
+  );
+
+  const updateGuestCount = useCallback(
+    (newCount: number): void => {
+      if (!table) return;
+
+      const validCount = Math.max(1, newCount);
+      setGuestCount(validCount);
+
+      setTable((prevTable) => {
+        if (!prevTable) return prevTable;
+        return {
+          ...prevTable,
+          guests: validCount,
+          order: prevTable.order
+            ? { ...prevTable.order, guests: validCount }
+            : undefined,
+        };
+      });
+
+      enqueueUpdate(`update_guests`, async () => {
+        try {
+          const currentTable = getTableById(tableId);
+          if (currentTable) {
+            await updateTableData(tableId, currentTable);
+          }
+        } catch (error) {
+          console.error('Error updating guest count:', error);
+        }
+      });
+    },
+    [table, tableId, enqueueUpdate, updateTableData, getTableById]
+  );
+
+  // ✅ Autres handlers...
+  const handleClearOrder = useCallback((): void => {
+    if (!table?.order || table.order.items.length === 0) return;
 
     Alert.alert(
       'Supprimer la commande',
-      'Êtes-vous sûr de vouloir supprimer tous les articles de la commande en cours ?',
+      'Êtes-vous sûr de vouloir supprimer tous les articles ?',
       [
         { text: 'Annuler', style: 'cancel' },
         {
           text: 'Supprimer',
           style: 'destructive',
-          onPress: async () => {
-            if (!table.order) return;
+          onPress: () => {
+            setTable((prevTable) => {
+              if (!prevTable?.order) return prevTable;
+              return {
+                ...prevTable,
+                order: { ...prevTable.order, items: [], total: 0 },
+              };
+            });
 
-            const updatedTable = {
-              ...table,
-              order: { ...table.order, items: [], total: 0 },
-            };
-
-            try {
-              setTable(updatedTable);
-              await updateTableData(tableId, updatedTable);
-              toast.showToast('Commande supprimée avec succès', 'success');
-            } catch (error) {
-              console.error('Error clearing order:', error);
-              await loadTable();
-              toast.showToast('Impossible de supprimer la commande', 'error');
-            }
+            enqueueUpdate('critical_clear_order', async () => {
+              try {
+                const currentTable = getTableById(tableId);
+                if (currentTable) {
+                  await updateTableData(tableId, currentTable);
+                  toast.showToast('Commande supprimée', 'success');
+                }
+              } catch (error) {
+                console.error('Error clearing order:', error);
+                loadTable();
+                toast.showToast('Impossible de supprimer la commande', 'error');
+              }
+            });
           },
         },
       ]
     );
-  };
+  }, [
+    table?.order,
+    tableId,
+    enqueueUpdate,
+    updateTableData,
+    getTableById,
+    loadTable,
+    toast,
+  ]);
 
-  // Fermer la table - OPTIMISÉ
-  const handleCloseTable = () => {
+  const handleCloseTable = useCallback((): void => {
     if (!table) return;
 
     Alert.alert(
       'Fermer la table',
-      `Êtes-vous sûr de vouloir fermer la table "${table.name}" ?`,
+      `Êtes-vous sûr de vouloir fermer "${table.name}" ?`,
       [
         { text: 'Annuler', style: 'cancel' },
         {
@@ -544,19 +679,11 @@ export default function TableScreen() {
           onPress: async () => {
             try {
               await resetTable(tableId);
-
-              // Nettoyer l'état local
               setTable(null);
               setGuestCount(1);
-              lastTableIdRef.current = null;
-
-              // Rafraîchir le contexte et naviguer
               refreshTables();
               router.push('/');
-              toast.showToast(
-                `Table ${table.name} fermée avec succès`,
-                'success'
-              );
+              toast.showToast(`Table ${table.name} fermée`, 'success');
             } catch (error) {
               console.error('Error closing table:', error);
               toast.showToast('Erreur lors de la fermeture', 'error');
@@ -565,11 +692,10 @@ export default function TableScreen() {
         },
       ]
     );
-  };
+  }, [table, tableId, refreshTables, router, toast]);
 
-  // Prévisualiser la note
-  const handlePreviewNote = () => {
-    if (!table || !table.order || table.order.items.length === 0) {
+  const handlePreviewNote = useCallback((): void => {
+    if (!table?.order || table.order.items.length === 0) {
       toast.showToast("Il n'y a pas d'articles à afficher", 'warning');
       return;
     }
@@ -584,128 +710,130 @@ export default function TableScreen() {
         tableName: table.name,
       },
     });
-  };
+  }, [table, tableId, router, toast]);
 
-  // Gérer les paiements - SIMPLIFIÉ
-  const handlePayment = (type: 'full' | 'split' | 'custom' | 'items') => {
-    if (!table || !table.order) return;
+  const handlePayment = useCallback(
+    (type: 'full' | 'split' | 'custom' | 'items'): void => {
+      if (!table?.order) return;
 
-    const total = table.order.total;
-    if (total <= 0) {
-      toast.showToast("Il n'y a pas d'articles à payer", 'warning');
-      return;
-    }
-
-    const serializedItems = JSON.stringify(table.order.items);
-
-    if (type === 'full') {
-      router.push({
-        pathname: '/payment/full',
-        params: {
-          tableId: tableId.toString(),
-          total: total.toString(),
-          items: serializedItems,
-        },
-      });
-    } else if (type === 'split') {
-      if (guestCount <= 1) {
-        toast.showToast(
-          "Il faut au moins 2 convives pour partager l'addition",
-          'warning'
-        );
+      const total = table.order.total;
+      if (total <= 0) {
+        toast.showToast("Il n'y a pas d'articles à payer", 'warning');
         return;
       }
-      setSplitModalVisible(true);
-    } else if (type === 'custom') {
-      router.push({
-        pathname: '/payment/custom',
-        params: {
-          tableId: tableId.toString(),
-          total: total.toString(),
-          items: serializedItems,
-        },
-      });
-    } else if (type === 'items') {
-      router.push({
-        pathname: '/payment/items',
-        params: { tableId: tableId.toString() },
-      });
+
+      const serializedItems = JSON.stringify(table.order.items);
+
+      switch (type) {
+        case 'full':
+          router.push({
+            pathname: '/payment/full',
+            params: {
+              tableId: tableId.toString(),
+              total: total.toString(),
+              items: serializedItems,
+            },
+          });
+          break;
+        case 'split':
+          if (guestCount <= 1) {
+            toast.showToast(
+              'Il faut au moins 2 convives pour partager',
+              'warning'
+            );
+            return;
+          }
+          setSplitModalVisible(true);
+          break;
+        case 'custom':
+          router.push({
+            pathname: '/payment/custom',
+            params: {
+              tableId: tableId.toString(),
+              total: total.toString(),
+              items: serializedItems,
+            },
+          });
+          break;
+        case 'items':
+          router.push({
+            pathname: '/payment/items',
+            params: { tableId: tableId.toString() },
+          });
+          break;
+      }
+    },
+    [table?.order, guestCount, tableId, router, toast]
+  );
+
+  // ✅ Calculs mémoïzés avec vérification du chargement du menu
+  const filteredMenuItems = useMemo((): MenuItem[] => {
+    if (!menuLoaded || menuCacheArray.length === 0) {
+      console.log('⏳ Menu pas encore chargé pour le filtrage');
+      return [];
     }
-  };
 
-  // Mettre à jour le nombre de couverts - OPTIMISÉ
-  const updateGuestCount = async (newCount: number) => {
-    if (!table) return;
+    const filtered = menuCacheArray.filter((item) => {
+      if (unavailableItemsSet.has(item.id)) return false;
+      if (activeType && item.type !== activeType) return false;
+      if (activeCategory && item.category !== activeCategory) return false;
+      return true;
+    });
 
-    const validCount = Math.max(1, newCount);
-    setGuestCount(validCount);
+    console.log(
+      `🔍 Items filtrés: ${filtered.length}/${menuCacheArray.length}`
+    );
+    return filtered;
+  }, [activeType, activeCategory, menuLoaded, forceUpdate]); // forceUpdate pour re-trigger
 
-    const updatedTable = {
-      ...table,
-      guests: validCount,
-      order: table.order ? { ...table.order, guests: validCount } : undefined,
-    };
-
-    try {
-      setTable(updatedTable);
-      await updateTableData(tableId, updatedTable);
-    } catch (error) {
-      console.error('Error updating guest count:', error);
+  const categories = useMemo((): string[] => {
+    if (!menuLoaded || menuCacheArray.length === 0) {
+      console.log('⏳ Menu pas encore chargé pour les catégories');
+      return [];
     }
-  };
 
-  // Filtrer les items du menu - SANS useMemo complexe
-  const filteredMenuItems = menuItems.filter((item) => {
-    if (unavailableItems.includes(item.id)) return false;
-    if (activeType && item.type !== activeType) return false;
-    if (activeCategory && item.category !== activeCategory) return false;
-    return true;
-  });
-
-  // Catégories visibles selon le type actif - SANS useMemo complexe
-  const categories = (() => {
-    const allCategories = [...new Set(menuItems.map((item) => item.category))];
+    const allCategories = [
+      ...new Set(menuCacheArray.map((item) => item.category)),
+    ];
     if (activeType) {
-      return allCategories.filter((category) =>
-        menuItems.some(
+      const filtered = allCategories.filter((category) =>
+        menuCacheArray.some(
           (item) => item.category === category && item.type === activeType
         )
       );
+      console.log(`📂 Catégories pour ${activeType}:`, filtered);
+      return filtered;
     }
+    console.log('📂 Toutes les catégories:', allCategories.sort());
     return allCategories.sort();
-  })();
+  }, [activeType, menuLoaded, forceUpdate]);
 
-  // Catégoriser les articles de la commande - SANS useCallback complexe
-  const categorizeOrderItems = (items: OrderItem[]) => {
+  const categorizedOrderItems = useMemo(() => {
+    if (!deferredTable?.order?.items) return { plats: [], boissons: [] };
+
     const result = { plats: [] as OrderItem[], boissons: [] as OrderItem[] };
-    const menuItemMap = new Map(
-      menuItems.map((item) => [`${item.name}-${item.price}`, item.type])
-    );
 
-    items.forEach((item) => {
-      const type = menuItemMap.get(`${item.name}-${item.price}`) || 'resto';
+    deferredTable.order.items.forEach((item) => {
+      const menuItem = menuItemsCache.get(item.id);
+      const type = menuItem?.type || 'resto';
       result[type === 'boisson' ? 'boissons' : 'plats'].push(item);
     });
 
     return result;
-  };
+  }, [deferredTable?.order?.items]);
 
-  // Calculer le total des articles offerts - SANS useMemo complexe
-  const offeredTotal = (() => {
-    if (!table || !table.order) return 0;
-    return table.order.items.reduce((sum, item) => {
-      if (item.offered) {
-        return sum + item.price * item.quantity;
-      }
-      return sum;
+  const offeredTotal = useMemo((): number => {
+    if (!deferredTable?.order?.items) return 0;
+    return deferredTable.order.items.reduce((sum, item) => {
+      return item.offered ? sum + item.price * item.quantity : sum;
     }, 0);
-  })();
+  }, [deferredTable?.order?.items]);
 
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={styles.loadingText}>Chargement des données...</Text>
+        <Text style={styles.loadingText}>Chargement...</Text>
       </View>
     );
   }
@@ -713,10 +841,30 @@ export default function TableScreen() {
   if (!table) {
     return (
       <View style={styles.loadingContainer}>
-        <Text>Table not found</Text>
+        <Text>Table introuvable</Text>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
-          <Text style={styles.backButtonText}>Go Back</Text>
+          <Text style={styles.backButtonText}>Retour</Text>
         </Pressable>
+      </View>
+    );
+  }
+
+  // ✅ Affichage conditionnel si le menu n'est pas encore chargé
+  if (!menuLoaded || menuCacheArray.length === 0) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.header}>
+          <Pressable onPress={() => router.push('/')} style={styles.backLink}>
+            <ArrowLeft size={28} color="#333" />
+          </Pressable>
+          <View style={styles.headerTitleContainer}>
+            <Text style={styles.title}>{table.name}</Text>
+          </View>
+        </View>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#007AFF" />
+          <Text style={styles.loadingText}>Chargement du menu...</Text>
+        </View>
       </View>
     );
   }
@@ -727,13 +875,7 @@ export default function TableScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Pressable
-          onPress={() => {
-            lastTableIdRef.current = null;
-            router.push('/');
-          }}
-          style={styles.backLink}
-        >
+        <Pressable onPress={() => router.push('/')} style={styles.backLink}>
           <ArrowLeft size={28} color="#333" />
         </Pressable>
 
@@ -760,7 +902,7 @@ export default function TableScreen() {
           onPress={handlePreviewNote}
         >
           <Receipt size={24} color="white" />
-          <Text style={styles.paymentButtonText}>Prévisualiser Note</Text>
+          <Text style={styles.paymentButtonText}>Prévisualiser</Text>
         </Pressable>
 
         <Pressable
@@ -786,7 +928,7 @@ export default function TableScreen() {
           onPress={handleCloseTable}
         >
           <X size={24} color="white" />
-          <Text style={styles.paymentButtonText}>Fermer table</Text>
+          <Text style={styles.paymentButtonText}>Fermer</Text>
         </Pressable>
       </View>
 
@@ -801,156 +943,133 @@ export default function TableScreen() {
             </Text>
           ) : (
             <View style={styles.orderColumns}>
-              {(() => {
-                const { plats, boissons } = categorizeOrderItems(orderItems);
-                return (
-                  <>
-                    <View style={styles.orderColumn}>
-                      <Text style={styles.columnTitle}>Plats</Text>
-                      <ScrollView style={styles.orderColumnScroll}>
-                        {plats.map((item) => (
-                          <View
-                            key={item.id}
+              <View style={styles.orderColumn}>
+                <Text style={styles.columnTitle}>Plats</Text>
+                <ScrollView style={styles.orderColumnScroll}>
+                  {categorizedOrderItems.plats.map((item) => (
+                    <View
+                      key={item.id}
+                      style={[
+                        styles.orderItem,
+                        item.offered && styles.offeredItem,
+                      ]}
+                    >
+                      <View style={styles.itemHeader}>
+                        <View style={styles.itemNameContainer}>
+                          {item.offered && <Gift size={14} color="#FF9800" />}
+                          <Text
                             style={[
-                              styles.orderItem,
-                              item.offered && styles.offeredItem,
+                              styles.itemName,
+                              item.offered && styles.offeredItemText,
                             ]}
                           >
-                            <View style={styles.itemHeader}>
-                              <View style={styles.itemNameContainer}>
-                                {item.offered && (
-                                  <Gift size={14} color="#FF9800" />
-                                )}
-                                <Text
-                                  style={[
-                                    styles.itemName,
-                                    item.offered && styles.offeredItemText,
-                                  ]}
-                                >
-                                  {item.name} {item.offered ? '(Offert)' : ''}
-                                </Text>
-                              </View>
-                              <Text
-                                style={[
-                                  styles.itemPrice,
-                                  item.offered && styles.offeredPrice,
-                                ]}
-                              >
-                                {(item.price * item.quantity).toFixed(2)} €
-                              </Text>
-                            </View>
+                            {item.name} {item.offered ? '(Offert)' : ''}
+                          </Text>
+                        </View>
+                        <Text
+                          style={[
+                            styles.itemPrice,
+                            item.offered && styles.offeredPrice,
+                          ]}
+                        >
+                          {(item.price * item.quantity).toFixed(2)} €
+                        </Text>
+                      </View>
 
-                            <View style={styles.itemActions}>
-                              <View style={styles.quantityControl}>
-                                <Pressable
-                                  style={styles.quantityButton}
-                                  onPress={() =>
-                                    updateItemQuantity(item.id, false)
-                                  }
-                                >
-                                  <Minus size={16} color="#666" />
-                                </Pressable>
-                                <Text style={styles.quantity}>
-                                  {item.quantity}
-                                </Text>
-                                <Pressable
-                                  style={styles.quantityButton}
-                                  onPress={() =>
-                                    updateItemQuantity(item.id, true)
-                                  }
-                                >
-                                  <Plus size={16} color="#666" />
-                                </Pressable>
-                              </View>
+                      <View style={styles.itemActions}>
+                        <View style={styles.quantityControl}>
+                          <Pressable
+                            style={styles.quantityButton}
+                            onPress={() => updateItemQuantity(item.id, false)}
+                          >
+                            <Minus size={16} color="#666" />
+                          </Pressable>
+                          <Text style={styles.quantity}>{item.quantity}</Text>
+                          <Pressable
+                            style={styles.quantityButton}
+                            onPress={() => updateItemQuantity(item.id, true)}
+                          >
+                            <Plus size={16} color="#666" />
+                          </Pressable>
+                        </View>
 
-                              <Pressable
-                                style={styles.offerButton}
-                                onPress={() => toggleItemOffered(item.id)}
-                              >
-                                <Text style={styles.offerButtonText}>
-                                  {item.offered ? 'Annuler offre' : 'Offrir'}
-                                </Text>
-                              </Pressable>
-                            </View>
-                          </View>
-                        ))}
-                      </ScrollView>
+                        <Pressable
+                          style={styles.offerButton}
+                          onPress={() => toggleItemOffered(item.id)}
+                        >
+                          <Text style={styles.offerButtonText}>
+                            {item.offered ? 'Annuler offre' : 'Offrir'}
+                          </Text>
+                        </Pressable>
+                      </View>
                     </View>
+                  ))}
+                </ScrollView>
+              </View>
 
-                    <View style={styles.orderColumn}>
-                      <Text style={styles.columnTitle}>Boissons</Text>
-                      <ScrollView style={styles.orderColumnScroll}>
-                        {boissons.map((item) => (
-                          <View
-                            key={item.id}
+              <View style={styles.orderColumn}>
+                <Text style={styles.columnTitle}>Boissons</Text>
+                <ScrollView style={styles.orderColumnScroll}>
+                  {categorizedOrderItems.boissons.map((item) => (
+                    <View
+                      key={item.id}
+                      style={[
+                        styles.orderItem,
+                        item.offered && styles.offeredItem,
+                      ]}
+                    >
+                      <View style={styles.itemHeader}>
+                        <View style={styles.itemNameContainer}>
+                          {item.offered && <Gift size={14} color="#FF9800" />}
+                          <Text
                             style={[
-                              styles.orderItem,
-                              item.offered && styles.offeredItem,
+                              styles.itemName,
+                              item.offered && styles.offeredItemText,
                             ]}
                           >
-                            <View style={styles.itemHeader}>
-                              <View style={styles.itemNameContainer}>
-                                {item.offered && (
-                                  <Gift size={14} color="#FF9800" />
-                                )}
-                                <Text
-                                  style={[
-                                    styles.itemName,
-                                    item.offered && styles.offeredItemText,
-                                  ]}
-                                >
-                                  {item.name} {item.offered ? '(Offert)' : ''}
-                                </Text>
-                              </View>
-                              <Text
-                                style={[
-                                  styles.itemPrice,
-                                  item.offered && styles.offeredPrice,
-                                ]}
-                              >
-                                {(item.price * item.quantity).toFixed(2)} €
-                              </Text>
-                            </View>
+                            {item.name} {item.offered ? '(Offert)' : ''}
+                          </Text>
+                        </View>
+                        <Text
+                          style={[
+                            styles.itemPrice,
+                            item.offered && styles.offeredPrice,
+                          ]}
+                        >
+                          {(item.price * item.quantity).toFixed(2)} €
+                        </Text>
+                      </View>
 
-                            <View style={styles.itemActions}>
-                              <View style={styles.quantityControl}>
-                                <Pressable
-                                  style={styles.quantityButton}
-                                  onPress={() =>
-                                    updateItemQuantity(item.id, false)
-                                  }
-                                >
-                                  <Minus size={16} color="#666" />
-                                </Pressable>
-                                <Text style={styles.quantity}>
-                                  {item.quantity}
-                                </Text>
-                                <Pressable
-                                  style={styles.quantityButton}
-                                  onPress={() =>
-                                    updateItemQuantity(item.id, true)
-                                  }
-                                >
-                                  <Plus size={16} color="#666" />
-                                </Pressable>
-                              </View>
+                      <View style={styles.itemActions}>
+                        <View style={styles.quantityControl}>
+                          <Pressable
+                            style={styles.quantityButton}
+                            onPress={() => updateItemQuantity(item.id, false)}
+                          >
+                            <Minus size={16} color="#666" />
+                          </Pressable>
+                          <Text style={styles.quantity}>{item.quantity}</Text>
+                          <Pressable
+                            style={styles.quantityButton}
+                            onPress={() => updateItemQuantity(item.id, true)}
+                          >
+                            <Plus size={16} color="#666" />
+                          </Pressable>
+                        </View>
 
-                              <Pressable
-                                style={styles.offerButton}
-                                onPress={() => toggleItemOffered(item.id)}
-                              >
-                                <Text style={styles.offerButtonText}>
-                                  {item.offered ? 'Annuler offre' : 'Offrir'}
-                                </Text>
-                              </Pressable>
-                            </View>
-                          </View>
-                        ))}
-                      </ScrollView>
+                        <Pressable
+                          style={styles.offerButton}
+                          onPress={() => toggleItemOffered(item.id)}
+                        >
+                          <Text style={styles.offerButtonText}>
+                            {item.offered ? 'Annuler offre' : 'Offrir'}
+                          </Text>
+                        </Pressable>
+                      </View>
                     </View>
-                  </>
-                );
-              })()}
+                  ))}
+                </ScrollView>
+              </View>
             </View>
           )}
 
@@ -985,9 +1104,7 @@ export default function TableScreen() {
                 onPress={() => handlePayment('items')}
               >
                 <ShoppingCart size={24} color="white" />
-                <Text style={styles.paymentButtonText}>
-                  Paiement par article
-                </Text>
+                <Text style={styles.paymentButtonText}>Par article</Text>
               </Pressable>
             </View>
             <View style={styles.paymentActionsRow}>
@@ -996,9 +1113,7 @@ export default function TableScreen() {
                 onPress={() => handlePayment('custom')}
               >
                 <Receipt size={24} color="white" />
-                <Text style={styles.paymentButtonText}>
-                  Partage personnalisé
-                </Text>
+                <Text style={styles.paymentButtonText}>Personnalisé</Text>
               </Pressable>
               <Pressable
                 style={[styles.paymentButton, { backgroundColor: '#2196F3' }]}
@@ -1021,7 +1136,12 @@ export default function TableScreen() {
                   styles.typeFilterButton,
                   activeType === 'resto' && styles.activeTypeButton,
                 ]}
-                onPress={() => setActiveType('resto')}
+                onPress={() => {
+                  startTransition(() => {
+                    setActiveType('resto');
+                    setActiveCategory(null);
+                  });
+                }}
               >
                 <Text
                   style={[
@@ -1037,7 +1157,12 @@ export default function TableScreen() {
                   styles.typeFilterButton,
                   activeType === 'boisson' && styles.activeTypeButton,
                 ]}
-                onPress={() => setActiveType('boisson')}
+                onPress={() => {
+                  startTransition(() => {
+                    setActiveType('boisson');
+                    setActiveCategory(null);
+                  });
+                }}
               >
                 <Text
                   style={[
@@ -1053,7 +1178,12 @@ export default function TableScreen() {
                   styles.typeFilterButton,
                   activeType === null && styles.activeTypeButton,
                 ]}
-                onPress={() => setActiveType(null)}
+                onPress={() => {
+                  startTransition(() => {
+                    setActiveType(null);
+                    setActiveCategory(null);
+                  });
+                }}
               >
                 <Text
                   style={[
@@ -1077,7 +1207,11 @@ export default function TableScreen() {
                 styles.categoryTab,
                 activeCategory === null && styles.activeCategoryTab,
               ]}
-              onPress={() => setActiveCategory(null)}
+              onPress={() => {
+                startTransition(() => {
+                  setActiveCategory(null);
+                });
+              }}
             >
               <Text
                 style={[
@@ -1098,7 +1232,11 @@ export default function TableScreen() {
                     borderBottomColor: CATEGORY_COLORS[category] || '#2196F3',
                   },
                 ]}
-                onPress={() => setActiveCategory(category)}
+                onPress={() => {
+                  startTransition(() => {
+                    setActiveCategory(category);
+                  });
+                }}
               >
                 <Text
                   style={[
@@ -1123,7 +1261,7 @@ export default function TableScreen() {
               {categories
                 .filter((cat) =>
                   activeType
-                    ? menuItems.some(
+                    ? menuCacheArray.some(
                         (item) =>
                           item.category === cat && item.type === activeType
                       )
@@ -1158,8 +1296,8 @@ export default function TableScreen() {
       <SplitSelectionModal
         visible={splitModalVisible}
         onClose={() => setSplitModalVisible(false)}
-        onConfirm={(partsCount) => {
-          if (!table || !table.order) return;
+        onConfirm={(partsCount: number) => {
+          if (!table?.order) return;
 
           router.push({
             pathname: '/payment/split',
@@ -1178,7 +1316,7 @@ export default function TableScreen() {
   );
 }
 
-// Styles identiques à l'original - pas de changement nécessaire
+// ✅ Styles conservés
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   loadingContainer: {

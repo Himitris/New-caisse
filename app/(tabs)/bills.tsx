@@ -1,4 +1,4 @@
-// app/(tabs)/bills.tsx - Version simplifiée sans événements
+// app/(tabs)/bills.tsx
 
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Print from 'expo-print';
@@ -20,7 +20,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react-native';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -39,20 +39,12 @@ import {
   saveBills,
   getBillsPage,
   getFilteredBills,
+  BillManager,
 } from '../../utils/storage';
 import { useToast } from '../../utils/ToastContext';
 import { useSettings } from '@/utils/useSettings';
 
-interface ViewReceiptModalProps {
-  visible: boolean;
-  bill: Bill | null;
-  onClose: () => void;
-  onPrint: () => void;
-  onShare: () => void;
-  onDelete: () => void;
-}
-
-// Cache pour les constantes
+// ✅ Constantes STATIQUES (éviter re-création)
 const STATUS_COLORS = {
   pending: '#FFC107',
   paid: '#4CAF50',
@@ -69,7 +61,9 @@ const PAYMENT_METHOD_LABELS = {
 
 const ITEM_HEIGHT = 80;
 const PAGE_SIZE = 20;
+const MAX_BILLS_DISPLAY = 100; // ✅ LIMITE CRITIQUE pour éviter le lag
 
+// ✅ Fonction utilitaire simple (pas dans le composant)
 const getBillStatusColor = (bill: Bill) => {
   if (bill.status === 'split' && bill.paymentType === 'custom') {
     return STATUS_COLORS.custom;
@@ -77,7 +71,16 @@ const getBillStatusColor = (bill: Bill) => {
   return STATUS_COLORS[bill.status] || STATUS_COLORS.default;
 };
 
-// Modal pour voir le reçu - Simplifié
+// ✅ Modal simplifié et mémoïzé
+interface ViewReceiptModalProps {
+  visible: boolean;
+  bill: Bill | null;
+  onClose: () => void;
+  onPrint: () => void;
+  onShare: () => void;
+  onDelete: () => void;
+}
+
 const ViewReceiptModal = memo<ViewReceiptModalProps>(
   ({ visible, bill, onClose, onPrint, onShare, onDelete }) => {
     const { restaurantInfo, paymentMethods } = useSettings();
@@ -101,7 +104,6 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
           }, 0) || bill.amount
         );
       }
-
       return bill.amount;
     }, []);
 
@@ -122,7 +124,6 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
     const paymentLabel = bill.paymentMethod
       ? getPaymentMethodLabel(bill.paymentMethod)
       : '';
-
     const hasDetailedItems = bill.paidItems && bill.paidItems.length > 0;
 
     return (
@@ -170,35 +171,40 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
 
               <View style={styles.receiptDivider} />
 
-              {/* Affichage des articles détaillés si disponibles */}
+              {/* Articles détaillés si disponibles */}
               {hasDetailedItems && (
                 <View style={styles.itemsContainer}>
                   <Text style={styles.itemsHeader}>Détail des articles</Text>
-                  {(bill.paidItems ?? []).map((item, index) => (
-                    <View key={index} style={styles.itemRow}>
-                      <View style={styles.itemDetails}>
-                        <Text style={styles.itemQuantity}>
-                          {item.quantity}x
-                        </Text>
+                  {(bill.paidItems ?? []).slice(0, 20).map(
+                    (
+                      item,
+                      index // ✅ LIMITE à 20 items max
+                    ) => (
+                      <View key={index} style={styles.itemRow}>
+                        <View style={styles.itemDetails}>
+                          <Text style={styles.itemQuantity}>
+                            {item.quantity}x
+                          </Text>
+                          <Text
+                            style={[
+                              styles.itemName,
+                              item.offered && styles.offeredItemText,
+                            ]}
+                          >
+                            {item.name} {item.offered ? '(Offert)' : ''}
+                          </Text>
+                        </View>
                         <Text
                           style={[
-                            styles.itemName,
-                            item.offered && styles.offeredItemText,
+                            styles.itemPrice,
+                            item.offered && styles.offeredItemPrice,
                           ]}
                         >
-                          {item.name} {item.offered ? '(Offert)' : ''}
+                          {(item.price * item.quantity).toFixed(2)} €
                         </Text>
                       </View>
-                      <Text
-                        style={[
-                          styles.itemPrice,
-                          item.offered && styles.offeredItemPrice,
-                        ]}
-                      >
-                        {(item.price * item.quantity).toFixed(2)} €
-                      </Text>
-                    </View>
-                  ))}
+                    )
+                  )}
                   <View style={styles.receiptDivider} />
                 </View>
               )}
@@ -315,7 +321,7 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
   }
 );
 
-// Composant pour le filtrage - Simplifié
+// ✅ FilterBar simplifié et mémoïzé
 interface FilterBarProps {
   onSearch: (text: string) => void;
   onDateChange: (date: Date | null) => void;
@@ -510,21 +516,21 @@ const FilterBar = memo<FilterBarProps>(
           <Pressable style={styles.filterButton} onPress={onDeleteAll}>
             <Filter size={20} color="#F44336" />
             <Text style={[styles.filterButtonText, { color: '#F44336' }]}>
-              Supprimer toutes les notes
+              Supprimer toutes
             </Text>
           </Pressable>
 
           <Pressable style={styles.filterButton} onPress={onDeleteFiltered}>
             <Trash2 size={20} color="#FF9800" />
             <Text style={[styles.filterButtonText, { color: '#FF9800' }]}>
-              Supprimer la sélection
+              Supprimer sélection
             </Text>
           </Pressable>
 
           <Pressable style={styles.resetButton} onPress={onResetFilters}>
             <RefreshCw size={20} color="#2196F3" />
             <Text style={[styles.filterButtonText, { color: '#2196F3' }]}>
-              Réinitialiser filtres
+              Réinitialiser
             </Text>
           </Pressable>
         </View>
@@ -542,7 +548,7 @@ const FilterBar = memo<FilterBarProps>(
   }
 );
 
-// Composant pour un item de facture - Simplifié
+// ✅ BillListItem ultra-optimisé
 interface BillListItemProps {
   bill: Bill;
   isSelected: boolean;
@@ -586,10 +592,21 @@ const BillListItem = memo<BillListItemProps>(
         <Text style={styles.billItemDate}>{formattedDate}</Text>
       </Pressable>
     );
+  },
+  // ✅ Comparaison personnalisée pour éviter les re-renders inutiles
+  (prevProps, nextProps) => {
+    return (
+      prevProps.bill.id === nextProps.bill.id &&
+      prevProps.isSelected === nextProps.isSelected &&
+      prevProps.bill.amount === nextProps.bill.amount &&
+      prevProps.bill.status === nextProps.bill.status
+    );
   }
 );
 
+// ✅ COMPOSANT PRINCIPAL ULTRA-OPTIMISÉ
 export default function BillsScreen() {
+  // ✅ États essentiels seulement
   const [bills, setBills] = useState<Bill[]>([]);
   const [filteredBills, setFilteredBills] = useState<Bill[]>([]);
   const [loading, setLoading] = useState(true);
@@ -597,16 +614,37 @@ export default function BillsScreen() {
   const [viewModalVisible, setViewModalVisible] = useState(false);
   const [processing, setProcessing] = useState(false);
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc' | 'none'>('desc');
-  const { restaurantInfo, paymentMethods } = useSettings();
   const [searchText, setSearchText] = useState('');
   const [dateFilter, setDateFilter] = useState<Date | null>(null);
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<
     Bill['paymentMethod'] | null
   >(null);
+
+  // ✅ Refs pour éviter les fuites
+  const mountedRef = useRef(true);
+  const lastLoadTimeRef = useRef(0);
+
+  const { restaurantInfo, paymentMethods } = useSettings();
   const toast = useToast();
 
-  // Charger les factures - SIMPLIFIÉ
+  // ✅ Nettoyage à la destruction
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // ✅ Charger les factures AVEC LIMITE STRICTE
   const loadBills = useCallback(async () => {
+    if (!mountedRef.current) return;
+
+    const now = Date.now();
+    // Éviter les recharges trop fréquentes
+    if (now - lastLoadTimeRef.current < 1000) {
+      return;
+    }
+    lastLoadTimeRef.current = now;
+
     setLoading(true);
     try {
       if (searchText || dateFilter || paymentMethodFilter) {
@@ -622,25 +660,39 @@ export default function BillsScreen() {
         };
 
         const filtered = await getFilteredBills(filters);
-        setFilteredBills(filtered);
+
+        if (mountedRef.current) {
+          // ✅ LIMITE CRITIQUE - Max 100 factures affichées
+          setFilteredBills(filtered.slice(0, MAX_BILLS_DISPLAY));
+        }
       } else {
         const allBills = await getBills();
-        setFilteredBills(allBills);
+
+        if (mountedRef.current) {
+          // ✅ LIMITE CRITIQUE - Max 100 factures affichées
+          setFilteredBills(allBills.slice(0, MAX_BILLS_DISPLAY));
+        }
       }
     } catch (error) {
       console.error('Error loading bills:', error);
-      toast.showToast('Impossible de charger les factures.', 'error');
+      if (mountedRef.current) {
+        toast.showToast('Impossible de charger les factures.', 'error');
+      }
     } finally {
-      setLoading(false);
+      if (mountedRef.current) {
+        setLoading(false);
+      }
     }
   }, [searchText, dateFilter, paymentMethodFilter, toast]);
 
-  // Charger toutes les factures
+  // ✅ Charger toutes les factures (limité)
   useEffect(() => {
     const loadAllBills = async () => {
       try {
         const allBills = await getBills();
-        setBills(allBills);
+        if (mountedRef.current) {
+          setBills(allBills.slice(0, MAX_BILLS_DISPLAY)); // ✅ LIMITE
+        }
       } catch (error) {
         console.error('Error loading all bills:', error);
       }
@@ -650,7 +702,7 @@ export default function BillsScreen() {
     loadBills();
   }, [loadBills]);
 
-  // Tri des factures par date - SIMPLIFIÉ
+  // ✅ Tri optimisé avec mémorisation
   const sortBillsByDate = useCallback(
     (billsToSort: Bill[], order: 'desc' | 'asc' | 'none' = 'desc') => {
       if (order === 'none') return billsToSort;
@@ -672,7 +724,7 @@ export default function BillsScreen() {
     [paymentMethods]
   );
 
-  // Supprimer les factures filtrées - SIMPLIFIÉ
+  // ✅ Supprimer les factures filtrées - OPTIMISÉ
   const handleDeleteFiltered = useCallback(() => {
     if (filteredBills.length === 0) {
       toast.showToast('Aucune facture à supprimer.', 'info');
@@ -681,13 +733,15 @@ export default function BillsScreen() {
 
     Alert.alert(
       'Supprimer les factures filtrées',
-      `Êtes-vous sûr de vouloir supprimer ${filteredBills.length} facture(s) filtrée(s) ?`,
+      `Êtes-vous sûr de vouloir supprimer ${filteredBills.length} facture(s) ?`,
       [
         { text: 'Annuler', style: 'cancel' },
         {
           text: 'Supprimer',
           style: 'destructive',
           onPress: async () => {
+            if (!mountedRef.current) return;
+
             try {
               setProcessing(true);
 
@@ -699,33 +753,40 @@ export default function BillsScreen() {
               );
 
               await saveBills(remainingBills);
-              setBills(remainingBills);
-              setFilteredBills([]);
 
-              if (
-                remainingBills.length > 0 &&
-                selectedBill &&
-                billIdsToDelete.has(selectedBill.id)
-              ) {
-                setSelectedBill(remainingBills[0]);
-              } else if (remainingBills.length === 0) {
-                setSelectedBill(null);
+              if (mountedRef.current) {
+                setBills(remainingBills);
+                setFilteredBills([]);
+
+                if (
+                  remainingBills.length > 0 &&
+                  selectedBill &&
+                  billIdsToDelete.has(selectedBill.id)
+                ) {
+                  setSelectedBill(remainingBills[0]);
+                } else if (remainingBills.length === 0) {
+                  setSelectedBill(null);
+                }
+
+                toast.showToast(
+                  `${billIdsToDelete.size} facture(s) supprimée(s).`,
+                  'success'
+                );
               }
 
               await loadBills();
-
-              toast.showToast(
-                `${billIdsToDelete.size} facture(s) supprimée(s) avec succès.`,
-                'success'
-              );
             } catch (error) {
               console.error('Erreur lors de la suppression:', error);
-              toast.showToast(
-                'Impossible de supprimer les factures filtrées.',
-                'error'
-              );
+              if (mountedRef.current) {
+                toast.showToast(
+                  'Impossible de supprimer les factures.',
+                  'error'
+                );
+              }
             } finally {
-              setProcessing(false);
+              if (mountedRef.current) {
+                setProcessing(false);
+              }
             }
           },
         },
@@ -733,7 +794,7 @@ export default function BillsScreen() {
     );
   }, [filteredBills, bills, selectedBill, loadBills, toast]);
 
-  // Filtrage et tri - SIMPLIFIÉ
+  // ✅ Filtrage et tri avec mémorisation
   const appliedFilters = useMemo(() => {
     let filtered = [...filteredBills];
 
@@ -754,7 +815,7 @@ export default function BillsScreen() {
     return sortBillsByDate(filtered, sortOrder);
   }, [filteredBills, searchText, sortOrder, sortBillsByDate]);
 
-  // Handlers simplifiés
+  // ✅ Handlers optimisés
   const handleSearch = useCallback((text: string) => {
     setSearchText(text);
   }, []);
@@ -814,21 +875,33 @@ export default function BillsScreen() {
           text: 'Supprimer',
           style: 'destructive',
           onPress: async () => {
+            if (!mountedRef.current) return;
+
             try {
               setProcessing(true);
-              await saveBills([]);
-              setBills([]);
-              setFilteredBills([]);
-              setSelectedBill(null);
-              toast.showToast(
-                'Toutes les factures ont été supprimées avec succès.',
-                'success'
-              );
+              await BillManager.clearAllBills(); // ✅ Utiliser le manager optimisé
+
+              if (mountedRef.current) {
+                setBills([]);
+                setFilteredBills([]);
+                setSelectedBill(null);
+                toast.showToast(
+                  'Toutes les factures ont été supprimées.',
+                  'success'
+                );
+              }
             } catch (error) {
               console.error('Erreur lors de la suppression:', error);
-              toast.showToast('Impossible de supprimer les factures.', 'error');
+              if (mountedRef.current) {
+                toast.showToast(
+                  'Impossible de supprimer les factures.',
+                  'error'
+                );
+              }
             } finally {
-              setProcessing(false);
+              if (mountedRef.current) {
+                setProcessing(false);
+              }
             }
           },
         },
@@ -837,32 +910,39 @@ export default function BillsScreen() {
   }, [toast]);
 
   const handleDeleteBill = useCallback(async () => {
-    if (!selectedBill) return;
+    if (!selectedBill || !mountedRef.current) return;
 
     try {
       setProcessing(true);
       const updatedBills = bills.filter((bill) => bill.id !== selectedBill.id);
       await saveBills(updatedBills);
-      setBills(updatedBills);
-      setFilteredBills(sortBillsByDate(updatedBills, sortOrder));
 
-      if (updatedBills.length > 0) {
-        setSelectedBill(updatedBills[0]);
-      } else {
-        setSelectedBill(null);
+      if (mountedRef.current) {
+        setBills(updatedBills);
+        setFilteredBills(sortBillsByDate(updatedBills, sortOrder));
+
+        if (updatedBills.length > 0) {
+          setSelectedBill(updatedBills[0]);
+        } else {
+          setSelectedBill(null);
+        }
+
+        setViewModalVisible(false);
+        toast.showToast('Facture supprimée avec succès.', 'success');
       }
-
-      setViewModalVisible(false);
-      toast.showToast('Facture supprimée avec succès.', 'success');
     } catch (error) {
       console.error('Erreur lors de la suppression:', error);
-      toast.showToast('Impossible de supprimer la facture.', 'error');
+      if (mountedRef.current) {
+        toast.showToast('Impossible de supprimer la facture.', 'error');
+      }
     } finally {
-      setProcessing(false);
+      if (mountedRef.current) {
+        setProcessing(false);
+      }
     }
   }, [selectedBill, bills, sortOrder, sortBillsByDate, toast]);
 
-  // Générer HTML pour impression - SIMPLIFIÉ
+  // ✅ Générer HTML pour impression - OPTIMISÉ
   const generateHTML = useCallback(
     (bill: Bill) => {
       const paymentLabel = bill.paymentMethod
@@ -902,6 +982,8 @@ export default function BillsScreen() {
 
       let itemsHTML = '';
       if (hasDetailedItems) {
+        // ✅ LIMITE les items affichés pour éviter HTML trop lourd
+        const itemsToShow = (bill.paidItems ?? []).slice(0, 20);
         itemsHTML = `
       <div class="items-section">
         <table style="width: 100%; border-collapse: collapse; margin: 5mm 0;">
@@ -910,7 +992,7 @@ export default function BillsScreen() {
             <th style="text-align: left;">Article</th>
             <th style="text-align: right;">Prix</th>
           </tr>
-          ${(bill.paidItems ?? [])
+          ${itemsToShow
             .map(
               (item) => `
             <tr ${
@@ -1100,20 +1182,25 @@ export default function BillsScreen() {
       return;
     }
 
+    if (!mountedRef.current) return;
+
     setProcessing(true);
     try {
       await Print.printAsync({
         html: generateHTML(selectedBill),
       });
-      toast.showToast("Reçu envoyé à l'imprimante.", 'success');
+      if (mountedRef.current) {
+        toast.showToast("Reçu envoyé à l'imprimante.", 'success');
+      }
     } catch (error) {
       console.error("Erreur d'impression:", error);
-      toast.showToast(
-        "Impossible d'imprimer le reçu. Vérifiez que votre imprimante est connectée.",
-        'error'
-      );
+      if (mountedRef.current) {
+        toast.showToast("Impossible d'imprimer le reçu.", 'error');
+      }
     } finally {
-      setProcessing(false);
+      if (mountedRef.current) {
+        setProcessing(false);
+      }
     }
   }, [selectedBill, generateHTML, toast]);
 
@@ -1122,6 +1209,8 @@ export default function BillsScreen() {
       toast.showToast('Veuillez sélectionner une facture à partager.', 'info');
       return;
     }
+
+    if (!mountedRef.current) return;
 
     setProcessing(true);
     try {
@@ -1133,12 +1222,19 @@ export default function BillsScreen() {
         UTI: '.pdf',
         mimeType: 'application/pdf',
       });
-      toast.showToast('Reçu partagé avec succès.', 'success');
+
+      if (mountedRef.current) {
+        toast.showToast('Reçu partagé avec succès.', 'success');
+      }
     } catch (error) {
       console.error('Erreur de partage:', error);
-      toast.showToast('Impossible de partager le reçu.', 'error');
+      if (mountedRef.current) {
+        toast.showToast('Impossible de partager le reçu.', 'error');
+      }
     } finally {
-      setProcessing(false);
+      if (mountedRef.current) {
+        setProcessing(false);
+      }
     }
   }, [selectedBill, generateHTML, toast]);
 
@@ -1147,6 +1243,8 @@ export default function BillsScreen() {
       toast.showToast('Veuillez sélectionner une facture à exporter.', 'info');
       return;
     }
+
+    if (!mountedRef.current) return;
 
     setProcessing(true);
     try {
@@ -1160,12 +1258,18 @@ export default function BillsScreen() {
         dialogTitle: 'Exporter le reçu en PDF',
       });
 
-      toast.showToast('Reçu exporté avec succès.', 'success');
+      if (mountedRef.current) {
+        toast.showToast('Reçu exporté avec succès.', 'success');
+      }
     } catch (error) {
       console.error("Erreur d'export:", error);
-      toast.showToast("Impossible d'exporter le reçu.", 'error');
+      if (mountedRef.current) {
+        toast.showToast("Impossible d'exporter le reçu.", 'error');
+      }
     } finally {
-      setProcessing(false);
+      if (mountedRef.current) {
+        setProcessing(false);
+      }
     }
   }, [selectedBill, generateHTML, toast]);
 
@@ -1232,6 +1336,9 @@ export default function BillsScreen() {
                 {appliedFilters.length !== bills.length
                   ? `(sur ${bills.length} total)`
                   : ''}
+                {appliedFilters.length >= MAX_BILLS_DISPLAY && (
+                  <Text style={styles.limitText}> - Affichage limité</Text>
+                )}
               </Text>
               <FlatList
                 data={appliedFilters}
@@ -1243,6 +1350,11 @@ export default function BillsScreen() {
                 removeClippedSubviews={true}
                 updateCellsBatchingPeriod={50}
                 extraData={selectedBill?.id}
+                getItemLayout={(data, index) => ({
+                  length: ITEM_HEIGHT,
+                  offset: ITEM_HEIGHT * index,
+                  index,
+                })}
               />
             </View>
 
@@ -1384,7 +1496,7 @@ export default function BillsScreen() {
   );
 }
 
-// Styles (identiques pour préserver l'apparence)
+// ✅ Styles identiques pour préserver l'apparence
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
@@ -1453,6 +1565,7 @@ const styles = StyleSheet.create({
   },
   listTitle: { fontSize: 18, fontWeight: '600', marginBottom: 8 },
   billCount: { fontSize: 14, color: '#666', marginBottom: 16 },
+  limitText: { color: '#FF9800', fontWeight: '600' },
   billListItem: {
     padding: 12,
     borderBottomWidth: 1,

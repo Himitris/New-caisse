@@ -1,4 +1,4 @@
-// app/payment/custom.tsx - Version simplifiée sans événements
+// app/payment/custom.tsx
 
 import {
   View,
@@ -10,7 +10,7 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ArrowLeft,
@@ -40,7 +40,7 @@ export default function CustomSplitScreen() {
   const toast = useToast();
   const { refreshTables } = useTableContext();
 
-  // ✅ TOUS LES HOOKS DOIVENT ÊTRE DÉCLARÉS EN PREMIER - SANS EXCEPTION
+  // ✅ États MINIMAUX - éviter l'accumulation
   const [processing, setProcessing] = useState(false);
   const [totalOffered, setTotalOffered] = useState(0);
   const [tableFullyPaid, setTableFullyPaid] = useState(false);
@@ -53,83 +53,114 @@ export default function CustomSplitScreen() {
     null,
   ]);
 
-  // ✅ Hooks personnalisés APRÈS les hooks de base
+  // ✅ Refs pour éviter les fuites de timeout
+  const processingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const validationTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+
   const { paymentMethods, restaurantInfo } = useSettings();
   const enabledPaymentMethods = paymentMethods.filter(
     (method) => method.enabled
   );
 
-  // ✅ TOUS LES useEffect et useCallback APRÈS
+  // ✅ Nettoyage automatique des refs
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      if (processingTimeoutRef.current) {
+        clearTimeout(processingTimeoutRef.current);
+      }
+      if (validationTimeoutRef.current) {
+        clearTimeout(validationTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // ✅ Chargement initial OPTIMISÉ
   useEffect(() => {
     const fetchTableDetails = async () => {
-      const table = await getTable(tableIdNum);
-      if (table) {
-        setTableName(table.name);
-        setTableSection(table.section);
+      if (!mountedRef.current) return;
 
-        if (table.order && table.order.items) {
-          const offeredAmount = table.order.items.reduce((sum, item) => {
-            if (item.offered) {
-              return sum + item.price * item.quantity;
-            }
-            return sum;
-          }, 0);
+      try {
+        const table = await getTable(tableIdNum);
+        if (table && mountedRef.current) {
+          setTableName(table.name);
+          setTableSection(table.section);
 
-          setTotalOffered(offeredAmount);
+          if (table.order && table.order.items) {
+            const offeredAmount = table.order.items.reduce((sum, item) => {
+              return item.offered ? sum + item.price * item.quantity : sum;
+            }, 0);
+            setTotalOffered(offeredAmount);
+          }
         }
+      } catch (error) {
+        console.error('Error fetching table details:', error);
       }
     };
 
     fetchTableDetails();
   }, [tableIdNum]);
 
+  // ✅ Validation des montants DÉBOUNCE
   useEffect(() => {
-    const calculatedTotal = splitAmounts.reduce((sum, amount) => {
-      const parsedAmount = parseFloat(amount || '0');
-      return sum + (isNaN(parsedAmount) ? 0 : parsedAmount);
-    }, 0);
-
-    const roundedTotal = Math.round(calculatedTotal * 100) / 100;
-    setCurrentTotal(roundedTotal);
-
-    if (roundedTotal > totalAmount + 0.01) {
-      setErrorMessage('Le total des partages dépasse le montant de la facture');
-    } else if (roundedTotal < totalAmount - 0.01 && roundedTotal > 0) {
-      setErrorMessage(`Restant : ${(totalAmount - roundedTotal).toFixed(2)} €`);
-    } else if (Math.abs(roundedTotal - totalAmount) <= 0.01) {
-      setErrorMessage('');
+    // Annuler la validation précédente
+    if (validationTimeoutRef.current) {
+      clearTimeout(validationTimeoutRef.current);
     }
+
+    // Débounce la validation pour éviter les calculs excessifs
+    validationTimeoutRef.current = setTimeout(() => {
+      if (!mountedRef.current) return;
+
+      const calculatedTotal = splitAmounts.reduce((sum, amount) => {
+        const parsedAmount = parseFloat(amount || '0');
+        return sum + (isNaN(parsedAmount) ? 0 : parsedAmount);
+      }, 0);
+
+      const roundedTotal = Math.round(calculatedTotal * 100) / 100;
+      setCurrentTotal(roundedTotal);
+
+      if (roundedTotal > totalAmount + 0.01) {
+        setErrorMessage(
+          'Le total des partages dépasse le montant de la facture'
+        );
+      } else if (roundedTotal < totalAmount - 0.01 && roundedTotal > 0) {
+        setErrorMessage(
+          `Restant : ${(totalAmount - roundedTotal).toFixed(2)} €`
+        );
+      } else if (Math.abs(roundedTotal - totalAmount) <= 0.01) {
+        setErrorMessage('');
+      }
+    }, 300); // Débounce de 300ms
+
+    return () => {
+      if (validationTimeoutRef.current) {
+        clearTimeout(validationTimeoutRef.current);
+      }
+    };
   }, [splitAmounts, totalAmount]);
 
+  // ✅ Handlers OPTIMISÉS
   const addSplitAmount = useCallback(() => {
-    setSplitAmounts([...splitAmounts, '']);
-    setPaymentMethodIds([...paymentMethodIds, null]);
-  }, [splitAmounts, paymentMethodIds]);
+    setSplitAmounts((prev) => [...prev, '']);
+    setPaymentMethodIds((prev) => [...prev, null]);
+  }, []);
 
-  const removeSplitAmount = useCallback(
-    (index: number) => {
-      const newAmounts = [...splitAmounts];
-      newAmounts.splice(index, 1);
-      setSplitAmounts(newAmounts);
+  const removeSplitAmount = useCallback((index: number) => {
+    setSplitAmounts((prev) => prev.filter((_, i) => i !== index));
+    setPaymentMethodIds((prev) => prev.filter((_, i) => i !== index));
+  }, []);
 
-      const newMethods = [...paymentMethodIds];
-      newMethods.splice(index, 1);
-      setPaymentMethodIds(newMethods);
-    },
-    [splitAmounts, paymentMethodIds]
-  );
-
-  const updateSplitAmount = useCallback(
-    (index: number, value: string) => {
-      const newAmounts = [...splitAmounts];
-
-      if (value === '' || /^\d*\.?\d*$/.test(value)) {
+  const updateSplitAmount = useCallback((index: number, value: string) => {
+    if (value === '' || /^\d*\.?\d*$/.test(value)) {
+      setSplitAmounts((prev) => {
+        const newAmounts = [...prev];
         newAmounts[index] = value;
-        setSplitAmounts(newAmounts);
-      }
-    },
-    [splitAmounts]
-  );
+        return newAmounts;
+      });
+    }
+  }, []);
 
   const calculateRemaining = useCallback(() => {
     const currentSum = splitAmounts.reduce((sum, amount) => {
@@ -145,29 +176,30 @@ export default function CustomSplitScreen() {
       const lastAmount = parseFloat(splitAmounts[lastIndex] || '0');
 
       if (lastAmount === 0 && splitAmounts.length > 0) {
-        const newAmounts = [...splitAmounts];
-        newAmounts[lastIndex] = remaining.toFixed(2);
-        setSplitAmounts(newAmounts);
+        setSplitAmounts((prev) => {
+          const newAmounts = [...prev];
+          newAmounts[lastIndex] = remaining.toFixed(2);
+          return newAmounts;
+        });
       } else {
-        const newAmounts = [...splitAmounts, remaining.toFixed(2)];
-        const newMethods = [...paymentMethodIds, null];
-
-        setSplitAmounts(newAmounts);
-        setPaymentMethodIds(newMethods);
+        setSplitAmounts((prev) => [...prev, remaining.toFixed(2)]);
+        setPaymentMethodIds((prev) => [...prev, null]);
       }
     }
-  }, [splitAmounts, paymentMethodIds, totalAmount]);
+  }, [splitAmounts, totalAmount]);
 
-  const setPaymentMethod = useCallback(
-    (index: number, methodId: string) => {
-      const newMethods = [...paymentMethodIds];
+  const setPaymentMethod = useCallback((index: number, methodId: string) => {
+    setPaymentMethodIds((prev) => {
+      const newMethods = [...prev];
       newMethods[index] = methodId;
-      setPaymentMethodIds(newMethods);
-    },
-    [paymentMethodIds]
-  );
+      return newMethods;
+    });
+  }, []);
 
+  // ✅ Traitement des paiements ULTRA-OPTIMISÉ
   const processPaymentTransactions = useCallback(async () => {
+    if (!mountedRef.current || processing) return;
+
     try {
       setProcessing(true);
       const table = await getTable(tableIdNum);
@@ -180,9 +212,6 @@ export default function CustomSplitScreen() {
         return;
       }
 
-      let allPaymentsProcessed = true;
-      let tableWasClosed = false;
-
       const validPayments = splitAmounts
         .map((amount, index) => ({
           amount: parseFloat(amount),
@@ -194,10 +223,15 @@ export default function CustomSplitScreen() {
         (sum, payment) => sum + payment.amount,
         0
       );
-
       const willPayFull = Math.abs(totalValidPayments - totalAmount) <= 0.02;
 
+      let allPaymentsProcessed = true;
+      let tableWasClosed = false;
+
+      // Traitement séquentiel des paiements
       for (let i = 0; i < validPayments.length; i++) {
+        if (!mountedRef.current) break;
+
         const payment = validPayments[i];
         const isLastPayment = i === validPayments.length - 1;
 
@@ -223,6 +257,7 @@ export default function CustomSplitScreen() {
           tableWasClosed = true;
         }
 
+        // Créer la facture
         const bill = {
           id: Date.now() + Math.random(),
           tableNumber: tableIdNum,
@@ -249,13 +284,13 @@ export default function CustomSplitScreen() {
         }
       }
 
-      // ✅ CORRECTION PRINCIPALE : Traiter la navigation et le toast de manière séquentielle
+      if (!mountedRef.current) return;
+
+      // ✅ Traitement de la finalisation OPTIMISÉ
       if (allPaymentsProcessed && willPayFull) {
         const finalCheck = await getTable(tableIdNum);
         if (finalCheck && (finalCheck.order || finalCheck.guests)) {
-          console.warn(
-            "La table n'a pas été correctement fermée, forçage de la réinitialisation"
-          );
+          console.warn('Forçage de la réinitialisation de la table');
           await resetTable(tableIdNum);
 
           const verifyReset = await getTable(tableIdNum);
@@ -270,72 +305,69 @@ export default function CustomSplitScreen() {
           }
         }
 
-        // Rafraîchir les tables dans le contexte
         await refreshTables();
         setTableFullyPaid(true);
 
-        // ✅ CORRECTION : Afficher le toast AVANT de naviguer
+        // ✅ CORRECTION CRITIQUE: Toast AVANT navigation avec timeout
         toast.showToast(
           'Tous les partages ont été traités avec succès.',
           'success'
         );
 
-        // ✅ Utiliser setTimeout pour s'assurer que le toast s'affiche avant la navigation
-        setTimeout(() => {
-          router.push('/');
-        }, 100);
+        // Timeout pour navigation avec nettoyage automatique
+        processingTimeoutRef.current = setTimeout(() => {
+          if (mountedRef.current) {
+            router.push('/');
+          }
+        }, 150); // Très court délai
       } else {
         if (tableWasClosed) {
           const checkTable = await getTable(tableIdNum);
           if (checkTable && (checkTable.order || checkTable.guests)) {
-            console.warn(
-              'Table marquée comme fermée mais contient encore des données, nettoyage forcé'
-            );
             await resetTable(tableIdNum);
           }
 
-          // Rafraîchir les tables
           await refreshTables();
           setTableFullyPaid(true);
-
-          // ✅ Même correction ici
           toast.showToast(
             'Tous les partages ont été traités avec succès.',
             'success'
           );
 
-          setTimeout(() => {
-            router.push('/');
-          }, 100);
+          processingTimeoutRef.current = setTimeout(() => {
+            if (mountedRef.current) {
+              router.push('/');
+            }
+          }, 150);
         } else {
           const updatedTable = await getTable(tableIdNum);
           const remainingAmount = updatedTable?.order?.total || 0;
 
-          // Rafraîchir les tables
           await refreshTables();
-
           toast.showToast(
-            `Paiement(s) traité(s) avec succès. Solde restant : ${remainingAmount.toFixed(
+            `Paiement(s) traité(s). Solde restant : ${remainingAmount.toFixed(
               2
             )} €`,
             'success'
           );
 
-          setTimeout(() => {
-            router.push(`/table/${tableIdNum}`);
-          }, 100);
+          processingTimeoutRef.current = setTimeout(() => {
+            if (mountedRef.current) {
+              router.push(`/table/${tableIdNum}`);
+            }
+          }, 150);
         }
       }
     } catch (error) {
       console.error('Erreur de paiement :', error);
-      toast.showToast(
-        'Il y a eu une erreur lors du traitement de vos paiements.',
-        'error'
-      );
+      toast.showToast('Erreur lors du traitement des paiements.', 'error');
     } finally {
-      setProcessing(false);
+      if (mountedRef.current) {
+        setProcessing(false);
+      }
     }
   }, [
+    processing,
     tableIdNum,
     splitAmounts,
     paymentMethodIds,
@@ -419,6 +451,7 @@ export default function CustomSplitScreen() {
           <Text style={styles.processingText}>Traitement en cours...</Text>
         </View>
       )}
+
       <View style={styles.header}>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <ArrowLeft size={24} color="#333" />
@@ -525,7 +558,11 @@ export default function CustomSplitScreen() {
                   styles.disabledButton,
               ]}
               onPress={processPayments}
-              disabled={currentTotal === 0 || errorMessage.includes('dépasse')}
+              disabled={
+                processing ||
+                currentTotal === 0 ||
+                errorMessage.includes('dépasse')
+              }
             >
               <CheckCircle size={24} color="white" />
               <Text style={styles.processButtonText}>
@@ -576,7 +613,7 @@ export default function CustomSplitScreen() {
   );
 }
 
-// Styles restent identiques pour préserver l'apparence
+// Styles conservés pour préserver l'apparence
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   header: {

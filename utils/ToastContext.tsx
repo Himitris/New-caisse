@@ -1,4 +1,3 @@
-// utils/ToastContext.tsx
 import React, {
   createContext,
   useContext,
@@ -40,54 +39,119 @@ export const useToast = () => {
   return context;
 };
 
+// ✅ Limites strictes pour éviter l'accumulation
+const MAX_TOASTS = 3; // Maximum 3 toasts simultanés
+const TOAST_DURATION = 2500; // RÉDUIT de 3000ms à 2500ms
+const CLEANUP_INTERVAL = 5000; // Nettoyage forcé toutes les 5 secondes
+
 export const ToastProvider: React.FC<{ children: ReactNode }> = ({
   children,
 }) => {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
-  const timeoutRefs = useRef<{ [id: number]: number }>({});
+  const timeoutRefs = useRef<{ [id: number]: NodeJS.Timeout | number }>({});
   const animationRefs = useRef<{ [id: number]: Animated.CompositeAnimation }>(
     {}
   );
+  const mountedRef = useRef(true);
+  const cleanupIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  useEffect(() => {
-    return () => {
-      Object.values(timeoutRefs.current).forEach(clearTimeout);
-      Object.values(animationRefs.current).forEach((animation) => {
+  // ✅ Nettoyage automatique agressif
+  const forceCleanup = useCallback(() => {
+    if (!mountedRef.current) return;
+
+    // Nettoyer tous les timeouts orphelins
+    Object.entries(timeoutRefs.current).forEach(([id, timeout]) => {
+      const idNum = parseInt(id, 10);
+      const toastExists = toasts.some((t) => t.id === idNum);
+
+      if (!toastExists) {
+        clearTimeout(timeout);
+        delete timeoutRefs.current[idNum];
+      }
+    });
+
+    // Nettoyer toutes les animations orphelines
+    Object.entries(animationRefs.current).forEach(([id, animation]) => {
+      const idNum = parseInt(id, 10);
+      const toastExists = toasts.some((t) => t.id === idNum);
+
+      if (!toastExists) {
         animation.stop();
-      });
-    };
-  }, []);
+        delete animationRefs.current[idNum];
+      }
+    });
 
-  const removeToast = useCallback((id: number) => {
-    setToasts((prevToasts) => {
-      const toastIndex = prevToasts.findIndex((t) => t.id === id);
-      if (toastIndex === -1 || prevToasts[toastIndex].isRemoving) {
-        return prevToasts;
+    // Si trop de toasts, supprimer les plus anciens
+    if (toasts.length > MAX_TOASTS) {
+      const oldestToasts = toasts.slice(0, toasts.length - MAX_TOASTS);
+      oldestToasts.forEach((toast) => {
+        if (!toast.isRemoving) {
+          removeToast(toast.id);
+        }
+      });
+    }
+
+    console.log(
+      `🧹 Toast cleanup: ${Object.keys(timeoutRefs.current).length} timeouts, ${
+        Object.keys(animationRefs.current).length
+      } animations`
+    );
+  }, [toasts]);
+
+  // ✅ Setup du nettoyage automatique
+  useEffect(() => {
+    cleanupIntervalRef.current = setInterval(forceCleanup, CLEANUP_INTERVAL);
+
+    return () => {
+      mountedRef.current = false;
+
+      if (cleanupIntervalRef.current) {
+        clearInterval(cleanupIntervalRef.current);
       }
 
-      const updatedToasts = [...prevToasts];
-      updatedToasts[toastIndex] = {
-        ...updatedToasts[toastIndex],
-        isRemoving: true,
-      };
+      // Nettoyer TOUT à la destruction
+      Object.values(timeoutRefs.current).forEach(clearTimeout);
+      Object.values(animationRefs.current).forEach((animation) =>
+        animation.stop()
+      );
+
+      timeoutRefs.current = {};
+      animationRefs.current = {};
+    };
+  }, [forceCleanup]);
+
+  const removeToast = useCallback((id: number) => {
+    if (!mountedRef.current) return;
+
+    setToasts((prevToasts) => {
+      const toastIndex = prevToasts.findIndex((t) => t.id === id);
+      if (toastIndex === -1) return prevToasts;
 
       const toast = prevToasts[toastIndex];
+      if (toast.isRemoving) return prevToasts;
+
+      const updatedToasts = [...prevToasts];
+      updatedToasts[toastIndex] = { ...toast, isRemoving: true };
+
+      // Animation de sortie plus rapide
       const animation = Animated.timing(toast.opacity, {
         toValue: 0,
-        duration: 300,
+        duration: 200, // RÉDUIT de 300ms à 200ms
         useNativeDriver: true,
       });
 
       animationRefs.current[id] = animation;
 
       animation.start(() => {
+        if (!mountedRef.current) return;
+
         setToasts((currentToasts) => currentToasts.filter((t) => t.id !== id));
 
+        // Nettoyer les références
         if (timeoutRefs.current[id]) {
           clearTimeout(timeoutRefs.current[id]);
           delete timeoutRefs.current[id];
         }
-
         delete animationRefs.current[id];
       });
 
@@ -97,18 +161,31 @@ export const ToastProvider: React.FC<{ children: ReactNode }> = ({
 
   const showToast = useCallback(
     (message: string, type: ToastType = 'info') => {
-      const id = Date.now();
+      if (!mountedRef.current) return;
+
+      // Si trop de toasts, supprimer le plus ancien
+      if (toasts.length >= MAX_TOASTS) {
+        const oldestToast = toasts[0];
+        if (oldestToast && !oldestToast.isRemoving) {
+          removeToast(oldestToast.id);
+        }
+      }
+
+      const id = Date.now() + Math.random(); // Assurer l'unicité
       const opacity = new Animated.Value(0);
 
       setToasts((prevToasts) => [
-        ...prevToasts,
+        ...prevToasts.slice(-(MAX_TOASTS - 1)), // Garder seulement les plus récents
         { id, message, type, opacity, isRemoving: false },
       ]);
 
+      // Animation d'entrée plus rapide
       requestAnimationFrame(() => {
+        if (!mountedRef.current) return;
+
         const animation = Animated.timing(opacity, {
           toValue: 1,
-          duration: 300,
+          duration: 200, // RÉDUIT de 300ms à 200ms
           useNativeDriver: true,
         });
 
@@ -117,12 +194,12 @@ export const ToastProvider: React.FC<{ children: ReactNode }> = ({
 
         const timeout = setTimeout(() => {
           removeToast(id);
-        }, 3000);
+        }, TOAST_DURATION);
 
         timeoutRefs.current[id] = timeout;
       });
     },
-    [removeToast]
+    [toasts, removeToast]
   );
 
   const getBackgroundColor = (type: ToastType) => {
@@ -161,7 +238,9 @@ export const ToastProvider: React.FC<{ children: ReactNode }> = ({
                   { opacity: toast.opacity },
                 ]}
               >
-                <Text style={styles.toastText}>{toast.message}</Text>
+                <Text style={styles.toastText} numberOfLines={2}>
+                  {toast.message}
+                </Text>
               </Animated.View>
             </TouchableOpacity>
           ))}
@@ -175,29 +254,27 @@ const styles = StyleSheet.create({
   toastContainer: {
     position: 'absolute',
     bottom: 20,
-    alignSelf: 'center', // Centre le container
+    alignSelf: 'center',
     zIndex: 9999,
-    // Retiré left: 0, right: 0 pour ne pas bloquer les côtés
   },
   toastWrapper: {
-    // Nouveau style pour le wrapper du toast
-    width: 320, // Largeur fixe au lieu de pourcentage
+    width: 320,
     maxWidth: 400,
   },
   toast: {
-    padding: 16,
+    padding: 12, // RÉDUIT de 16 à 12
     borderRadius: 8,
-    marginVertical: 8,
+    marginVertical: 4, // RÉDUIT de 8 à 4
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.25,
     shadowRadius: 3.84,
     elevation: 5,
-    width: '100%', // Prend toute la largeur du wrapper
+    width: '100%',
   },
   toastText: {
     color: 'white',
-    fontSize: 16,
+    fontSize: 14, // RÉDUIT de 16 à 14
     fontWeight: '600',
     textAlign: 'center',
   },
