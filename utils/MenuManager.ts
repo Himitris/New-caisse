@@ -1,7 +1,7 @@
-// utils/MenuManager.ts - VERSION SIMPLIFIÉE
-
+// utils/MenuManager.ts - VERSION AVEC DISPONIBILITÉ
 import { getCustomMenuItems, getMenuAvailability } from './storage';
 import priceData from '../helpers/ManjosPrice';
+import { useEffect, useState } from 'react';
 
 interface MenuItem {
   id: number;
@@ -10,6 +10,7 @@ interface MenuItem {
   category: string;
   type: 'resto' | 'boisson';
   color: string;
+  available: boolean; // ✅ Disponibilité importante
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -25,57 +26,12 @@ const CATEGORY_COLORS: Record<string, string> = {
   Vins: '#9C27B0',
   Alcools: '#673AB7',
   Glaces: '#00BCD4',
-} as const;
-
-const getCategoryFromName = (
-  name: string,
-  type: 'resto' | 'boisson'
-): string => {
-  const lowerName = name.toLowerCase();
-  if (type === 'resto') {
-    if (lowerName.includes('salade')) return 'Salades';
-    if (lowerName.includes('dessert')) return 'Desserts';
-    if (lowerName.includes('frites')) return 'Accompagnements';
-    if (lowerName.includes('menu enfant')) return 'Menu Enfant';
-    if (lowerName.includes('maxi')) return 'Plats Maxi';
-    return 'Plats Principaux';
-  } else {
-    if (lowerName.includes('glace')) return 'Glaces';
-    if (lowerName.includes('thé') || lowerName.includes('café'))
-      return 'Boissons Chaudes';
-    if (
-      lowerName.includes('bière') ||
-      lowerName.includes('blonde') ||
-      lowerName.includes('ambree')
-    )
-      return 'Bières';
-    if (
-      lowerName.includes('vin') ||
-      lowerName.includes('pichet') ||
-      lowerName.includes('btl')
-    )
-      return 'Vins';
-    if (
-      lowerName.includes('apero') ||
-      lowerName.includes('digestif') ||
-      lowerName.includes('ricard') ||
-      lowerName.includes('alcool') ||
-      lowerName.includes('punch') ||
-      lowerName.includes('cocktail')
-    )
-      return 'Alcools';
-    return 'Softs';
-  }
 };
 
 class MenuManager {
   private static instance: MenuManager;
-  private menuItems: MenuItem[] = [];
-  private menuMap: Map<number, MenuItem> = new Map();
-  private unavailableIds: Set<number> = new Set();
+  private allItems: MenuItem[] = []; // ✅ TOUS les items
   private isLoaded: boolean = false;
-  private loadPromise: Promise<void> | null = null;
-  listeners: Set<() => void> = new Set();
 
   static getInstance(): MenuManager {
     if (!MenuManager.instance) {
@@ -84,187 +40,180 @@ class MenuManager {
     return MenuManager.instance;
   }
 
-  // ✅ Chargement simple et unique
   async ensureLoaded(): Promise<void> {
     if (this.isLoaded) return;
 
-    if (this.loadPromise) {
-      return this.loadPromise;
-    }
+    console.log('📦 Chargement menu avec disponibilité...');
 
-    this.loadPromise = this.load();
-    await this.loadPromise;
-    this.loadPromise = null;
+    const [customItems, menuAvailability] = await Promise.all([
+      getCustomMenuItems(),
+      getMenuAvailability(),
+    ]);
+
+    // ✅ Map de disponibilité pour lookup rapide
+    const availabilityMap = new Map(
+      menuAvailability.map((item) => [item.id, item.available])
+    );
+
+    // ✅ Items standards avec disponibilité
+    const standardItems: MenuItem[] = priceData.map((item: any) => ({
+      id: item.id,
+      name: item.name,
+      price: item.price,
+      category: this.getCategoryFromName(item.name, item.type),
+      type: item.type as 'resto' | 'boisson',
+      color:
+        CATEGORY_COLORS[this.getCategoryFromName(item.name, item.type)] ||
+        '#757575',
+      available: availabilityMap.get(item.id) ?? true, // ✅ Disponible par défaut
+    }));
+
+    // ✅ Items personnalisés avec disponibilité
+    const customMenuItems: MenuItem[] = customItems.map((item: any) => ({
+      id: item.id,
+      name: item.name,
+      price: item.price,
+      category: item.category,
+      type: item.type,
+      color: CATEGORY_COLORS[item.category] || '#757575',
+      available: item.available ?? true, // ✅ Disponible par défaut
+    }));
+
+    this.allItems = [...standardItems, ...customMenuItems];
+    this.isLoaded = true;
+
+    console.log(
+      `✅ Menu chargé: ${this.allItems.length} items (${
+        this.getAvailableItems().length
+      } disponibles)`
+    );
   }
 
-  private async load(): Promise<void> {
-    try {
-      console.log('📦 Chargement du menu...');
-
-      const [customItems, menuAvailability] = await Promise.all([
-        getCustomMenuItems(),
-        getMenuAvailability(),
-      ]);
-
-      // Items standards
-      const standardItems: MenuItem[] = priceData.map((item: any) => {
-        const category = getCategoryFromName(
-          item.name,
-          item.type as 'resto' | 'boisson'
-        );
-        return {
-          id: item.id,
-          name: item.name,
-          price: item.price,
-          category,
-          type: item.type as 'resto' | 'boisson',
-          color: CATEGORY_COLORS[category] || '#757575',
-        };
-      });
-
-      // Items personnalisés
-      const customMenuItems: MenuItem[] = customItems.map((item: any) => ({
-        id: item.id,
-        name: item.name,
-        price: item.price,
-        category: item.category,
-        type: item.type,
-        color: CATEGORY_COLORS[item.category] || '#757575',
-      }));
-
-      // Fusion et mise en cache
-      this.menuItems = [...standardItems, ...customMenuItems];
-      this.menuMap.clear();
-      this.menuItems.forEach((item) => this.menuMap.set(item.id, item));
-
-      // Items indisponibles
-      this.unavailableIds = new Set(
-        menuAvailability
-          .filter((item) => !item.available)
-          .map((item) => item.id)
-      );
-
-      this.isLoaded = true;
-      console.log(`✅ Menu chargé: ${this.menuItems.length} items`);
-
-      // Notifier les listeners
-      this.listeners.forEach((listener) => {
-        try {
-          listener();
-        } catch (error) {
-          console.error('Erreur listener menu:', error);
-        }
-      });
-    } catch (error) {
-      console.error('❌ Erreur chargement menu:', error);
-      throw error;
-    }
+  // ✅ TOUS les items (disponibles + indisponibles)
+  getAllItems(): MenuItem[] {
+    return this.allItems;
   }
 
-  // ✅ API simple
-  getItems(): MenuItem[] {
-    return this.menuItems;
-  }
-
+  // ✅ SEULEMENT les items disponibles
   getAvailableItems(): MenuItem[] {
-    return this.menuItems.filter((item) => !this.unavailableIds.has(item.id));
+    return this.allItems.filter((item) => item.available);
   }
 
+  // ✅ Un item spécifique (même indisponible)
   getItem(id: number): MenuItem | undefined {
-    return this.menuMap.get(id);
+    return this.allItems.find((item) => item.id === id);
   }
 
+  // ✅ Items par type (SEULEMENT disponibles)
   getItemsByType(type: 'resto' | 'boisson'): MenuItem[] {
     return this.getAvailableItems().filter((item) => item.type === type);
   }
 
+  // ✅ Items par catégorie (SEULEMENT disponibles)
   getItemsByCategory(category: string): MenuItem[] {
     return this.getAvailableItems().filter(
       (item) => item.category === category
     );
   }
 
+  // ✅ Catégories des items disponibles
   getCategories(type?: 'resto' | 'boisson'): string[] {
     const items = type
-      ? this.menuItems.filter((item) => item.type === type)
-      : this.menuItems;
+      ? this.getAvailableItems().filter((item) => item.type === type)
+      : this.getAvailableItems();
+
     return [...new Set(items.map((item) => item.category))].sort();
+  }
+
+  // ✅ Changer disponibilité d'un item
+  async toggleItemAvailability(itemId: number): Promise<boolean> {
+    const item = this.allItems.find((i) => i.id === itemId);
+    if (!item) return false;
+
+    // Modification locale immédiate
+    item.available = !item.available;
+
+    // Sauvegarde en arrière-plan
+    try {
+      const currentAvailability = await getMenuAvailability();
+      const existingIndex = currentAvailability.findIndex(
+        (a) => a.id === itemId
+      );
+
+      if (existingIndex >= 0) {
+        currentAvailability[existingIndex].available = item.available;
+      } else {
+        currentAvailability.push({
+          id: itemId,
+          available: item.available,
+          name: item.name,
+          price: item.price,
+        });
+      }
+
+      // Sauvegarde différée
+      setTimeout(() => {
+        import('./storage').then(({ saveMenuAvailability }) => {
+          saveMenuAvailability(currentAvailability);
+        });
+      }, 100);
+
+      return true;
+    } catch (error) {
+      // Rollback en cas d'erreur
+      item.available = !item.available;
+      console.error('Error toggling availability:', error);
+      return false;
+    }
   }
 
   isMenuLoaded(): boolean {
     return this.isLoaded;
   }
 
-  // ✅ Abonnements simples
-  subscribe(listener: () => void): () => void {
-    this.listeners.add(listener);
-
-    // Si déjà chargé, notifier immédiatement
-    if (this.isLoaded) {
-      setTimeout(listener, 0);
-    }
-
-    return () => this.listeners.delete(listener);
-  }
-
-  // ✅ Reset si nécessaire
   reset(): void {
     this.isLoaded = false;
-    this.menuItems = [];
-    this.menuMap.clear();
-    this.unavailableIds.clear();
-    console.log('🔄 Menu reset');
+    this.allItems = [];
+  }
+
+  // ✅ Méthodes utilitaires privées
+  private getCategoryFromName(name: string, type: 'resto' | 'boisson'): string {
+    const lowerName = name.toLowerCase();
+    if (type === 'resto') {
+      if (lowerName.includes('salade')) return 'Salades';
+      if (lowerName.includes('dessert')) return 'Desserts';
+      if (lowerName.includes('frites')) return 'Accompagnements';
+      if (lowerName.includes('menu enfant')) return 'Menu Enfant';
+      if (lowerName.includes('maxi')) return 'Plats Maxi';
+      return 'Plats Principaux';
+    } else {
+      if (lowerName.includes('glace')) return 'Glaces';
+      if (lowerName.includes('thé') || lowerName.includes('café'))
+        return 'Boissons Chaudes';
+      if (lowerName.includes('bière')) return 'Bières';
+      if (lowerName.includes('vin')) return 'Vins';
+      if (lowerName.includes('alcool') || lowerName.includes('ricard'))
+        return 'Alcools';
+      return 'Softs';
+    }
   }
 }
 
-// ✅ Export singleton
 export const menuManager = MenuManager.getInstance();
 
-// ✅ Hook React simple
-import { useEffect, useRef, useState } from 'react';
-
+// ✅ Hook React optimisé
 export const useMenu = () => {
   const [isLoaded, setIsLoaded] = useState(menuManager.isMenuLoaded());
-  const mountedRef = useRef(true);
 
   useEffect(() => {
-    mountedRef.current = true;
-
     if (!menuManager.isMenuLoaded()) {
-      menuManager.ensureLoaded().catch((error) => {
-        console.error('Erreur chargement menu:', error);
-      });
+      menuManager.ensureLoaded().then(() => setIsLoaded(true));
     }
-
-    const unsubscribe = menuManager.subscribe(() => {
-      if (mountedRef.current) {
-        setIsLoaded(true);
-      }
-    });
-
-    return () => {
-      mountedRef.current = false;
-      unsubscribe();
-    };
-  }, []);
-
-  // ✅ Nettoyage automatique si trop de listeners
-  useEffect(() => {
-    const cleanup = setInterval(() => {
-      if (menuManager.listeners && menuManager.listeners.size > 10) {
-        console.warn(
-          '⚠️ Trop de listeners MenuManager:',
-          menuManager.listeners.size
-        );
-      }
-    }, 30000);
-
-    return () => clearInterval(cleanup);
   }, []);
 
   return {
     isLoaded,
-    getItems: () => menuManager.getItems(),
+    getAllItems: () => menuManager.getAllItems(),
     getAvailableItems: () => menuManager.getAvailableItems(),
     getItem: (id: number) => menuManager.getItem(id),
     getItemsByType: (type: 'resto' | 'boisson') =>
@@ -273,5 +222,7 @@ export const useMenu = () => {
       menuManager.getItemsByCategory(category),
     getCategories: (type?: 'resto' | 'boisson') =>
       menuManager.getCategories(type),
+    toggleItemAvailability: (id: number) =>
+      menuManager.toggleItemAvailability(id),
   };
 };
