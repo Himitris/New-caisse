@@ -106,20 +106,48 @@ const getCachedData = <T>(key: string): T | null => {
 
 const setCachedData = <T>(key: string, data: T): void => {
   const now = Date.now();
-  
-  // Nettoyer le cache si trop d'entrées
+
+  // ✅ Nettoyage plus agressif
   if (memoryCache.size >= MAX_CACHE_ENTRIES) {
-    const oldestKey = Array.from(memoryCache.entries())
-      .sort((a, b) => a[1].timestamp - b[1].timestamp)[0][0];
-    memoryCache.delete(oldestKey);
+    // Supprimer les 3 plus anciennes entrées au lieu d'une seule
+    const sortedEntries = Array.from(memoryCache.entries()).sort(
+      (a, b) => a[1].timestamp - b[1].timestamp
+    );
+
+    for (let i = 0; i < Math.min(3, sortedEntries.length); i++) {
+      memoryCache.delete(sortedEntries[i][0]);
+    }
   }
-  
+
   memoryCache.set(key, {
     data,
     timestamp: now,
-    expires: now + CACHE_TTL
+    expires: now + CACHE_TTL,
   });
 };
+
+let cacheCleanupInterval: ReturnType<typeof setInterval> | null = null;
+
+if (!cacheCleanupInterval) {
+  cacheCleanupInterval = setInterval(() => {
+    const now = Date.now();
+    const keysToDelete: string[] = [];
+
+    memoryCache.forEach((entry, key) => {
+      if (now > entry.expires) {
+        keysToDelete.push(key);
+      }
+    });
+
+    keysToDelete.forEach((key) => memoryCache.delete(key));
+
+    if (keysToDelete.length > 0) {
+      console.log(
+        `🧹 Cache nettoyé: ${keysToDelete.length} entrées supprimées`
+      );
+    }
+  }, 60000); // Toutes les minutes
+}
 
 const clearCache = () => {
   memoryCache.clear();

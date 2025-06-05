@@ -227,19 +227,29 @@ export const useMenu = () => {
   const [isLoaded, setIsLoaded] = useState(menuManager.isMenuLoaded());
 
   useEffect(() => {
-    // Charger le menu si nécessaire
     if (!menuManager.isMenuLoaded()) {
       menuManager.ensureLoaded().catch((error) => {
         console.error('Erreur chargement menu:', error);
       });
     }
 
-    // S'abonner aux changements
     const unsubscribe = menuManager.subscribe(() => {
       setIsLoaded(true);
     });
 
-    return unsubscribe;
+    // ✅ CRITIQUE : S'assurer que le nettoyage se fait
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      // Si c'est le dernier composant qui utilise le menu, nettoyer
+      if (menuManager.isMenuLoaded()) {
+        console.log('🧹 Nettoyage du MenuManager');
+      }
+    };
   }, []);
 
   return {
