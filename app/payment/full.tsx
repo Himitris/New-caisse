@@ -144,7 +144,7 @@ export default function FullPaymentScreen() {
               },
             });
           } else {
-            router.push('/');
+            router.replace('/');
           }
           toast.showToast(
             `${table.name} a été payée complètement en ${method}.`,

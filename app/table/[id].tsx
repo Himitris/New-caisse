@@ -430,7 +430,7 @@ export default function TableScreen(): JSX.Element {
     const backHandler = BackHandler.addEventListener(
       'hardwareBackPress',
       () => {
-        router.push('/');
+        router.replace('/');
         return true;
       }
     );
@@ -732,7 +732,7 @@ export default function TableScreen(): JSX.Element {
               setTable(null);
               setGuestCount(1);
               refreshTables();
-              router.push('/');
+              router.replace('/');
               toast.showToast(`Table ${table.name} fermée`, 'success');
             } catch (error) {
               console.error('Error closing table:', error);
@@ -910,7 +910,7 @@ export default function TableScreen(): JSX.Element {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
-          <Pressable onPress={() => router.push('/')} style={styles.backLink}>
+          <Pressable onPress={() => router.replace('/')} style={styles.backLink}>
             <ArrowLeft size={28} color="#333" />
           </Pressable>
           <View style={styles.headerTitleContainer}>
@@ -932,7 +932,7 @@ export default function TableScreen(): JSX.Element {
     <View style={styles.container}>
       <View style={styles.header}>
         <Pressable
-          onPress={() => router.push('/')}
+          onPress={() => router.replace('/')}
           style={({ pressed }) => [
             styles.backLink,
             pressed && {backgroundColor: '#d0d0d0'},

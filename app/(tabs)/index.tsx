@@ -113,7 +113,7 @@ export default function TablesScreen() {
         setSelectedTable(table);
         setCoversSelectionModalVisible(true);
       } else if (table.status === 'occupied') {
-        router.replace(`/table/${table.id}`);
+        router.navigate(`/table/${table.id}`);
       } else if (table.status === 'reserved') {
         Alert.alert(
           'Table Réservée',
@@ -168,7 +168,7 @@ export default function TablesScreen() {
 
         await updateTable(updatedTable);
         await refreshTables();
-        router.push(`/table/${table.id}`);
+        router.navigate(`/table/${table.id}`);
       } catch (error) {
         console.error('Error opening table:', error);
         toast.showToast(

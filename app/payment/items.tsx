@@ -695,7 +695,7 @@ export default function ItemsPaymentScreen() {
           // ✅ AJOUT MANQUANT : Rafraîchir le contexte des tables
           await refreshTables();
 
-          router.push('/');
+          router.replace('/');
           toast.showToast('Tous les articles ont été payés.', 'success');
         } else {
           const updatedTable = {

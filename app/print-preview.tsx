@@ -333,7 +333,7 @@ export default function PrintPreviewScreen() {
     } else if (isPartialPayment) {
       router.push(`/table/${tableId}`);
     } else {
-      router.push('/');
+      router.replace('/');
     }
   };
 

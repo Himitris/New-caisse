@@ -248,7 +248,7 @@ export default function SplitBillScreen() {
   const handleComplete = () => {
     if (tableFullyPaid || allPaid) {
       // Si tout est payé, retourner à l'écran d'accueil
-      router.push('/');
+      router.replace('/');
       toast.showToast(
         'Tous les paiements ont été traités avec succès.',
         'success'

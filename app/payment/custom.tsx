@@ -317,7 +317,7 @@ export default function CustomSplitScreen() {
         // Timeout pour navigation avec nettoyage automatique
         processingTimeoutRef.current = setTimeout(() => {
           if (mountedRef.current) {
-            router.push('/');
+            router.replace('/');
           }
         }, 150); // Très court délai
       } else {
@@ -336,7 +336,7 @@ export default function CustomSplitScreen() {
 
           processingTimeoutRef.current = setTimeout(() => {
             if (mountedRef.current) {
-              router.push('/');
+              router.replace('/');
             }
           }, 150);
         } else {

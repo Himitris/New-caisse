@@ -153,7 +153,7 @@ const PasswordModal: React.FC<PasswordModalProps> = ({
 
   const handleCancel = () => {
     if (type === 'verify') {
-      router.push('/'); // Retour à l'accueil
+      router.replace('/'); // Retour à l'accueil
     } else if (type === 'change') {
       onCancel(); // Ferme le modal
     }
