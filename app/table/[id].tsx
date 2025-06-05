@@ -146,6 +146,14 @@ export default function TableScreen(): JSX.Element {
       if (!loading) {
         loadTable();
       }
+
+      // ✅ Nettoyage forcé des caches lors du focus
+      return () => {
+        // Vider les caches quand on quitte la page
+        if (typeof global !== 'undefined' && global.gc) {
+          global.gc();
+        }
+      };
     }, [loading, loadTable])
   );
 

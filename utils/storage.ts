@@ -87,8 +87,8 @@ const AUTO_CLEANUP_ENABLED = false; // ✅ DÉSACTIVÉ par défaut
 
 // ✅ Cache en mémoire avec limite raisonnable
 const memoryCache = new Map<string, { data: any; timestamp: number; expires: number }>();
-const CACHE_TTL = 30 * 1000; // 30 secondes
-const MAX_CACHE_ENTRIES = 15; // Augmenté pour plus de performance
+const CACHE_TTL = 10 * 1000; // 30 secondes
+const MAX_CACHE_ENTRIES = 8; // Augmenté pour plus de performance
 
 // ✅ Fonction de cache intelligente
 const getCachedData = <T>(key: string): T | null => {
@@ -107,14 +107,14 @@ const getCachedData = <T>(key: string): T | null => {
 const setCachedData = <T>(key: string, data: T): void => {
   const now = Date.now();
 
-  // ✅ Nettoyage plus agressif
+  // ✅ Nettoyage plus agressif - supprimer 50% quand limite atteinte
   if (memoryCache.size >= MAX_CACHE_ENTRIES) {
-    // Supprimer les 3 plus anciennes entrées au lieu d'une seule
     const sortedEntries = Array.from(memoryCache.entries()).sort(
       (a, b) => a[1].timestamp - b[1].timestamp
     );
 
-    for (let i = 0; i < Math.min(3, sortedEntries.length); i++) {
+    const toDelete = Math.ceil(sortedEntries.length / 2); // Supprimer 50%
+    for (let i = 0; i < toDelete; i++) {
       memoryCache.delete(sortedEntries[i][0]);
     }
   }
@@ -141,12 +141,24 @@ if (!cacheCleanupInterval) {
 
     keysToDelete.forEach((key) => memoryCache.delete(key));
 
+    // ✅ Forcer un nettoyage si trop d'entrées même valides
+    if (memoryCache.size > MAX_CACHE_ENTRIES) {
+      const sortedEntries = Array.from(memoryCache.entries()).sort(
+        (a, b) => a[1].timestamp - b[1].timestamp
+      );
+
+      const excess = memoryCache.size - MAX_CACHE_ENTRIES;
+      for (let i = 0; i < excess; i++) {
+        memoryCache.delete(sortedEntries[i][0]);
+      }
+    }
+
     if (keysToDelete.length > 0) {
       console.log(
-        `🧹 Cache nettoyé: ${keysToDelete.length} entrées supprimées`
+        `🧹 Cache nettoyé: ${keysToDelete.length} entrées, taille: ${memoryCache.size}`
       );
     }
-  }, 60000); // Toutes les minutes
+  }, 15000); // Toutes les 15 secondes au lieu de 60
 }
 
 const clearCache = () => {
@@ -481,29 +493,20 @@ export const manualCleanupBills = async (options: {
 
 // ✅ Pagination optimisée avec cache
 export const getBillsPage = async (page: number = 0, pageSize: number = 20) => {
-  const cacheKey = `bills_page_${page}_${pageSize}`;
-  const cached = getCachedData<any>(cacheKey);
-  
-  if (cached) {
-    return cached;
-  }
-  
+  // ✅ SANS cache - calcul direct
   const allBills = await getBills();
   const sorted = [...allBills].sort(
     (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
   );
-  
+
   const start = page * pageSize;
   const end = start + pageSize;
-  
-  const result = {
+
+  return {
     bills: sorted.slice(start, end),
     total: sorted.length,
     hasMore: end < sorted.length,
   };
-  
-  setCachedData(cacheKey, result);
-  return result;
 };
 
 // ✅ Filtrage optimisé avec cache
@@ -512,27 +515,24 @@ export const getFilteredBills = async (filters: {
   dateRange?: { start: Date; end: Date };
   paymentMethod?: string;
 }) => {
-  const cacheKey = `filtered_bills_${JSON.stringify(filters)}`;
-  const cached = getCachedData<Bill[]>(cacheKey);
-  
-  if (cached) {
-    return cached;
-  }
-  
+  // ✅ SANS cache - calcul direct
   const allBills = await getBills();
-  
-  const filtered = allBills.filter((bill) => {
+
+  return allBills.filter((bill) => {
     if (filters.dateRange) {
       const billDate = new Date(bill.timestamp);
-      if (billDate < filters.dateRange.start || billDate > filters.dateRange.end) {
+      if (
+        billDate < filters.dateRange.start ||
+        billDate > filters.dateRange.end
+      ) {
         return false;
       }
     }
-    
+
     if (filters.paymentMethod && bill.paymentMethod !== filters.paymentMethod) {
       return false;
     }
-    
+
     if (filters.searchText) {
       const search = filters.searchText.toLowerCase();
       const tableName = bill.tableName || `Table ${bill.tableNumber}`;
@@ -541,12 +541,9 @@ export const getFilteredBills = async (filters: {
         bill.amount.toString().includes(search)
       );
     }
-    
+
     return true;
   });
-  
-  setCachedData(cacheKey, filtered);
-  return filtered;
 };
 
 // ✅ MENU - Fonctions inchangées

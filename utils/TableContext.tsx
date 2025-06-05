@@ -25,9 +25,9 @@ interface TableContextType {
 const TableContext = createContext<TableContextType | undefined>(undefined);
 
 const MAX_CACHE_SIZE = 15; // Réduit pour plus de réactivité
-const CACHE_TTL = 90 * 1000; // 1.5 minutes - plus court pour fraîcheur
-const CLEANUP_INTERVAL = 20 * 1000; // Nettoyage toutes les 20 secondes
-const BATCH_WRITE_DELAY = 100; // Groupe les écritures pendant 100ms
+const CACHE_TTL = 30 * 1000; // Réduit de 90s à 30s
+const CLEANUP_INTERVAL = 15 * 1000; // Réduit de 20s à 15s
+const BATCH_WRITE_DELAY = 50; // Réduit de 100ms à 50ms
 
 interface CacheEntry {
   table: Table;
@@ -121,21 +121,20 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
 
     keysToDelete.forEach((key) => tableCache.delete(key));
 
-    // ✅ Nettoyage par taille plus agressif
+    // ✅ Nettoyage forcé si trop de données
     if (tableCache.size > MAX_CACHE_SIZE) {
       const sortedEntries = Array.from(tableCache.entries())
-        .filter(([, entry]) => !entry.dirty) // Ne pas supprimer les données modifiées
+        .filter(([, entry]) => !entry.dirty)
         .sort((a, b) => a[1].timestamp - b[1].timestamp);
 
-      const toDelete = sortedEntries.slice(
-        0,
-        Math.max(0, tableCache.size - MAX_CACHE_SIZE)
-      );
-      toDelete.forEach(([key]) => tableCache.delete(key));
+      const toDelete = Math.ceil(sortedEntries.length / 2); // Plus agressif
+      for (let i = 0; i < toDelete; i++) {
+        tableCache.delete(sortedEntries[i][0]);
+      }
     }
 
     console.log(
-      `🧹 Cache nettoyé: ${keysToDelete.length} entrées, taille: ${tableCache.size}`
+      `🧹 Table cache nettoyé: ${keysToDelete.length} entrées, taille: ${tableCache.size}`
     );
   }, []);
 

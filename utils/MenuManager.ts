@@ -75,7 +75,7 @@ class MenuManager {
   private unavailableIds: Set<number> = new Set();
   private isLoaded: boolean = false;
   private loadPromise: Promise<void> | null = null;
-  private listeners: Set<() => void> = new Set();
+  listeners: Set<() => void> = new Set();
 
   static getInstance(): MenuManager {
     if (!MenuManager.instance) {
@@ -221,12 +221,15 @@ class MenuManager {
 export const menuManager = MenuManager.getInstance();
 
 // ✅ Hook React simple
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export const useMenu = () => {
   const [isLoaded, setIsLoaded] = useState(menuManager.isMenuLoaded());
+  const mountedRef = useRef(true);
 
   useEffect(() => {
+    mountedRef.current = true;
+
     if (!menuManager.isMenuLoaded()) {
       menuManager.ensureLoaded().catch((error) => {
         console.error('Erreur chargement menu:', error);
@@ -234,22 +237,29 @@ export const useMenu = () => {
     }
 
     const unsubscribe = menuManager.subscribe(() => {
-      setIsLoaded(true);
+      if (mountedRef.current) {
+        setIsLoaded(true);
+      }
     });
 
-    // ✅ CRITIQUE : S'assurer que le nettoyage se fait
     return () => {
+      mountedRef.current = false;
       unsubscribe();
     };
   }, []);
 
+  // ✅ Nettoyage automatique si trop de listeners
   useEffect(() => {
-    return () => {
-      // Si c'est le dernier composant qui utilise le menu, nettoyer
-      if (menuManager.isMenuLoaded()) {
-        console.log('🧹 Nettoyage du MenuManager');
+    const cleanup = setInterval(() => {
+      if (menuManager.listeners && menuManager.listeners.size > 10) {
+        console.warn(
+          '⚠️ Trop de listeners MenuManager:',
+          menuManager.listeners.size
+        );
       }
-    };
+    }, 30000);
+
+    return () => clearInterval(cleanup);
   }, []);
 
   return {
