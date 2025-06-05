@@ -7,6 +7,7 @@ import { Printer, Share, Home, Gift } from 'lucide-react-native';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { useSettings } from '@/utils/useSettings';
+import { OrderItem } from '@/utils/storage';
 
 export default function PrintPreviewScreen() {
   const { paymentMethods } = useSettings();
@@ -83,13 +84,6 @@ export default function PrintPreviewScreen() {
   const generateHTML = () => {
     let totalPrice = 0;
     let offeredTotal = 0;
-
-    interface OrderItem {
-      name: string;
-      quantity: number;
-      price: number;
-      offered?: boolean;
-    }
 
     const itemsHTML: string = order.items
       .map((item: OrderItem) => {

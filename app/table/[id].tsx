@@ -187,7 +187,9 @@ export default function TableScreen(): JSX.Element {
           const items = [...updatedTable.order.items];
           const existingItemIndex = items.findIndex(
             (orderItem) =>
-              orderItem.name === item.name && orderItem.price === item.price
+              orderItem.menuId === item.id && // ✅ Utiliser menuId pour la comparaison
+              orderItem.name === item.name &&
+              orderItem.price === item.price
           );
 
           if (existingItemIndex >= 0) {
@@ -198,9 +200,11 @@ export default function TableScreen(): JSX.Element {
           } else {
             items.push({
               id: Date.now() + Math.random(),
+              menuId: item.id, // ✅ Ajouter menuId pour référencer l'item original
               name: item.name,
               price: item.price,
               quantity: 1,
+              type: item.type, // ✅ Stocker le type directement
             });
           }
 
@@ -211,7 +215,6 @@ export default function TableScreen(): JSX.Element {
         });
       });
 
-      // ✅ Sauvegarde avec délai pour grouper les modifications
       setSafeTimeout(async () => {
         if (!isMounted()) return;
 
@@ -279,9 +282,10 @@ export default function TableScreen(): JSX.Element {
     const result = { plats: [] as OrderItem[], boissons: [] as OrderItem[] };
 
     deferredTable.order.items.forEach((item) => {
-      const menuItem = getMenuItem(item.id);
-      const type = menuItem?.type || 'resto';
-      result[type === 'boisson' ? 'boissons' : 'plats'].push(item);
+      // ✅ Utiliser le type stocké dans l'item ou fallback sur menu
+      const itemType =
+        item.type || getMenuItem(item.menuId || item.id)?.type || 'resto';
+      result[itemType === 'boisson' ? 'boissons' : 'plats'].push(item);
     });
 
     return result;

@@ -1,38 +1,49 @@
 // app/(tabs)/menu.tsx - VERSION SIMPLIFIÉE AVEC NOUVEAUX HOOKS
 
+import { useToast } from '@/utils/ToastContext';
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  Pressable,
-  TextInput,
-  Modal,
-  Alert,
-} from 'react-native';
-import { useState, useMemo, useCallback, memo, useEffect } from 'react';
-import {
-  CirclePlus as PlusCircle,
-  CircleMinus as MinusCircle,
   CreditCard as Edit,
-  X,
-  Save,
+  CircleMinus as MinusCircle,
   Plus,
+  CirclePlus as PlusCircle,
+  Save,
   Trash2,
+  X
 } from 'lucide-react-native';
-import { useMenu, menuManager } from '../../utils/MenuManager'; // ✅ Import du nouveau hook
-import { useInstanceManager } from '../../utils/useInstanceManager'; // ✅ Import du gestionnaire
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { menuManager, useMenu } from '../../utils/MenuManager'; // ✅ Import du nouveau hook
+import {
+  CustomMenuItem,
+  addCustomMenuItem,
+  deleteCustomMenuItem,
   getMenuAvailability,
   saveMenuAvailability,
-  MenuItemAvailability,
-  addCustomMenuItem,
-  updateCustomMenuItem,
-  deleteCustomMenuItem,
-  CustomMenuItem,
-  saveCustomMenuItems,
+  updateCustomMenuItem
 } from '../../utils/storage';
-import { useToast } from '@/utils/ToastContext';
+import { useInstanceManager } from '../../utils/useInstanceManager'; // ✅ Import du gestionnaire
+
+
+const CATEGORIES_BY_TYPE = {
+  resto: [
+    'Plats Principaux',
+    'Plats Maxi',
+    'Salades',
+    'Accompagnements',
+    'Desserts',
+    'Menu Enfant',
+  ],
+  boisson: ['Softs', 'Boissons Chaudes', 'Bières', 'Vins', 'Alcools', 'Glaces'],
+} as const;
 
 // ✅ Interface pour les types du menu
 interface MenuItem {
@@ -65,21 +76,44 @@ const EditItemModal = memo<EditModalProps>(
     const [price, setPrice] = useState('');
     const [available, setAvailable] = useState(true);
 
+    // ✅ Meilleure synchronisation de l'état initial
     useEffect(() => {
-      if (item) {
+      if (item && visible) {
         setName(item.name);
         setPrice(item.price.toString());
         setAvailable(item.available);
       }
-    }, [item]);
+    }, [item, visible]); // ✅ Ajout de 'visible' comme dépendance
+
+    // ✅ Réinitialiser l'état quand le modal se ferme
+    useEffect(() => {
+      if (!visible) {
+        setName('');
+        setPrice('');
+        setAvailable(true);
+      }
+    }, [visible]);
 
     const handleSave = useCallback(() => {
       if (!item) return;
 
+      const trimmedName = name.trim();
+      if (!trimmedName) {
+        // Ajouter une validation
+        alert('Le nom ne peut pas être vide');
+        return;
+      }
+
+      const parsedPrice = parseFloat(price);
+      if (isNaN(parsedPrice) || parsedPrice <= 0) {
+        alert('Le prix doit être un nombre positif');
+        return;
+      }
+
       const updatedItem = {
         ...item,
-        name,
-        price: parseFloat(price) || item.price,
+        name: trimmedName,
+        price: parsedPrice,
         available,
       };
 
@@ -188,6 +222,9 @@ const MenuItemCard = memo(
     onEdit: () => void;
     onDelete: () => void;
   }) => {
+    // ✅ Déterminer si c'est un item personnalisé (ID > 10000 par exemple)
+    const isCustomItem = item.id > 10000;
+
     return (
       <View style={[styles.menuItem, { borderLeftColor: item.color }]}>
         <View style={styles.itemInfo}>
@@ -195,6 +232,12 @@ const MenuItemCard = memo(
             {item.name}
           </Text>
           <Text style={styles.itemPrice}>{item.price.toFixed(2)} €</Text>
+          {/* ✅ Indicateur pour les items personnalisés */}
+          {isCustomItem && (
+            <View style={styles.customItemBadge}>
+              <Text style={styles.customItemText}>Personnalisé</Text>
+            </View>
+          )}
         </View>
         <View style={styles.itemActions}>
           <Pressable
@@ -213,18 +256,32 @@ const MenuItemCard = memo(
               {item.available ? 'Indisponible' : 'Disponible'}
             </Text>
           </Pressable>
-          <Pressable
-            style={[styles.actionButton, { backgroundColor: '#2196F3' }]}
-            onPress={onEdit}
-          >
-            <Edit size={16} color="#fff" />
-            <Text style={styles.actionButtonText}>Modifier</Text>
-          </Pressable>
+
+          {/* ✅ Bouton modifier - seulement pour les items personnalisés */}
+          {isCustomItem && (
+            <Pressable
+              style={[styles.actionButton, { backgroundColor: '#2196F3' }]}
+              onPress={onEdit}
+            >
+              <Edit size={16} color="#fff" />
+              <Text style={styles.actionButtonText}>Modifier</Text>
+            </Pressable>
+          )}
+
+          {/* ✅ Bouton supprimer - seulement pour les items personnalisés */}
+          {isCustomItem && (
+            <Pressable
+              style={[styles.actionButton, { backgroundColor: '#F44336' }]}
+              onPress={onDelete}
+            >
+              <Trash2 size={16} color="#fff" />
+              <Text style={styles.actionButtonText}>Supprimer</Text>
+            </Pressable>
+          )}
         </View>
       </View>
     );
   },
-  // ✅ Comparaison stricte pour éviter les re-renders
   (prevProps, nextProps) => {
     return (
       prevProps.item.id === nextProps.item.id &&
@@ -240,6 +297,18 @@ export default function MenuScreen() {
   const { isLoaded, getItems, getCategories } = useMenu();
   const { isMounted, setSafeTimeout, safeExecute } =
     useInstanceManager('MenuScreen');
+    const [addModalVisible, setAddModalVisible] = useState(false);
+    const [newItem, setNewItem] = useState<{
+      name: string;
+      price: string;
+      category: string;
+      type: 'resto' | 'boisson';
+    }>({
+      name: '',
+      price: '',
+      category: '',
+      type: 'resto',
+    });
 
   // ✅ États simplifiés
   const [menuState, setMenuState] = useState<MenuState>({
@@ -402,15 +471,128 @@ export default function MenuScreen() {
   );
 
   // ✅ Handlers simplifiés
-  const handleEdit = useCallback((item: MenuItem) => {
-    setEditItem(item);
-    setEditModalVisible(true);
-  }, []);
+  const handleEdit = useCallback(
+    (item: MenuItem) => {
+      const isCustomItem = item.id > 10000;
+
+      if (!isCustomItem) {
+        toast.showToast(
+          'Les articles par défaut ne peuvent pas être modifiés.',
+          'info'
+        );
+        return;
+      }
+
+      setEditItem(item);
+      setEditModalVisible(true);
+    },
+    [toast]
+  );
+
+  const handleDelete = useCallback(
+    async (item: MenuItem) => {
+      Alert.alert(
+        "Supprimer l'article",
+        `Êtes-vous sûr de vouloir supprimer "${item.name}" ?`,
+        [
+          { text: 'Annuler', style: 'cancel' },
+          {
+            text: 'Supprimer',
+            style: 'destructive',
+            onPress: async () => {
+              try {
+                await deleteCustomMenuItem(item.id);
+
+                // Forcer le rechargement du menu
+                menuManager.reset();
+                await menuManager.ensureLoaded();
+
+                toast.showToast('Article supprimé avec succès.', 'success');
+              } catch (error) {
+                console.error('Error deleting menu item:', error);
+                toast.showToast("Impossible de supprimer l'article.", 'error');
+              }
+            },
+          },
+        ]
+      );
+    },
+    [toast]
+  );
+
+  const handleAddNewItem = useCallback(async () => {
+    if (!newItem.name.trim() || !newItem.price.trim()) {
+      toast.showToast('Veuillez remplir tous les champs.', 'warning');
+      return;
+    }
+
+    const price = parseFloat(newItem.price);
+    if (isNaN(price) || price <= 0) {
+      toast.showToast('Veuillez entrer un prix valide.', 'warning');
+      return;
+    }
+
+    // ✅ Déterminer la catégorie finale
+    let finalCategory = newItem.category;
+    if (!finalCategory) {
+      finalCategory =
+        newItem.type === 'boisson'
+          ? 'Boissons Personnalisées'
+          : 'Plats Personnalisés';
+    }
+
+    try {
+      const customItem: CustomMenuItem = {
+        id: Date.now() + 10000, // ✅ S'assurer que l'ID est > 10000 pour les items personnalisés
+        name: newItem.name.trim(),
+        price: price,
+        category: finalCategory,
+        type: newItem.type,
+        available: true,
+      };
+
+      await addCustomMenuItem(customItem);
+
+      // Forcer le rechargement du menu
+      menuManager.reset();
+      await menuManager.ensureLoaded();
+
+      // Réinitialiser le formulaire
+      setNewItem({
+        name: '',
+        price: '',
+        category: '',
+        type: 'resto',
+      });
+
+      setAddModalVisible(false);
+      toast.showToast('Article ajouté avec succès.', 'success');
+    } catch (error) {
+      console.error('Error adding menu item:', error);
+      toast.showToast("Impossible d'ajouter l'article.", 'error');
+    }
+  }, [newItem, toast]);
 
   const handleSaveEdit = useCallback(
     async (updatedItem: MenuItem) => {
       try {
-        // Mise à jour optimiste
+        const isCustomItem = updatedItem.id > 10000;
+
+        if (isCustomItem) {
+          // ✅ Mettre à jour l'item personnalisé dans le stockage
+          const customItem: CustomMenuItem = {
+            id: updatedItem.id,
+            name: updatedItem.name,
+            price: updatedItem.price,
+            category: updatedItem.category,
+            type: updatedItem.type,
+            available: updatedItem.available,
+          };
+
+          await updateCustomMenuItem(customItem);
+        }
+
+        // ✅ Mise à jour optimiste de la disponibilité
         safeExecute(() => {
           setUnavailableItems((prev) => {
             const newSet = new Set(prev);
@@ -423,6 +605,7 @@ export default function MenuScreen() {
           });
         });
 
+        // ✅ Sauvegarder la disponibilité
         const availability = await getMenuAvailability();
         const updatedAvailability = availability.some(
           (item) => item.id === updatedItem.id
@@ -457,9 +640,24 @@ export default function MenuScreen() {
       } catch (error) {
         console.error('Error updating menu item:', error);
         toast.showToast("Impossible de mettre à jour l'article.", 'error');
+
+        // ✅ Revenir à l'état précédent en cas d'erreur
+        if (isMounted()) {
+          safeExecute(() => {
+            setUnavailableItems((prev) => {
+              const newSet = new Set(prev);
+              if (!updatedItem.available) {
+                newSet.delete(updatedItem.id);
+              } else {
+                newSet.add(updatedItem.id);
+              }
+              return newSet;
+            });
+          });
+        }
       }
     },
-    [safeExecute, toast]
+    [safeExecute, toast, isMounted]
   );
 
   const handleCategorySelect = useCallback((category: string) => {
@@ -495,48 +693,57 @@ export default function MenuScreen() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Gestion du Menu</Text>
-        <View style={styles.typeFilters}>
+        <View style={styles.headerActions}>
           <Pressable
-            style={[
-              styles.typeFilterButton,
-              menuState.activeType === 'resto' && styles.activeTypeButton,
-            ]}
-            onPress={() =>
-              setActiveType(menuState.activeType === 'resto' ? null : 'resto')
-            }
+            style={styles.addItemButton}
+            onPress={() => setAddModalVisible(true)}
           >
-            <Text
-              style={[
-                styles.typeFilterText,
-                menuState.activeType === 'resto' && styles.activeTypeText,
-              ]}
-            >
-              Plats
-            </Text>
+            <Plus size={20} color="white" />
+            <Text style={styles.addItemButtonText}>Ajouter</Text>
           </Pressable>
-          <Pressable
-            style={[
-              styles.typeFilterButton,
-              menuState.activeType === 'boisson' && styles.activeTypeButton,
-            ]}
-            onPress={() =>
-              setActiveType(
-                menuState.activeType === 'boisson' ? null : 'boisson'
-              )
-            }
-          >
-            <Text
+
+          <View style={styles.typeFilters}>
+            <Pressable
               style={[
-                styles.typeFilterText,
-                menuState.activeType === 'boisson' && styles.activeTypeText,
+                styles.typeFilterButton,
+                menuState.activeType === 'resto' && styles.activeTypeButton,
               ]}
+              onPress={() =>
+                setActiveType(menuState.activeType === 'resto' ? null : 'resto')
+              }
             >
-              Boissons
-            </Text>
-          </Pressable>
+              <Text
+                style={[
+                  styles.typeFilterText,
+                  menuState.activeType === 'resto' && styles.activeTypeText,
+                ]}
+              >
+                Plats
+              </Text>
+            </Pressable>
+            <Pressable
+              style={[
+                styles.typeFilterButton,
+                menuState.activeType === 'boisson' && styles.activeTypeButton,
+              ]}
+              onPress={() =>
+                setActiveType(
+                  menuState.activeType === 'boisson' ? null : 'boisson'
+                )
+              }
+            >
+              <Text
+                style={[
+                  styles.typeFilterText,
+                  menuState.activeType === 'boisson' && styles.activeTypeText,
+                ]}
+              >
+                Boissons
+              </Text>
+            </Pressable>
+          </View>
         </View>
       </View>
-
       <View style={styles.content}>
         <View style={styles.categoriesSidebar}>
           <ScrollView>
@@ -592,14 +799,181 @@ export default function MenuScreen() {
                   item={item}
                   onToggleAvailability={() => toggleItemAvailability(item.id)}
                   onEdit={() => handleEdit(item)}
-                  onDelete={() => {}} // Placeholder pour delete
+                  onDelete={() => handleDelete(item)}
                 />
               ))}
             </View>
           </ScrollView>
         </View>
       </View>
+      <Modal
+        visible={addModalVisible}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => setAddModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Ajouter un article</Text>
+              <Pressable
+                onPress={() => setAddModalVisible(false)}
+                style={styles.closeButton}
+              >
+                <X size={24} color="#666" />
+              </Pressable>
+            </View>
 
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Nom:</Text>
+              <TextInput
+                style={styles.input}
+                value={newItem.name}
+                onChangeText={(text) =>
+                  setNewItem((prev) => ({ ...prev, name: text }))
+                }
+                placeholder="Nom de l'article"
+              />
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Prix (€):</Text>
+              <TextInput
+                style={styles.input}
+                value={newItem.price}
+                onChangeText={(text) =>
+                  setNewItem((prev) => ({ ...prev, price: text }))
+                }
+                keyboardType="decimal-pad"
+                placeholder="0.00"
+              />
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Type:</Text>
+              <View style={styles.typeSelector}>
+                <Pressable
+                  style={[
+                    styles.typeOption,
+                    newItem.type === 'resto' && styles.selectedTypeOption,
+                  ]}
+                  onPress={() =>
+                    setNewItem((prev) => ({
+                      ...prev,
+                      type: 'resto',
+                      category: '', // ✅ Reset catégorie quand on change de type
+                    }))
+                  }
+                >
+                  <Text
+                    style={[
+                      styles.typeOptionText,
+                      newItem.type === 'resto' && styles.selectedTypeOptionText,
+                    ]}
+                  >
+                    Plat
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={[
+                    styles.typeOption,
+                    newItem.type === 'boisson' && styles.selectedTypeOption,
+                  ]}
+                  onPress={() =>
+                    setNewItem((prev) => ({
+                      ...prev,
+                      type: 'boisson',
+                      category: '', // ✅ Reset catégorie quand on change de type
+                    }))
+                  }
+                >
+                  <Text
+                    style={[
+                      styles.typeOptionText,
+                      newItem.type === 'boisson' &&
+                        styles.selectedTypeOptionText,
+                    ]}
+                  >
+                    Boisson
+                  </Text>
+                </Pressable>
+              </View>
+            </View>
+
+            <View style={styles.formGroup}>
+              <Text style={styles.label}>Catégorie:</Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.categorySelector}
+              >
+                {/* ✅ Catégorie personnalisée */}
+                <Pressable
+                  style={[
+                    styles.categoryOption,
+                    newItem.category === '' && styles.selectedCategoryOption,
+                  ]}
+                  onPress={() =>
+                    setNewItem((prev) => ({ ...prev, category: '' }))
+                  }
+                >
+                  <Text
+                    style={[
+                      styles.categoryOptionText,
+                      newItem.category === '' &&
+                        styles.selectedCategoryOptionText,
+                    ]}
+                  >
+                    Personnalisée
+                  </Text>
+                </Pressable>
+
+                {/* ✅ Catégories prédéfinies selon le type */}
+                {CATEGORIES_BY_TYPE[newItem.type].map((category) => (
+                  <Pressable
+                    key={category}
+                    style={[
+                      styles.categoryOption,
+                      newItem.category === category &&
+                        styles.selectedCategoryOption,
+                    ]}
+                    onPress={() =>
+                      setNewItem((prev) => ({ ...prev, category }))
+                    }
+                  >
+                    <Text
+                      style={[
+                        styles.categoryOptionText,
+                        newItem.category === category &&
+                          styles.selectedCategoryOptionText,
+                      ]}
+                    >
+                      {category}
+                    </Text>
+                  </Pressable>
+                ))}
+              </ScrollView>
+
+              {/* ✅ Input pour catégorie personnalisée */}
+              {newItem.category === '' && (
+                <TextInput
+                  style={[styles.input, { marginTop: 8 }]}
+                  value={newItem.category}
+                  onChangeText={(text) =>
+                    setNewItem((prev) => ({ ...prev, category: text }))
+                  }
+                  placeholder="Nom de la catégorie personnalisée"
+                />
+              )}
+            </View>
+
+            <Pressable style={styles.saveButton} onPress={handleAddNewItem}>
+              <Plus size={20} color="#fff" />
+              <Text style={styles.saveButtonText}>Ajouter</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
       <EditItemModal
         visible={editModalVisible}
         item={editItem}
@@ -829,5 +1203,84 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 16,
     fontWeight: '600',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  addItemButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#4CAF50',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    gap: 6,
+  },
+  addItemButtonText: {
+    color: 'white',
+    fontWeight: '600',
+    fontSize: 14,
+  },
+  typeSelector: {
+    flexDirection: 'row',
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  typeOption: {
+    flex: 1,
+    padding: 10,
+    alignItems: 'center',
+    backgroundColor: '#f9f9f9',
+  },
+  selectedTypeOption: {
+    backgroundColor: '#2196F3',
+  },
+  typeOptionText: {
+    fontWeight: '500',
+    color: '#666',
+  },
+  selectedTypeOptionText: {
+    color: 'white',
+  },customItemBadge: {
+    backgroundColor: '#E8F5E8',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 10,
+    marginTop: 2,
+    alignSelf: 'flex-start',
+  },
+  customItemText: {
+    fontSize: 10,
+    color: '#4CAF50',
+    fontWeight: '600',
+  },
+  categorySelector: {
+    flexDirection: 'row',
+    marginVertical: 8,
+  },
+  categoryOption: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginRight: 8,
+    backgroundColor: '#f0f0f0',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  selectedCategoryOption: {
+    backgroundColor: '#2196F3',
+    borderColor: '#2196F3',
+  },
+  categoryOptionText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#666',
+  },
+  selectedCategoryOptionText: {
+    color: 'white',
   },
 });

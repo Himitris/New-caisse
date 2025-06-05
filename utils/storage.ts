@@ -15,11 +15,13 @@ export interface Table {
 
 export interface OrderItem {
   id: number;
+  menuId?: number; 
   name: string;
   price: number;
   quantity: number;
   notes?: string;
   offered?: boolean;
+  type?: 'resto' | 'boisson';
 }
 
 export interface Order {
