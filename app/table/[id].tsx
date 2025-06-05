@@ -1,4 +1,5 @@
-// app/table/[id].tsx - VERSION TYPESCRIPT ULTRA-FLUIDE
+// app/table/[id].tsx - INTÉGRATION SIMPLIFIÉE
+
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ArrowLeft,
@@ -18,7 +19,6 @@ import {
   useEffect,
   useMemo,
   useState,
-  useRef,
   startTransition,
   useDeferredValue,
   JSX,
@@ -33,22 +33,20 @@ import {
   Text,
   View,
 } from 'react-native';
-import priceData from '../../helpers/ManjosPrice';
 import {
-  CustomMenuItem,
   OrderItem,
   Table,
-  getCustomMenuItems,
-  getMenuAvailability,
   getTable,
   resetTable,
   updateTable,
 } from '../../utils/storage';
 import { useTableContext } from '../../utils/TableContext';
 import { useToast } from '../../utils/ToastContext';
+import { useMenu } from '../../utils/MenuManager'; // ✅ Import du nouveau hook
+import { useInstanceManager } from '../../utils/useInstanceManager'; // ✅ Import du gestionnaire
 import SplitSelectionModal from '../components/SplitSelectionModal';
 
-// ✅ Types TypeScript
+// ✅ Types
 interface MenuItem {
   id: number;
   name: string;
@@ -58,80 +56,7 @@ interface MenuItem {
   color: string;
 }
 
-interface UpdateOperation {
-  id: string;
-  timestamp: number;
-  operation: () => Promise<void>;
-}
-
-// ✅ Constantes typées
-const CATEGORY_COLORS: Record<string, string> = {
-  'Plats Principaux': '#FF9800',
-  'Plats Maxi': '#F44336',
-  Salades: '#4CAF50',
-  Accompagnements: '#CDDC39',
-  Desserts: '#E91E63',
-  'Menu Enfant': '#8BC34A',
-  Softs: '#03A9F4',
-  'Boissons Chaudes': '#795548',
-  Bières: '#FFC107',
-  Vins: '#9C27B0',
-  Alcools: '#673AB7',
-  Glaces: '#00BCD4',
-} as const;
-
-// ✅ Cache optimisé avec types
-let menuItemsCache: Map<number, MenuItem> = new Map();
-let menuCacheArray: MenuItem[] = [];
-let unavailableItemsSet: Set<number> = new Set();
-let menuCacheLoaded = false;
-
-// ✅ Callbacks pour notifier les composants du chargement
-const menuLoadCallbacks: Set<() => void> = new Set();
-
-// ✅ Fonction utilitaire typée
-const getCategoryFromName = (
-  name: string,
-  type: 'resto' | 'boisson'
-): string => {
-  const lowerName = name.toLowerCase();
-  if (type === 'resto') {
-    if (lowerName.includes('salade')) return 'Salades';
-    if (lowerName.includes('dessert')) return 'Desserts';
-    if (lowerName.includes('frites')) return 'Accompagnements';
-    if (lowerName.includes('menu enfant')) return 'Menu Enfant';
-    if (lowerName.includes('maxi')) return 'Plats Maxi';
-    return 'Plats Principaux';
-  } else {
-    if (lowerName.includes('glace')) return 'Glaces';
-    if (lowerName.includes('thé') || lowerName.includes('café'))
-      return 'Boissons Chaudes';
-    if (
-      lowerName.includes('bière') ||
-      lowerName.includes('blonde') ||
-      lowerName.includes('ambree')
-    )
-      return 'Bières';
-    if (
-      lowerName.includes('vin') ||
-      lowerName.includes('pichet') ||
-      lowerName.includes('btl')
-    )
-      return 'Vins';
-    if (
-      lowerName.includes('apero') ||
-      lowerName.includes('digestif') ||
-      lowerName.includes('ricard') ||
-      lowerName.includes('alcool') ||
-      lowerName.includes('punch') ||
-      lowerName.includes('cocktail')
-    )
-      return 'Alcools';
-    return 'Softs';
-  }
-};
-
-// ✅ Composant MenuItem typé et optimisé
+// ✅ Composant MenuItem optimisé
 interface MenuItemProps {
   item: MenuItem;
   onPress: () => void;
@@ -148,195 +73,26 @@ const MenuItemComponent = memo<MenuItemProps>(({ item, onPress }) => (
   </Pressable>
 ));
 
-// ✅ Hook pour la queue d'updates typé
-const useUpdateQueue = () => {
-  const queueRef = useRef<Map<string, UpdateOperation>>(new Map());
-  const processingRef = useRef<boolean>(false);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const processQueue = useCallback(async (): Promise<void> => {
-    if (processingRef.current || queueRef.current.size === 0) return;
-
-    processingRef.current = true;
-    const operations = Array.from(queueRef.current.values()).sort(
-      (a, b) => a.timestamp - b.timestamp
-    );
-    queueRef.current.clear();
-
-    try {
-      // ✅ Traitement en parallèle pour les opérations non-critiques
-      const criticalOps = operations.filter((op) =>
-        op.id.startsWith('critical_')
-      );
-      const normalOps = operations.filter(
-        (op) => !op.id.startsWith('critical_')
-      );
-
-      // Traiter les opérations critiques en série
-      for (const op of criticalOps) {
-        await op.operation();
-      }
-
-      // Traiter les opérations normales en parallèle (max 3 simultanées)
-      const chunks = [];
-      for (let i = 0; i < normalOps.length; i += 3) {
-        chunks.push(normalOps.slice(i, i + 3));
-      }
-
-      for (const chunk of chunks) {
-        await Promise.all(chunk.map((op) => op.operation()));
-      }
-    } catch (error) {
-      console.error('Error processing update queue:', error);
-    } finally {
-      processingRef.current = false;
-
-      if (queueRef.current.size > 0) {
-        setTimeout(processQueue, 10); // ✅ Délai réduit de 50ms à 10ms
-      }
-    }
-  }, []);
-
-  const enqueueUpdate = useCallback(
-    (id: string, operation: () => Promise<void>): void => {
-      queueRef.current.set(id, {
-        id,
-        timestamp: Date.now(),
-        operation,
-      });
-
-      // ✅ Débounce ultra-rapide pour les mises à jour de table
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-
-      const delay = id.startsWith('critical_')
-        ? 0
-        : id.startsWith('table_update')
-        ? 20 // ✅ Délai spécial pour les tables
-        : 50;
-
-      timeoutRef.current = setTimeout(processQueue, delay);
-    },
-    [processQueue]
-  );
-
-  return { enqueueUpdate };
-};
-
-// ✅ Hook pour écouter le chargement du menu
-const useMenuLoader = () => {
-  const [menuLoaded, setMenuLoaded] = useState<boolean>(menuCacheLoaded);
-  const [forceUpdate, setForceUpdate] = useState<number>(0);
-
-  useEffect(() => {
-    if (menuCacheLoaded) {
-      setMenuLoaded(true);
-      return;
-    }
-
-    // ✅ Callback pour être notifié quand le menu est chargé
-    const callback = () => {
-      console.log('🔄 Menu chargé - Forcing component update');
-      setMenuLoaded(true);
-      setForceUpdate((prev) => prev + 1); // Force le re-render
-    };
-
-    menuLoadCallbacks.add(callback);
-
-    return () => {
-      menuLoadCallbacks.delete(callback);
-    };
-  }, []);
-
-  return { menuLoaded, forceUpdate };
-};
-
-// ✅ Fonction de chargement du menu avec notification
-const loadMenuDataOnce = async (): Promise<void> => {
-  if (menuCacheLoaded) {
-    // Si déjà chargé, notifier quand même les nouveaux composants
-    setTimeout(() => {
-      menuLoadCallbacks.forEach((callback) => callback());
-    }, 0);
-    return;
-  }
-
-  try {
-    console.log('📦 Début du chargement du menu...');
-
-    const [customItems, menuAvailability] = await Promise.all([
-      getCustomMenuItems(),
-      getMenuAvailability(),
-    ]);
-
-    const standardItems: MenuItem[] = priceData.map((item: any) => {
-      const category = getCategoryFromName(
-        item.name,
-        item.type as 'resto' | 'boisson'
-      );
-      return {
-        id: item.id,
-        name: item.name,
-        price: item.price,
-        category,
-        type: item.type as 'resto' | 'boisson',
-        color: CATEGORY_COLORS[category] || '#757575',
-      };
-    });
-
-    const customMenuItems: MenuItem[] = customItems.map(
-      (item: CustomMenuItem) => ({
-        id: item.id,
-        name: item.name,
-        price: item.price,
-        category: item.category,
-        type: item.type,
-        color: CATEGORY_COLORS[item.category] || '#757575',
-      })
-    );
-
-    const allItems = [...standardItems, ...customMenuItems];
-
-    // Optimisation : utiliser Map pour accès O(1)
-    menuItemsCache.clear();
-    allItems.forEach((item) => menuItemsCache.set(item.id, item));
-    menuCacheArray = allItems;
-
-    // Set pour vérifications O(1)
-    unavailableItemsSet = new Set(
-      menuAvailability
-        .filter((item: any) => !item.available)
-        .map((item: any) => item.id)
-    );
-
-    menuCacheLoaded = true;
-
-    console.log(`✅ Menu chargé en cache: ${allItems.length} items`);
-    console.log('📋 Categories disponibles:', [
-      ...new Set(allItems.map((item) => item.category)),
-    ]);
-
-    // ✅ Notifier tous les composants en attente
-    setTimeout(() => {
-      console.log(`🔔 Notification de ${menuLoadCallbacks.size} composant(s)`);
-      menuLoadCallbacks.forEach((callback) => callback());
-    }, 0);
-  } catch (error) {
-    console.error('❌ Error loading menu data:', error);
-  }
-};
-
 export default function TableScreen(): JSX.Element {
   const { id } = useLocalSearchParams();
   const tableId = parseInt(id as string, 10);
   const router = useRouter();
   const toast = useToast();
   const { refreshTables, getTableById, updateTableData } = useTableContext();
-  const { enqueueUpdate } = useUpdateQueue();
-  const { menuLoaded, forceUpdate } = useMenuLoader();
 
-  // ✅ États typés
+  // ✅ Utilisation des nouveaux hooks
+  const { instanceId, isMounted, safeExecute, setSafeTimeout, addCleanup } =
+    useInstanceManager('TableScreen');
+  const {
+    isLoaded: menuLoaded,
+    getAvailableItems,
+    getCategories,
+    getItem: getMenuItem,
+    getItemsByType,
+    getItemsByCategory,
+  } = useMenu();
+
+  // ✅ États simplifiés
   const [table, setTable] = useState<Table | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [guestCount, setGuestCount] = useState<number>(1);
@@ -346,52 +102,19 @@ export default function TableScreen(): JSX.Element {
   );
   const [splitModalVisible, setSplitModalVisible] = useState<boolean>(false);
 
-  // ✅ État différé pour les calculs coûteux
+  // ✅ État différé pour optimisation
   const deferredTable = useDeferredValue(table);
 
-  // ✅ Refs typés
-  const mountedRef = useRef<boolean>(true);
-
-  // ✅ Nettoyage
-  useEffect(() => {
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  // ✅ Chargement du menu au démarrage
-  useEffect(() => {
-    console.log('🚀 Initialisation du chargement du menu');
-    loadMenuDataOnce();
-  }, []);
-
-  // ✅ Log pour debug
-  useEffect(() => {
-    console.log(
-      `📊 État menu: loaded=${menuLoaded}, items=${menuCacheArray.length}, forceUpdate=${forceUpdate}`
-    );
-  }, [menuLoaded, forceUpdate]);
-
-  let lastItemsRef: OrderItem[] = [];
-  let lastTotalRef: number = 0;
-
+  // ✅ Fonction de calcul du total mémorisée
   const calculateTotal = useCallback((items: OrderItem[]): number => {
-    // ✅ Mémoïzation manuelle ultra-rapide
-    if (items === lastItemsRef) return lastTotalRef;
-
-    const total = items.reduce((sum, item) => {
+    return items.reduce((sum, item) => {
       return item.offered ? sum : sum + item.price * item.quantity;
     }, 0);
-
-    lastItemsRef = items;
-    lastTotalRef = total;
-
-    return total;
   }, []);
 
   // ✅ Charger la table
   const loadTable = useCallback(async (): Promise<void> => {
-    if (!mountedRef.current) return;
+    if (!isMounted()) return;
 
     try {
       let tableData = getTableById(tableId);
@@ -400,19 +123,20 @@ export default function TableScreen(): JSX.Element {
         tableData = loadedTable || undefined;
       }
 
-      if (tableData && mountedRef.current) {
+      if (tableData && isMounted()) {
         setTable(tableData);
         setGuestCount(tableData.guests || 1);
       }
     } catch (error) {
       console.error('Error loading table:', error);
     } finally {
-      if (mountedRef.current) {
+      if (isMounted()) {
         setLoading(false);
       }
     }
-  }, [tableId, getTableById]);
+  }, [tableId, getTableById, isMounted]);
 
+  // ✅ Chargement initial et focus
   useEffect(() => {
     loadTable();
   }, [loadTable]);
@@ -434,63 +158,62 @@ export default function TableScreen(): JSX.Element {
         return true;
       }
     );
-    return () => backHandler.remove();
-  }, [router]);
 
-  // ✅ Handlers d'actions typés
+    addCleanup(() => backHandler.remove());
+  }, [router, addCleanup]);
+
+  // ✅ Handler pour ajouter un item (avec debounce)
   const addItemToOrder = useCallback(
     (item: MenuItem): void => {
-      if (!table || !mountedRef.current) return;
+      if (!table || !isMounted()) return;
 
-      // ✅ Mise à jour d'état optimisée et groupée
-      setTable((prevTable) => {
-        if (!prevTable) return prevTable;
+      safeExecute(() => {
+        setTable((prevTable) => {
+          if (!prevTable) return prevTable;
 
-        const updatedTable = { ...prevTable };
+          const updatedTable = { ...prevTable };
 
-        if (!updatedTable.order) {
-          updatedTable.order = {
-            id: Date.now(),
-            items: [],
-            guests: guestCount,
-            status: 'active',
-            timestamp: new Date().toISOString(),
-            total: 0,
-          };
-        }
+          if (!updatedTable.order) {
+            updatedTable.order = {
+              id: Date.now(),
+              items: [],
+              guests: guestCount,
+              status: 'active',
+              timestamp: new Date().toISOString(),
+              total: 0,
+            };
+          }
 
-        // ✅ Optimisation : éviter la recherche linéaire répétée
-        const items = [...updatedTable.order.items];
-        const existingItemIndex = items.findIndex(
-          (orderItem) =>
-            orderItem.name === item.name && orderItem.price === item.price
-        );
+          const items = [...updatedTable.order.items];
+          const existingItemIndex = items.findIndex(
+            (orderItem) =>
+              orderItem.name === item.name && orderItem.price === item.price
+          );
 
-        if (existingItemIndex >= 0) {
-          // ✅ Mise à jour in-place plus rapide
-          items[existingItemIndex] = {
-            ...items[existingItemIndex],
-            quantity: items[existingItemIndex].quantity + 1,
-          };
-        } else {
-          // ✅ Ajout direct plus rapide
-          items.push({
-            id: Date.now() + Math.random(),
-            name: item.name,
-            price: item.price,
-            quantity: 1,
-          });
-        }
+          if (existingItemIndex >= 0) {
+            items[existingItemIndex] = {
+              ...items[existingItemIndex],
+              quantity: items[existingItemIndex].quantity + 1,
+            };
+          } else {
+            items.push({
+              id: Date.now() + Math.random(),
+              name: item.name,
+              price: item.price,
+              quantity: 1,
+            });
+          }
 
-        updatedTable.order.items = items;
-        updatedTable.order.total = calculateTotal(items);
+          updatedTable.order.items = items;
+          updatedTable.order.total = calculateTotal(items);
 
-        return updatedTable;
+          return updatedTable;
+        });
       });
 
-      // ✅ Sauvegarde groupée par table (un seul ID pour toute la table)
-      enqueueUpdate(`table_update_${tableId}`, async () => {
-        if (!mountedRef.current) return;
+      // ✅ Sauvegarde avec délai pour grouper les modifications
+      setSafeTimeout(async () => {
+        if (!isMounted()) return;
 
         try {
           const currentTable = getTableById(tableId);
@@ -499,63 +222,105 @@ export default function TableScreen(): JSX.Element {
           }
         } catch (error) {
           console.error('Error saving table updates:', error);
-          if (mountedRef.current) {
+          if (isMounted()) {
             loadTable();
             toast.showToast('Erreur lors de la sauvegarde', 'error');
           }
         }
-      });
+      }, 500);
     },
     [
       table,
       guestCount,
       tableId,
-      enqueueUpdate,
       updateTableData,
       getTableById,
       loadTable,
       toast,
       calculateTotal,
+      isMounted,
+      safeExecute,
+      setSafeTimeout,
     ]
   );
 
+  // ✅ Items de menu filtrés (utilise le nouveau système)
+  const filteredMenuItems = useMemo((): MenuItem[] => {
+    if (!menuLoaded) {
+      return [];
+    }
+
+    let filtered = getAvailableItems();
+
+    if (activeType) {
+      filtered = filtered.filter((item) => item.type === activeType);
+    }
+
+    if (activeCategory) {
+      filtered = filtered.filter((item) => item.category === activeCategory);
+    }
+
+    return filtered;
+  }, [menuLoaded, activeType, activeCategory, getAvailableItems]);
+
+  // ✅ Catégories (utilise le nouveau système)
+  const categories = useMemo((): string[] => {
+    if (!menuLoaded) {
+      return [];
+    }
+
+    return getCategories(activeType || undefined);
+  }, [menuLoaded, activeType, getCategories]);
+
+  // ✅ Items de commande catégorisés
+  const categorizedOrderItems = useMemo(() => {
+    if (!deferredTable?.order?.items) return { plats: [], boissons: [] };
+
+    const result = { plats: [] as OrderItem[], boissons: [] as OrderItem[] };
+
+    deferredTable.order.items.forEach((item) => {
+      const menuItem = getMenuItem(item.id);
+      const type = menuItem?.type || 'resto';
+      result[type === 'boisson' ? 'boissons' : 'plats'].push(item);
+    });
+
+    return result;
+  }, [deferredTable?.order?.items, getMenuItem]);
+
+  // ✅ Autres handlers (simplifiés mais fonctionnels)
   const updateItemQuantity = useCallback(
     (itemId: number, increment: boolean): void => {
-      if (!table?.order || !mountedRef.current) return;
+      if (!table?.order || !isMounted()) return;
 
-      setTable((prevTable) => {
-        if (!prevTable?.order) return prevTable;
+      safeExecute(() => {
+        setTable((prevTable) => {
+          if (!prevTable?.order) return prevTable;
 
-        const updatedTable = { ...prevTable };
-        if (!updatedTable.order) return prevTable;
+          const updatedTable = { ...prevTable };
+          const newItems: OrderItem[] = [];
 
-        // ✅ Optimisation : filtrage et mappage en une seule passe
-        const newItems: OrderItem[] = [];
-
-        for (const item of updatedTable.order.items) {
-          if (item.id !== itemId) {
-            newItems.push(item);
-          } else {
-            const newQuantity = increment
-              ? item.quantity + 1
-              : Math.max(0, item.quantity - 1);
-
-            if (newQuantity > 0) {
-              newItems.push({ ...item, quantity: newQuantity });
+          for (const item of updatedTable.order!.items) {
+            if (item.id !== itemId) {
+              newItems.push(item);
+            } else {
+              const newQuantity = increment
+                ? item.quantity + 1
+                : Math.max(0, item.quantity - 1);
+              if (newQuantity > 0) {
+                newItems.push({ ...item, quantity: newQuantity });
+              }
             }
           }
-        }
 
-        updatedTable.order.items = newItems;
-        updatedTable.order.total = calculateTotal(newItems);
+          updatedTable.order!.items = newItems;
+          updatedTable.order!.total = calculateTotal(newItems);
 
-        return updatedTable;
+          return updatedTable;
+        });
       });
 
-      // ✅ Même optimisation de sauvegarde groupée
-      enqueueUpdate(`table_update_${tableId}`, async () => {
-        if (!mountedRef.current) return;
-
+      setSafeTimeout(async () => {
+        if (!isMounted()) return;
         try {
           const currentTable = getTableById(tableId);
           if (currentTable) {
@@ -563,52 +328,45 @@ export default function TableScreen(): JSX.Element {
           }
         } catch (error) {
           console.error('Error updating quantity:', error);
-          if (mountedRef.current) {
-            loadTable();
-            toast.showToast('Erreur lors de la mise à jour', 'error');
-          }
         }
-      });
+      }, 500);
     },
     [
       table?.order,
       tableId,
-      enqueueUpdate,
       updateTableData,
       getTableById,
-      loadTable,
-      toast,
       calculateTotal,
+      isMounted,
+      safeExecute,
+      setSafeTimeout,
     ]
   );
 
   const toggleItemOffered = useCallback(
     (itemId: number): void => {
-      if (!table?.order || !mountedRef.current) return;
+      if (!table?.order || !isMounted()) return;
 
-      setTable((prevTable) => {
-        if (!prevTable?.order) return prevTable;
+      safeExecute(() => {
+        setTable((prevTable) => {
+          if (!prevTable?.order) return prevTable;
 
-        const updatedTable = { ...prevTable };
-        if (!updatedTable.order) return prevTable;
+          const updatedTable = { ...prevTable };
+          const newItems = updatedTable.order!.items.map((item) => {
+            return item.id !== itemId
+              ? item
+              : { ...item, offered: !item.offered };
+          });
 
-        // ✅ Optimisation : mise à jour directe sans copie profonde
-        const newItems = updatedTable.order.items.map((item) => {
-          return item.id !== itemId
-            ? item
-            : { ...item, offered: !item.offered };
+          updatedTable.order!.items = newItems;
+          updatedTable.order!.total = calculateTotal(newItems);
+
+          return updatedTable;
         });
-
-        updatedTable.order.items = newItems;
-        updatedTable.order.total = calculateTotal(newItems);
-
-        return updatedTable;
       });
 
-      // ✅ Même optimisation de sauvegarde groupée
-      enqueueUpdate(`table_update_${tableId}`, async () => {
-        if (!mountedRef.current) return;
-
+      setSafeTimeout(async () => {
+        if (!isMounted()) return;
         try {
           const currentTable = getTableById(tableId);
           if (currentTable) {
@@ -616,22 +374,18 @@ export default function TableScreen(): JSX.Element {
           }
         } catch (error) {
           console.error('Error toggling offered:', error);
-          if (mountedRef.current) {
-            loadTable();
-            toast.showToast('Erreur lors de la mise à jour', 'error');
-          }
         }
-      });
+      }, 500);
     },
     [
       table?.order,
       tableId,
-      enqueueUpdate,
       updateTableData,
       getTableById,
-      loadTable,
-      toast,
       calculateTotal,
+      isMounted,
+      safeExecute,
+      setSafeTimeout,
     ]
   );
 
@@ -653,7 +407,7 @@ export default function TableScreen(): JSX.Element {
         };
       });
 
-      enqueueUpdate(`update_guests`, async () => {
+      setSafeTimeout(async () => {
         try {
           const currentTable = getTableById(tableId);
           if (currentTable) {
@@ -662,12 +416,12 @@ export default function TableScreen(): JSX.Element {
         } catch (error) {
           console.error('Error updating guest count:', error);
         }
-      });
+      }, 1000);
     },
-    [table, tableId, enqueueUpdate, updateTableData, getTableById]
+    [table, tableId, updateTableData, getTableById, setSafeTimeout]
   );
 
-  // ✅ Autres handlers...
+  // ✅ Handlers d'actions
   const handleClearOrder = useCallback((): void => {
     if (!table?.order || table.order.items.length === 0) return;
 
@@ -680,15 +434,17 @@ export default function TableScreen(): JSX.Element {
           text: 'Supprimer',
           style: 'destructive',
           onPress: () => {
-            setTable((prevTable) => {
-              if (!prevTable?.order) return prevTable;
-              return {
-                ...prevTable,
-                order: { ...prevTable.order, items: [], total: 0 },
-              };
+            safeExecute(() => {
+              setTable((prevTable) => {
+                if (!prevTable?.order) return prevTable;
+                return {
+                  ...prevTable,
+                  order: { ...prevTable.order, items: [], total: 0 },
+                };
+              });
             });
 
-            enqueueUpdate('critical_clear_order', async () => {
+            setSafeTimeout(async () => {
               try {
                 const currentTable = getTableById(tableId);
                 if (currentTable) {
@@ -700,7 +456,7 @@ export default function TableScreen(): JSX.Element {
                 loadTable();
                 toast.showToast('Impossible de supprimer la commande', 'error');
               }
-            });
+            }, 100);
           },
         },
       ]
@@ -708,11 +464,12 @@ export default function TableScreen(): JSX.Element {
   }, [
     table?.order,
     tableId,
-    enqueueUpdate,
     updateTableData,
     getTableById,
     loadTable,
     toast,
+    safeExecute,
+    setSafeTimeout,
   ]);
 
   const handleCloseTable = useCallback((): void => {
@@ -743,24 +500,6 @@ export default function TableScreen(): JSX.Element {
       ]
     );
   }, [table, tableId, refreshTables, router, toast]);
-
-  const handlePreviewNote = useCallback((): void => {
-    if (!table?.order || table.order.items.length === 0) {
-      toast.showToast("Il n'y a pas d'articles à afficher", 'warning');
-      return;
-    }
-
-    router.push({
-      pathname: '/print-preview',
-      params: {
-        tableId: tableId.toString(),
-        total: table.order.total.toString(),
-        items: JSON.stringify(table.order.items),
-        isPreview: 'true',
-        tableName: table.name,
-      },
-    });
-  }, [table, tableId, router, toast]);
 
   const handlePayment = useCallback(
     (type: 'full' | 'split' | 'custom' | 'items'): void => {
@@ -816,62 +555,7 @@ export default function TableScreen(): JSX.Element {
     [table?.order, guestCount, tableId, router, toast]
   );
 
-  // ✅ Calculs mémoïzés avec vérification du chargement du menu
-  const filteredMenuItems = useMemo((): MenuItem[] => {
-    if (!menuLoaded || menuCacheArray.length === 0) {
-      console.log('⏳ Menu pas encore chargé pour le filtrage');
-      return [];
-    }
-
-    const filtered = menuCacheArray.filter((item) => {
-      if (unavailableItemsSet.has(item.id)) return false;
-      if (activeType && item.type !== activeType) return false;
-      if (activeCategory && item.category !== activeCategory) return false;
-      return true;
-    });
-
-    console.log(
-      `🔍 Items filtrés: ${filtered.length}/${menuCacheArray.length}`
-    );
-    return filtered;
-  }, [activeType, activeCategory, menuLoaded, forceUpdate]); // forceUpdate pour re-trigger
-
-  const categories = useMemo((): string[] => {
-    if (!menuLoaded || menuCacheArray.length === 0) {
-      console.log('⏳ Menu pas encore chargé pour les catégories');
-      return [];
-    }
-
-    const allCategories = [
-      ...new Set(menuCacheArray.map((item) => item.category)),
-    ];
-    if (activeType) {
-      const filtered = allCategories.filter((category) =>
-        menuCacheArray.some(
-          (item) => item.category === category && item.type === activeType
-        )
-      );
-      console.log(`📂 Catégories pour ${activeType}:`, filtered);
-      return filtered;
-    }
-    console.log('📂 Toutes les catégories:', allCategories.sort());
-    return allCategories.sort();
-  }, [activeType, menuLoaded, forceUpdate]);
-
-  const categorizedOrderItems = useMemo(() => {
-    if (!deferredTable?.order?.items) return { plats: [], boissons: [] };
-
-    const result = { plats: [] as OrderItem[], boissons: [] as OrderItem[] };
-
-    deferredTable.order.items.forEach((item) => {
-      const menuItem = menuItemsCache.get(item.id);
-      const type = menuItem?.type || 'resto';
-      result[type === 'boisson' ? 'boissons' : 'plats'].push(item);
-    });
-
-    return result;
-  }, [deferredTable?.order?.items]);
-
+  // ✅ Calculs dérivés
   const offeredTotal = useMemo((): number => {
     if (!deferredTable?.order?.items) return 0;
     return deferredTable.order.items.reduce((sum, item) => {
@@ -879,6 +563,7 @@ export default function TableScreen(): JSX.Element {
     }, 0);
   }, [deferredTable?.order?.items]);
 
+  // ✅ Affichage conditionnel pour le chargement
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -905,12 +590,15 @@ export default function TableScreen(): JSX.Element {
     );
   }
 
-  // ✅ Affichage conditionnel si le menu n'est pas encore chargé
-  if (!menuLoaded || menuCacheArray.length === 0) {
+  // ✅ Affichage si menu pas encore chargé
+  if (!menuLoaded) {
     return (
       <View style={styles.container}>
         <View style={styles.header}>
-          <Pressable onPress={() => router.replace('/')} style={styles.backLink}>
+          <Pressable
+            onPress={() => router.replace('/')}
+            style={styles.backLink}
+          >
             <ArrowLeft size={28} color="#333" />
           </Pressable>
           <View style={styles.headerTitleContainer}>
@@ -930,12 +618,13 @@ export default function TableScreen(): JSX.Element {
 
   return (
     <View style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
         <Pressable
           onPress={() => router.replace('/')}
           style={({ pressed }) => [
             styles.backLink,
-            pressed && {backgroundColor: '#d0d0d0'},
+            pressed && { backgroundColor: '#d0d0d0' },
           ]}
         >
           <ArrowLeft size={28} color="#333" />
@@ -960,19 +649,10 @@ export default function TableScreen(): JSX.Element {
         </View>
 
         <Pressable
-          style={[styles.paymentButton, { backgroundColor: '#9C27B0' }]}
-          onPress={handlePreviewNote}
-        >
-          <Receipt size={24} color="white" />
-          <Text style={styles.paymentButtonText}>Prévisualiser</Text>
-        </Pressable>
-
-        <Pressable
           style={[
             styles.paymentButton,
             {
               backgroundColor: orderItems.length > 0 ? '#FF6600' : '#BDBDBD',
-              marginLeft: 8,
             },
           ]}
           onPress={handleClearOrder}
@@ -1290,9 +970,6 @@ export default function TableScreen(): JSX.Element {
                 style={[
                   styles.categoryTab,
                   activeCategory === category && styles.activeCategoryTab,
-                  activeCategory === category && {
-                    borderBottomColor: CATEGORY_COLORS[category] || '#2196F3',
-                  },
                 ]}
                 onPress={() => {
                   startTransition(() => {
@@ -1304,9 +981,6 @@ export default function TableScreen(): JSX.Element {
                   style={[
                     styles.categoryTabText,
                     activeCategory === category && styles.activeCategoryTabText,
-                    activeCategory === category && {
-                      color: CATEGORY_COLORS[category] || '#2196F3',
-                    },
                   ]}
                 >
                   {category}
@@ -1320,36 +994,27 @@ export default function TableScreen(): JSX.Element {
               style={styles.menuItemsScroll}
               showsVerticalScrollIndicator={false}
             >
-              {categories
-                .filter((cat) =>
-                  activeType
-                    ? menuCacheArray.some(
-                        (item) =>
-                          item.category === cat && item.type === activeType
-                      )
-                    : true
-                )
-                .map((category) => {
-                  const categoryItems = filteredMenuItems.filter(
-                    (item) => item.category === category
-                  );
-                  if (categoryItems.length === 0) return null;
+              {categories.map((category) => {
+                const categoryItems = filteredMenuItems.filter(
+                  (item) => item.category === category
+                );
+                if (categoryItems.length === 0) return null;
 
-                  return (
-                    <View key={category} style={styles.categorySection}>
-                      <Text style={styles.categoryHeaderText}>{category}</Text>
-                      <View style={styles.categoryItems}>
-                        {categoryItems.map((item) => (
-                          <MenuItemComponent
-                            key={item.id}
-                            item={item}
-                            onPress={() => addItemToOrder(item)}
-                          />
-                        ))}
-                      </View>
+                return (
+                  <View key={category} style={styles.categorySection}>
+                    <Text style={styles.categoryHeaderText}>{category}</Text>
+                    <View style={styles.categoryItems}>
+                      {categoryItems.map((item) => (
+                        <MenuItemComponent
+                          key={item.id}
+                          item={item}
+                          onPress={() => addItemToOrder(item)}
+                        />
+                      ))}
                     </View>
-                  );
-                })}
+                  </View>
+                );
+              })}
             </ScrollView>
           </View>
         </View>
@@ -1378,7 +1043,7 @@ export default function TableScreen(): JSX.Element {
   );
 }
 
-// ✅ Styles conservés
+// ✅ Styles conservés (identiques à l'original)
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   loadingContainer: {

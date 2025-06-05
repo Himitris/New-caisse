@@ -1,4 +1,4 @@
-// app/(tabs)/bills.tsx
+// app/(tabs)/bills.tsx - VERSION OPTIMISÉE
 
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Print from 'expo-print';
@@ -20,7 +20,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react-native';
-import { memo, useCallback, useEffect, useMemo, useState, useRef } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -37,14 +37,14 @@ import {
   Bill,
   getBills,
   saveBills,
-  getBillsPage,
   getFilteredBills,
   BillManager,
 } from '../../utils/storage';
 import { useToast } from '../../utils/ToastContext';
 import { useSettings } from '@/utils/useSettings';
+import { useInstanceManager } from '../../utils/useInstanceManager'; // ✅ Import du gestionnaire
 
-// ✅ Constantes STATIQUES (éviter re-création)
+// ✅ Constantes optimisées
 const STATUS_COLORS = {
   pending: '#FFC107',
   paid: '#4CAF50',
@@ -60,10 +60,9 @@ const PAYMENT_METHOD_LABELS = {
 } as const;
 
 const ITEM_HEIGHT = 80;
-const PAGE_SIZE = 20;
-const MAX_BILLS_DISPLAY = 100; // ✅ LIMITE CRITIQUE pour éviter le lag
+const MAX_BILLS_DISPLAY = 200; // ✅ Augmenté pour plus de données
 
-// ✅ Fonction utilitaire simple (pas dans le composant)
+// ✅ Fonction utilitaire simple
 const getBillStatusColor = (bill: Bill) => {
   if (bill.status === 'split' && bill.paymentType === 'custom') {
     return STATUS_COLORS.custom;
@@ -171,40 +170,34 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
 
               <View style={styles.receiptDivider} />
 
-              {/* Articles détaillés si disponibles */}
               {hasDetailedItems && (
                 <View style={styles.itemsContainer}>
                   <Text style={styles.itemsHeader}>Détail des articles</Text>
-                  {(bill.paidItems ?? []).slice(0, 20).map(
-                    (
-                      item,
-                      index // ✅ LIMITE à 20 items max
-                    ) => (
-                      <View key={index} style={styles.itemRow}>
-                        <View style={styles.itemDetails}>
-                          <Text style={styles.itemQuantity}>
-                            {item.quantity}x
-                          </Text>
-                          <Text
-                            style={[
-                              styles.itemName,
-                              item.offered && styles.offeredItemText,
-                            ]}
-                          >
-                            {item.name} {item.offered ? '(Offert)' : ''}
-                          </Text>
-                        </View>
+                  {(bill.paidItems ?? []).slice(0, 20).map((item, index) => (
+                    <View key={index} style={styles.itemRow}>
+                      <View style={styles.itemDetails}>
+                        <Text style={styles.itemQuantity}>
+                          {item.quantity}x
+                        </Text>
                         <Text
                           style={[
-                            styles.itemPrice,
-                            item.offered && styles.offeredItemPrice,
+                            styles.itemName,
+                            item.offered && styles.offeredItemText,
                           ]}
                         >
-                          {(item.price * item.quantity).toFixed(2)} €
+                          {item.name} {item.offered ? '(Offert)' : ''}
                         </Text>
                       </View>
-                    )
-                  )}
+                      <Text
+                        style={[
+                          styles.itemPrice,
+                          item.offered && styles.offeredItemPrice,
+                        ]}
+                      >
+                        {(item.price * item.quantity).toFixed(2)} €
+                      </Text>
+                    </View>
+                  ))}
                   <View style={styles.receiptDivider} />
                 </View>
               )}
@@ -290,7 +283,6 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
               })()}
 
               <View style={styles.receiptDivider} />
-
               <Text style={styles.receiptFooter}>Merci de votre visite!</Text>
             </ScrollView>
 
@@ -321,7 +313,7 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
   }
 );
 
-// ✅ FilterBar simplifié et mémoïzé
+// ✅ FilterBar simplifié
 interface FilterBarProps {
   onSearch: (text: string) => void;
   onDateChange: (date: Date | null) => void;
@@ -593,7 +585,6 @@ const BillListItem = memo<BillListItemProps>(
       </Pressable>
     );
   },
-  // ✅ Comparaison personnalisée pour éviter les re-renders inutiles
   (prevProps, nextProps) => {
     return (
       prevProps.bill.id === nextProps.bill.id &&
@@ -604,9 +595,13 @@ const BillListItem = memo<BillListItemProps>(
   }
 );
 
-// ✅ COMPOSANT PRINCIPAL ULTRA-OPTIMISÉ
+// ✅ COMPOSANT PRINCIPAL OPTIMISÉ avec useInstanceManager
 export default function BillsScreen() {
-  // ✅ États essentiels seulement
+  // ✅ Hook de gestion d'instance
+  const { isMounted, setSafeTimeout, safeExecute, addCleanup } =
+    useInstanceManager('BillsScreen');
+
+  // ✅ États essentiels
   const [bills, setBills] = useState<Bill[]>([]);
   const [filteredBills, setFilteredBills] = useState<Bill[]>([]);
   const [loading, setLoading] = useState(true);
@@ -620,30 +615,12 @@ export default function BillsScreen() {
     Bill['paymentMethod'] | null
   >(null);
 
-  // ✅ Refs pour éviter les fuites
-  const mountedRef = useRef(true);
-  const lastLoadTimeRef = useRef(0);
-
   const { restaurantInfo, paymentMethods } = useSettings();
   const toast = useToast();
 
-  // ✅ Nettoyage à la destruction
-  useEffect(() => {
-    return () => {
-      mountedRef.current = false;
-    };
-  }, []);
-
-  // ✅ Charger les factures AVEC LIMITE STRICTE
+  // ✅ Charger les factures avec protection
   const loadBills = useCallback(async () => {
-    if (!mountedRef.current) return;
-
-    const now = Date.now();
-    // Éviter les recharges trop fréquentes
-    if (now - lastLoadTimeRef.current < 1000) {
-      return;
-    }
-    lastLoadTimeRef.current = now;
+    if (!isMounted()) return;
 
     setLoading(true);
     try {
@@ -661,37 +638,35 @@ export default function BillsScreen() {
 
         const filtered = await getFilteredBills(filters);
 
-        if (mountedRef.current) {
-          // ✅ LIMITE CRITIQUE - Max 100 factures affichées
+        if (isMounted()) {
           setFilteredBills(filtered.slice(0, MAX_BILLS_DISPLAY));
         }
       } else {
         const allBills = await getBills();
 
-        if (mountedRef.current) {
-          // ✅ LIMITE CRITIQUE - Max 100 factures affichées
+        if (isMounted()) {
           setFilteredBills(allBills.slice(0, MAX_BILLS_DISPLAY));
         }
       }
     } catch (error) {
       console.error('Error loading bills:', error);
-      if (mountedRef.current) {
+      if (isMounted()) {
         toast.showToast('Impossible de charger les factures.', 'error');
       }
     } finally {
-      if (mountedRef.current) {
+      if (isMounted()) {
         setLoading(false);
       }
     }
-  }, [searchText, dateFilter, paymentMethodFilter, toast]);
+  }, [searchText, dateFilter, paymentMethodFilter, toast, isMounted]);
 
-  // ✅ Charger toutes les factures (limité)
+  // ✅ Charger toutes les factures
   useEffect(() => {
     const loadAllBills = async () => {
       try {
         const allBills = await getBills();
-        if (mountedRef.current) {
-          setBills(allBills.slice(0, MAX_BILLS_DISPLAY)); // ✅ LIMITE
+        if (isMounted()) {
+          setBills(allBills.slice(0, MAX_BILLS_DISPLAY));
         }
       } catch (error) {
         console.error('Error loading all bills:', error);
@@ -700,7 +675,7 @@ export default function BillsScreen() {
 
     loadAllBills();
     loadBills();
-  }, [loadBills]);
+  }, [loadBills, isMounted]);
 
   // ✅ Tri optimisé avec mémorisation
   const sortBillsByDate = useCallback(
@@ -724,7 +699,7 @@ export default function BillsScreen() {
     [paymentMethods]
   );
 
-  // ✅ Supprimer les factures filtrées - OPTIMISÉ
+  // ✅ Supprimer les factures filtrées avec protection
   const handleDeleteFiltered = useCallback(() => {
     if (filteredBills.length === 0) {
       toast.showToast('Aucune facture à supprimer.', 'info');
@@ -740,7 +715,7 @@ export default function BillsScreen() {
           text: 'Supprimer',
           style: 'destructive',
           onPress: async () => {
-            if (!mountedRef.current) return;
+            if (!isMounted()) return;
 
             try {
               setProcessing(true);
@@ -754,7 +729,7 @@ export default function BillsScreen() {
 
               await saveBills(remainingBills);
 
-              if (mountedRef.current) {
+              if (isMounted()) {
                 setBills(remainingBills);
                 setFilteredBills([]);
 
@@ -774,17 +749,20 @@ export default function BillsScreen() {
                 );
               }
 
-              await loadBills();
+              // ✅ Rechargement sécurisé avec délai
+              setSafeTimeout(() => {
+                loadBills();
+              }, 500);
             } catch (error) {
               console.error('Erreur lors de la suppression:', error);
-              if (mountedRef.current) {
+              if (isMounted()) {
                 toast.showToast(
                   'Impossible de supprimer les factures.',
                   'error'
                 );
               }
             } finally {
-              if (mountedRef.current) {
+              if (isMounted()) {
                 setProcessing(false);
               }
             }
@@ -792,7 +770,15 @@ export default function BillsScreen() {
         },
       ]
     );
-  }, [filteredBills, bills, selectedBill, loadBills, toast]);
+  }, [
+    filteredBills,
+    bills,
+    selectedBill,
+    loadBills,
+    toast,
+    isMounted,
+    setSafeTimeout,
+  ]);
 
   // ✅ Filtrage et tri avec mémorisation
   const appliedFilters = useMemo(() => {
@@ -815,7 +801,7 @@ export default function BillsScreen() {
     return sortBillsByDate(filtered, sortOrder);
   }, [filteredBills, searchText, sortOrder, sortBillsByDate]);
 
-  // ✅ Handlers optimisés
+  // ✅ Handlers optimisés avec protection
   const handleSearch = useCallback((text: string) => {
     setSearchText(text);
   }, []);
@@ -839,11 +825,13 @@ export default function BillsScreen() {
   );
 
   const handleResetFilters = useCallback(() => {
-    setSearchText('');
-    setDateFilter(null);
-    setPaymentMethodFilter(null);
-    setSortOrder('desc');
-  }, []);
+    safeExecute(() => {
+      setSearchText('');
+      setDateFilter(null);
+      setPaymentMethodFilter(null);
+      setSortOrder('desc');
+    });
+  }, [safeExecute]);
 
   const handleSelectBill = useCallback(
     (bill: Bill) => {
@@ -875,16 +863,18 @@ export default function BillsScreen() {
           text: 'Supprimer',
           style: 'destructive',
           onPress: async () => {
-            if (!mountedRef.current) return;
+            if (!isMounted()) return;
 
             try {
               setProcessing(true);
-              await BillManager.clearAllBills(); // ✅ Utiliser le manager optimisé
+              await BillManager.clearAllBills();
 
-              if (mountedRef.current) {
-                setBills([]);
-                setFilteredBills([]);
-                setSelectedBill(null);
+              if (isMounted()) {
+                safeExecute(() => {
+                  setBills([]);
+                  setFilteredBills([]);
+                  setSelectedBill(null);
+                });
                 toast.showToast(
                   'Toutes les factures ont été supprimées.',
                   'success'
@@ -892,14 +882,14 @@ export default function BillsScreen() {
               }
             } catch (error) {
               console.error('Erreur lors de la suppression:', error);
-              if (mountedRef.current) {
+              if (isMounted()) {
                 toast.showToast(
                   'Impossible de supprimer les factures.',
                   'error'
                 );
               }
             } finally {
-              if (mountedRef.current) {
+              if (isMounted()) {
                 setProcessing(false);
               }
             }
@@ -907,42 +897,52 @@ export default function BillsScreen() {
         },
       ]
     );
-  }, [toast]);
+  }, [toast, isMounted, safeExecute]);
 
   const handleDeleteBill = useCallback(async () => {
-    if (!selectedBill || !mountedRef.current) return;
+    if (!selectedBill || !isMounted()) return;
 
     try {
       setProcessing(true);
       const updatedBills = bills.filter((bill) => bill.id !== selectedBill.id);
       await saveBills(updatedBills);
 
-      if (mountedRef.current) {
-        setBills(updatedBills);
-        setFilteredBills(sortBillsByDate(updatedBills, sortOrder));
+      if (isMounted()) {
+        safeExecute(() => {
+          setBills(updatedBills);
+          setFilteredBills(sortBillsByDate(updatedBills, sortOrder));
 
-        if (updatedBills.length > 0) {
-          setSelectedBill(updatedBills[0]);
-        } else {
-          setSelectedBill(null);
-        }
+          if (updatedBills.length > 0) {
+            setSelectedBill(updatedBills[0]);
+          } else {
+            setSelectedBill(null);
+          }
 
-        setViewModalVisible(false);
+          setViewModalVisible(false);
+        });
         toast.showToast('Facture supprimée avec succès.', 'success');
       }
     } catch (error) {
       console.error('Erreur lors de la suppression:', error);
-      if (mountedRef.current) {
+      if (isMounted()) {
         toast.showToast('Impossible de supprimer la facture.', 'error');
       }
     } finally {
-      if (mountedRef.current) {
+      if (isMounted()) {
         setProcessing(false);
       }
     }
-  }, [selectedBill, bills, sortOrder, sortBillsByDate, toast]);
+  }, [
+    selectedBill,
+    bills,
+    sortOrder,
+    sortBillsByDate,
+    toast,
+    isMounted,
+    safeExecute,
+  ]);
 
-  // ✅ Générer HTML pour impression - OPTIMISÉ
+  // ✅ Générer HTML pour impression
   const generateHTML = useCallback(
     (bill: Bill) => {
       const paymentLabel = bill.paymentMethod
@@ -982,7 +982,6 @@ export default function BillsScreen() {
 
       let itemsHTML = '';
       if (hasDetailedItems) {
-        // ✅ LIMITE les items affichés pour éviter HTML trop lourd
         const itemsToShow = (bill.paidItems ?? []).slice(0, 20);
         itemsHTML = `
       <div class="items-section">
@@ -1182,27 +1181,27 @@ export default function BillsScreen() {
       return;
     }
 
-    if (!mountedRef.current) return;
+    if (!isMounted()) return;
 
     setProcessing(true);
     try {
       await Print.printAsync({
         html: generateHTML(selectedBill),
       });
-      if (mountedRef.current) {
+      if (isMounted()) {
         toast.showToast("Reçu envoyé à l'imprimante.", 'success');
       }
     } catch (error) {
       console.error("Erreur d'impression:", error);
-      if (mountedRef.current) {
+      if (isMounted()) {
         toast.showToast("Impossible d'imprimer le reçu.", 'error');
       }
     } finally {
-      if (mountedRef.current) {
+      if (isMounted()) {
         setProcessing(false);
       }
     }
-  }, [selectedBill, generateHTML, toast]);
+  }, [selectedBill, generateHTML, toast, isMounted]);
 
   const handleShare = useCallback(async () => {
     if (!selectedBill) {
@@ -1210,7 +1209,7 @@ export default function BillsScreen() {
       return;
     }
 
-    if (!mountedRef.current) return;
+    if (!isMounted()) return;
 
     setProcessing(true);
     try {
@@ -1223,20 +1222,20 @@ export default function BillsScreen() {
         mimeType: 'application/pdf',
       });
 
-      if (mountedRef.current) {
+      if (isMounted()) {
         toast.showToast('Reçu partagé avec succès.', 'success');
       }
     } catch (error) {
       console.error('Erreur de partage:', error);
-      if (mountedRef.current) {
+      if (isMounted()) {
         toast.showToast('Impossible de partager le reçu.', 'error');
       }
     } finally {
-      if (mountedRef.current) {
+      if (isMounted()) {
         setProcessing(false);
       }
     }
-  }, [selectedBill, generateHTML, toast]);
+  }, [selectedBill, generateHTML, toast, isMounted]);
 
   const handleExport = useCallback(async () => {
     if (!selectedBill) {
@@ -1244,7 +1243,7 @@ export default function BillsScreen() {
       return;
     }
 
-    if (!mountedRef.current) return;
+    if (!isMounted()) return;
 
     setProcessing(true);
     try {
@@ -1258,20 +1257,20 @@ export default function BillsScreen() {
         dialogTitle: 'Exporter le reçu en PDF',
       });
 
-      if (mountedRef.current) {
+      if (isMounted()) {
         toast.showToast('Reçu exporté avec succès.', 'success');
       }
     } catch (error) {
       console.error("Erreur d'export:", error);
-      if (mountedRef.current) {
+      if (isMounted()) {
         toast.showToast("Impossible d'exporter le reçu.", 'error');
       }
     } finally {
-      if (mountedRef.current) {
+      if (isMounted()) {
         setProcessing(false);
       }
     }
-  }, [selectedBill, generateHTML, toast]);
+  }, [selectedBill, generateHTML, toast, isMounted]);
 
   const keyExtractor = useCallback((item: Bill, index: number) => {
     return item.id ? `bill-${item.id}` : `bill-index-${index}`;
@@ -1496,7 +1495,7 @@ export default function BillsScreen() {
   );
 }
 
-// ✅ Styles identiques pour préserver l'apparence
+// ✅ Styles conservés identiques
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },

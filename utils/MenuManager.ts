@@ -1,4 +1,4 @@
-// utils/MenuManager.ts - SINGLETON MENU MANAGER
+// utils/MenuManager.ts - VERSION SIMPLIFIÉE
 
 import { getCustomMenuItems, getMenuAvailability } from './storage';
 import priceData from '../helpers/ManjosPrice';
@@ -70,13 +70,12 @@ const getCategoryFromName = (
 
 class MenuManager {
   private static instance: MenuManager;
-  private menuItems: Map<number, MenuItem> = new Map();
-  private menuArray: MenuItem[] = [];
-  private unavailableItems: Set<number> = new Set();
+  private menuItems: MenuItem[] = [];
+  private menuMap: Map<number, MenuItem> = new Map();
+  private unavailableIds: Set<number> = new Set();
   private isLoaded: boolean = false;
-  private isLoading: boolean = false;
   private loadPromise: Promise<void> | null = null;
-  private subscribers: Set<() => void> = new Set();
+  private listeners: Set<() => void> = new Set();
 
   static getInstance(): MenuManager {
     if (!MenuManager.instance) {
@@ -85,40 +84,29 @@ class MenuManager {
     return MenuManager.instance;
   }
 
-  // ✅ Chargement unique avec promesse partagée
-  async loadMenu(): Promise<void> {
-    // Si déjà chargé, retourner immédiatement
-    if (this.isLoaded) {
-      this.notifySubscribers();
-      return;
-    }
+  // ✅ Chargement simple et unique
+  async ensureLoaded(): Promise<void> {
+    if (this.isLoaded) return;
 
-    // Si déjà en cours de chargement, attendre la promesse existante
-    if (this.isLoading && this.loadPromise) {
+    if (this.loadPromise) {
       return this.loadPromise;
     }
 
-    // Démarrer le chargement
-    this.isLoading = true;
-    this.loadPromise = this.performLoad();
-
-    try {
-      await this.loadPromise;
-    } finally {
-      this.isLoading = false;
-      this.loadPromise = null;
-    }
+    this.loadPromise = this.load();
+    await this.loadPromise;
+    this.loadPromise = null;
   }
 
-  private async performLoad(): Promise<void> {
+  private async load(): Promise<void> {
     try {
-      console.log('📦 MenuManager: Début du chargement du menu...');
+      console.log('📦 Chargement du menu...');
 
       const [customItems, menuAvailability] = await Promise.all([
         getCustomMenuItems(),
         getMenuAvailability(),
       ]);
 
+      // Items standards
       const standardItems: MenuItem[] = priceData.map((item: any) => {
         const category = getCategoryFromName(
           item.name,
@@ -134,6 +122,7 @@ class MenuManager {
         };
       });
 
+      // Items personnalisés
       const customMenuItems: MenuItem[] = customItems.map((item: any) => ({
         id: item.id,
         name: item.name,
@@ -143,91 +132,62 @@ class MenuManager {
         color: CATEGORY_COLORS[item.category] || '#757575',
       }));
 
-      const allItems = [...standardItems, ...customMenuItems];
+      // Fusion et mise en cache
+      this.menuItems = [...standardItems, ...customMenuItems];
+      this.menuMap.clear();
+      this.menuItems.forEach((item) => this.menuMap.set(item.id, item));
 
-      // ✅ Mise à jour atomique
-      this.menuItems.clear();
-      allItems.forEach((item) => this.menuItems.set(item.id, item));
-      this.menuArray = allItems;
-
-      this.unavailableItems = new Set(
+      // Items indisponibles
+      this.unavailableIds = new Set(
         menuAvailability
-          .filter((item: any) => !item.available)
-          .map((item: any) => item.id)
+          .filter((item) => !item.available)
+          .map((item) => item.id)
       );
 
       this.isLoaded = true;
+      console.log(`✅ Menu chargé: ${this.menuItems.length} items`);
 
-      console.log(`✅ MenuManager: Menu chargé - ${allItems.length} items`);
-
-      // ✅ Notifier tous les abonnés
-      this.notifySubscribers();
+      // Notifier les listeners
+      this.listeners.forEach((listener) => {
+        try {
+          listener();
+        } catch (error) {
+          console.error('Erreur listener menu:', error);
+        }
+      });
     } catch (error) {
-      console.error('❌ MenuManager: Erreur lors du chargement:', error);
+      console.error('❌ Erreur chargement menu:', error);
       throw error;
     }
   }
 
-  // ✅ Abonnements pour les composants
-  subscribe(callback: () => void): () => void {
-    this.subscribers.add(callback);
-
-    // Si déjà chargé, notifier immédiatement
-    if (this.isLoaded) {
-      setTimeout(callback, 0);
-    }
-
-    // Retourner fonction de désabonnement
-    return () => {
-      this.subscribers.delete(callback);
-    };
-  }
-
-  private notifySubscribers(): void {
-    this.subscribers.forEach((callback) => {
-      try {
-        callback();
-      } catch (error) {
-        console.error('Erreur dans subscriber callback:', error);
-      }
-    });
-  }
-
-  // ✅ Getters sécurisés
-  getMenuItems(): MenuItem[] {
-    return [...this.menuArray];
-  }
-
-  getMenuItem(id: number): MenuItem | undefined {
-    return this.menuItems.get(id);
+  // ✅ API simple
+  getItems(): MenuItem[] {
+    return this.menuItems;
   }
 
   getAvailableItems(): MenuItem[] {
-    return this.menuArray.filter((item) => !this.unavailableItems.has(item.id));
+    return this.menuItems.filter((item) => !this.unavailableIds.has(item.id));
   }
 
-  getFilteredItems(filters: {
-    type?: 'resto' | 'boisson';
-    category?: string;
-  }): MenuItem[] {
-    let filtered = this.getAvailableItems();
+  getItem(id: number): MenuItem | undefined {
+    return this.menuMap.get(id);
+  }
 
-    if (filters.type) {
-      filtered = filtered.filter((item) => item.type === filters.type);
-    }
+  getItemsByType(type: 'resto' | 'boisson'): MenuItem[] {
+    return this.getAvailableItems().filter((item) => item.type === type);
+  }
 
-    if (filters.category) {
-      filtered = filtered.filter((item) => item.category === filters.category);
-    }
-
-    return filtered;
+  getItemsByCategory(category: string): MenuItem[] {
+    return this.getAvailableItems().filter(
+      (item) => item.category === category
+    );
   }
 
   getCategories(type?: 'resto' | 'boisson'): string[] {
     const items = type
-      ? this.menuArray.filter((item) => item.type === type)
-      : this.menuArray;
-
+      ? this.menuItems.filter((item) => item.type === type)
+      : this.menuItems;
     return [...new Set(items.map((item) => item.category))].sort();
   }
 
@@ -235,63 +195,63 @@ class MenuManager {
     return this.isLoaded;
   }
 
-  // ✅ Invalidation du cache (si besoin)
-  invalidateCache(): void {
-    this.isLoaded = false;
-    this.menuItems.clear();
-    this.menuArray = [];
-    this.unavailableItems.clear();
-    console.log('🔄 MenuManager: Cache invalidé');
+  // ✅ Abonnements simples
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+
+    // Si déjà chargé, notifier immédiatement
+    if (this.isLoaded) {
+      setTimeout(listener, 0);
+    }
+
+    return () => this.listeners.delete(listener);
   }
 
-  // ✅ Stats pour debug
-  getStats(): {
-    itemCount: number;
-    subscribersCount: number;
-    isLoaded: boolean;
-  } {
-    return {
-      itemCount: this.menuArray.length,
-      subscribersCount: this.subscribers.size,
-      isLoaded: this.isLoaded,
-    };
+  // ✅ Reset si nécessaire
+  reset(): void {
+    this.isLoaded = false;
+    this.menuItems = [];
+    this.menuMap.clear();
+    this.unavailableIds.clear();
+    console.log('🔄 Menu reset');
   }
 }
 
-// ✅ Export de l'instance singleton
+// ✅ Export singleton
 export const menuManager = MenuManager.getInstance();
 
-// ✅ Hook React pour utiliser le menu
+// ✅ Hook React simple
 import { useEffect, useState } from 'react';
 
 export const useMenu = () => {
   const [isLoaded, setIsLoaded] = useState(menuManager.isMenuLoaded());
-  const [forceUpdate, setForceUpdate] = useState(0);
 
   useEffect(() => {
+    // Charger le menu si nécessaire
+    if (!menuManager.isMenuLoaded()) {
+      menuManager.ensureLoaded().catch((error) => {
+        console.error('Erreur chargement menu:', error);
+      });
+    }
+
     // S'abonner aux changements
     const unsubscribe = menuManager.subscribe(() => {
       setIsLoaded(true);
-      setForceUpdate((prev) => prev + 1);
     });
-
-    // Charger le menu si pas déjà fait
-    if (!menuManager.isMenuLoaded()) {
-      menuManager.loadMenu().catch((error) => {
-        console.error('Erreur de chargement menu:', error);
-      });
-    }
 
     return unsubscribe;
   }, []);
 
   return {
     isLoaded,
-    getMenuItems: () => menuManager.getMenuItems(),
-    getFilteredItems: (filters: any) => menuManager.getFilteredItems(filters),
+    getItems: () => menuManager.getItems(),
+    getAvailableItems: () => menuManager.getAvailableItems(),
+    getItem: (id: number) => menuManager.getItem(id),
+    getItemsByType: (type: 'resto' | 'boisson') =>
+      menuManager.getItemsByType(type),
+    getItemsByCategory: (category: string) =>
+      menuManager.getItemsByCategory(category),
     getCategories: (type?: 'resto' | 'boisson') =>
       menuManager.getCategories(type),
-    getMenuItem: (id: number) => menuManager.getMenuItem(id),
-    forceUpdate, // Pour forcer les re-renders si nécessaire
   };
 };
