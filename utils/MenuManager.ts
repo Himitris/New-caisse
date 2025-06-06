@@ -175,6 +175,12 @@ class MenuManager {
     this.isLoaded = false;
     this.allItems = [];
   }
+  
+  async refresh(): Promise<void> {
+    this.isLoaded = false;
+    this.allItems = [];
+    await this.ensureLoaded();
+  }
 
   // ✅ Méthodes utilitaires privées
   private getCategoryFromName(name: string, type: 'resto' | 'boisson'): string {
@@ -213,6 +219,7 @@ export const useMenu = () => {
 
   return {
     isLoaded,
+    refresh: () => menuManager.refresh(),
     getAllItems: () => menuManager.getAllItems(),
     getAvailableItems: () => menuManager.getAvailableItems(),
     getItem: (id: number) => menuManager.getItem(id),
