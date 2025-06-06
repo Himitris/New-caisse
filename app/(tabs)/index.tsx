@@ -1,4 +1,4 @@
-// app/(tabs)/index.tsx - VERSION ULTRA-SIMPLE
+// app/(tabs)/index.tsx - VERSION CORRIGÉE - Warning Text résolu
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -283,7 +283,7 @@ export default function TablesScreen() {
                             <View style={styles.tableInfo}>
                               <Users size={16} color="white" />
                               <Text style={styles.seats}>
-                                {table.guests || 0}
+                                {(table.guests || 0).toString()}
                               </Text>
                             </View>
                           </View>
@@ -296,9 +296,9 @@ export default function TablesScreen() {
 
                           <View style={styles.tableFooter}>
                             <Text style={styles.status}>{table.status}</Text>
-                            {table.order?.total && (
+                            {table.order?.total && table.order.total > 0 && (
                               <Text style={styles.orderInfo}>
-                                {table.order.items.length} items -{' '}
+                                {table.order.items.length.toString()} items -{' '}
                                 {table.order.total.toFixed(2)}€
                               </Text>
                             )}
