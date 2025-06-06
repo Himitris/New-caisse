@@ -1,5 +1,6 @@
-// app/table/[id].tsx - INTÉGRATION SIMPLIFIÉE
+// app/table/[id].tsx - AVEC NOTE DE PRÉVISUALISATION
 
+import * as Print from 'expo-print';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ArrowLeft,
@@ -12,6 +13,7 @@ import {
   Split,
   Users,
   X,
+  FileText,
 } from 'lucide-react-native';
 import {
   memo,
@@ -42,8 +44,9 @@ import {
 } from '../../utils/storage';
 import { useTableContext } from '../../utils/TableContext';
 import { useToast } from '../../utils/ToastContext';
-import { useMenu } from '../../utils/MenuManager'; // ✅ Import du nouveau hook
-import { useInstanceManager } from '../../utils/useInstanceManager'; // ✅ Import du gestionnaire
+import { useMenu } from '../../utils/MenuManager';
+import { useInstanceManager } from '../../utils/useInstanceManager';
+import { useSettings } from '@/utils/useSettings';
 import SplitSelectionModal from '../components/SplitSelectionModal';
 
 // ✅ Types
@@ -73,12 +76,14 @@ const MenuItemComponent = memo<MenuItemProps>(({ item, onPress }) => (
   </Pressable>
 ));
 
+
 export default function TableScreen(): JSX.Element {
   const { id } = useLocalSearchParams();
   const tableId = parseInt(id as string, 10);
   const router = useRouter();
   const toast = useToast();
   const { refreshTables, getTableById, updateTableData } = useTableContext();
+  const { restaurantInfo } = useSettings();
 
   // ✅ Utilisation des nouveaux hooks
   const { instanceId, isMounted, safeExecute, setSafeTimeout, addCleanup } =
@@ -101,9 +106,182 @@ export default function TableScreen(): JSX.Element {
     'resto'
   );
   const [splitModalVisible, setSplitModalVisible] = useState<boolean>(false);
+  const [processing, setProcessing] = useState<boolean>(false);
 
   // ✅ État différé pour optimisation
   const deferredTable = useDeferredValue(table);
+
+  // ✅ Fonction pour générer le HTML du ticket de prévisualisation
+  const generatePreviewTicketHTML = useCallback(
+    (
+      table: Table,
+      orderItems: OrderItem[],
+      total: number,
+      offeredTotal: number
+    ) => {
+      const dateObj = new Date();
+      const dateFormatted = dateObj.toLocaleDateString('fr-FR', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      });
+      const timeFormatted = dateObj.toLocaleTimeString('fr-FR', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+
+      let itemsHTML = '';
+      if (orderItems.length > 0) {
+        itemsHTML = `
+      <div class="items-section">
+        <table style="width: 100%; border-collapse: collapse; margin: 5mm 0;">
+          <tr>
+            <th style="text-align: left; padding: 2mm 0;">Qté</th>
+            <th style="text-align: left; padding: 2mm 0;">Article</th>
+            <th style="text-align: right; padding: 2mm 0;">Prix</th>
+          </tr>
+          ${orderItems
+            .map(
+              (item) => `
+            <tr ${item.offered ? 'style="font-style: italic;"' : ''}>
+              <td style="padding: 1mm 0;">${item.quantity}x</td>
+              <td style="padding: 1mm 0;">${item.name}${
+                item.offered ? ' (Offert)' : ''
+              }</td>
+              <td style="text-align: right; padding: 1mm 0;">${(
+                item.price * item.quantity
+              ).toFixed(2)}€</td>
+            </tr>
+          `
+            )
+            .join('')}
+        </table>
+      </div>
+    `;
+      }
+
+      let offeredHTML = '';
+      if (offeredTotal > 0) {
+        offeredHTML = `
+      <div class="total-line" style="font-style: italic;">
+        <span>Articles offerts:</span>
+        <span>${offeredTotal.toFixed(2)}€</span>
+      </div>
+    `;
+      }
+
+      return `
+    <html>
+      <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+          @page { size: 80mm auto; margin: 0mm; }
+          body { 
+            font-family: 'Courier New', monospace; 
+            width: 80mm;
+            padding: 5mm;
+            margin: 0;
+            font-size: 14pt;
+          }
+          .header, .footer { 
+            text-align: center; 
+            margin-bottom: 5mm;
+          }
+          .header h1 {
+            font-size: 18pt;
+            margin: 0 0 2mm 0;
+          }
+          .header p, .footer p {
+            margin: 0 0 1mm 0;
+            font-size: 14pt;
+          }
+          .divider {
+            border-bottom: 1px dashed #000;
+            margin: 3mm 0;
+          }
+          .info {
+            margin-bottom: 3mm;
+          }
+          .info p {
+            margin: 0 0 1mm 0;
+          }
+          .totals {
+            margin: 2mm 0;
+          }
+          .total-line {
+            display: flex;
+            justify-content: space-between;
+            margin: 1mm 0;
+            font-size: 16pt;
+          }
+          .total-amount {
+            font-weight: bold;
+            font-size: 16pt;
+            text-align: right;
+            margin: 2mm 0;
+          }
+          .preview-info {
+            text-align: center;
+            margin: 3mm 0;
+            font-size: 14pt;
+          }
+          .preview-info p {
+            margin: 0 0 1mm 0;
+          }
+          th, td {
+            padding: 1mm 0;
+            font-size: 14pt;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>${restaurantInfo.name}</h1>
+          <p>${restaurantInfo.address}</p>
+          <p>${restaurantInfo.phone}</p>
+        </div>
+        
+        <div class="info">
+          <p><strong>${table.name}</strong></p>
+          <p>Date: ${dateFormatted} ${timeFormatted}</p>
+          <p>Section: ${table.section}</p>
+          <p>Invités: ${guestCount}</p>
+        </div>
+
+        <div class="divider"></div>
+
+        ${itemsHTML}
+
+        <div class="totals">
+          <div class="total-line">
+            <span>Articles:</span>
+            <span>${orderItems.length}</span>
+          </div>
+          ${offeredHTML}
+          <div class="total-amount">
+            TOTAL: ${total.toFixed(2)}€
+          </div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="preview-info">
+          <p><strong>TICKET DE PRÉVISUALISATION</strong></p>
+          <p>⚠️ Cette commande n'a pas été payée ⚠️</p>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="footer">
+          <p>${restaurantInfo.taxInfo}</p>
+          <p>Document de prévisualisation - ${restaurantInfo.owner}</p>
+        </div>
+      </body>
+    </html>
+  `;
+    },
+    [restaurantInfo, guestCount]
+  );
 
   // ✅ Fonction de calcul du total mémorisée
   const calculateTotal = useCallback((items: OrderItem[]): number => {
@@ -195,7 +373,7 @@ export default function TableScreen(): JSX.Element {
           const items = [...updatedTable.order.items];
           const existingItemIndex = items.findIndex(
             (orderItem) =>
-              orderItem.menuId === item.id && // ✅ Utiliser menuId pour la comparaison
+              orderItem.menuId === item.id &&
               orderItem.name === item.name &&
               orderItem.price === item.price
           );
@@ -208,11 +386,11 @@ export default function TableScreen(): JSX.Element {
           } else {
             items.push({
               id: Date.now() + Math.random(),
-              menuId: item.id, // ✅ Ajouter menuId pour référencer l'item original
+              menuId: item.id,
               name: item.name,
               price: item.price,
               quantity: 1,
-              type: item.type, // ✅ Stocker le type directement
+              type: item.type,
             });
           }
 
@@ -567,6 +745,49 @@ export default function TableScreen(): JSX.Element {
     [table?.order, guestCount, tableId, router, toast]
   );
 
+  // ✅ Handler pour générer le ticket de prévisualisation
+  const handlePreviewNote = useCallback(async () => {
+    if (!table || !isMounted()) return;
+
+    if (!table.order || table.order.items.length === 0) {
+      toast.showToast('Aucun article à prévisualiser', 'warning');
+      return;
+    }
+
+    setProcessing(true);
+    try {
+      const orderItems = table.order.items;
+      const total = table.order.total;
+      const offeredTotal = orderItems.reduce((sum, item) => {
+        return item.offered ? sum + item.price * item.quantity : sum;
+      }, 0);
+
+      const ticketHTML = generatePreviewTicketHTML(
+        table,
+        orderItems,
+        total,
+        offeredTotal
+      );
+
+      await Print.printAsync({
+        html: ticketHTML,
+      });
+
+      if (isMounted()) {
+        toast.showToast('Ticket de prévisualisation généré', 'success');
+      }
+    } catch (error) {
+      console.error('Erreur lors de la génération du ticket:', error);
+      if (isMounted()) {
+        toast.showToast('Impossible de générer le ticket', 'error');
+      }
+    } finally {
+      if (isMounted()) {
+        setProcessing(false);
+      }
+    }
+  }, [table, generatePreviewTicketHTML, toast, isMounted]);
+
   // ✅ Calculs dérivés
   const offeredTotal = useMemo((): number => {
     if (!deferredTable?.order?.items) return 0;
@@ -659,6 +880,18 @@ export default function TableScreen(): JSX.Element {
             <Plus size={24} color="#666" />
           </Pressable>
         </View>
+
+        {/* ✅ NOUVEAU BOUTON NOTE DE PRÉVISUALISATION */}
+        <Pressable
+          style={[
+            styles.paymentButton,
+            { backgroundColor: '#673AB7', marginRight: 8 },
+          ]}
+          onPress={handlePreviewNote}
+        >
+          <FileText size={24} color="white" />
+          <Text style={styles.paymentButtonText}>Note</Text>
+        </Pressable>
 
         <Pressable
           style={[
@@ -1051,11 +1284,18 @@ export default function TableScreen(): JSX.Element {
         defaultPartsCount={guestCount}
         tableName={table?.name || `Table ${tableId}`}
       />
+
+      {processing && (
+        <View style={styles.processingOverlay}>
+          <ActivityIndicator size="large" color="white" />
+          <Text style={styles.processingText}>Génération du ticket...</Text>
+        </View>
+      )}
     </View>
   );
 }
 
-// ✅ Styles conservés (identiques à l'original)
+// ✅ Styles mis à jour avec les nouveaux composants
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   loadingContainer: {
@@ -1347,4 +1587,22 @@ const styles = StyleSheet.create({
   },
   menuItemName: { fontSize: 11, fontWeight: '500', marginBottom: 2 },
   menuItemPrice: { fontSize: 11, fontWeight: '600', color: '#4CAF50' },
+
+  // ✅ STYLES POUR L'OVERLAY DE PROCESSING
+  processingOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 1000,
+  },
+  processingText: {
+    color: 'white',
+    marginTop: 12,
+    fontSize: 16,
+  },
 });
