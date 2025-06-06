@@ -3,9 +3,9 @@ import { useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { menuManager } from '../utils/MenuManager';
 import { View, Text, ActivityIndicator } from 'react-native';
 import { initializeTables } from '../utils/storage';
+import { menuManager } from '../utils/MenuManager';
 import { ToastProvider } from '../utils/ToastContext';
 import { SettingsProvider } from '../utils/SettingsContext';
 import { TableProvider } from '@/utils/TableContext';
@@ -13,38 +13,39 @@ import { TableProvider } from '@/utils/TableContext';
 export default function RootLayout() {
   const [appReady, setAppReady] = useState(false);
 
-  // ✅ Setup ultra-simple
+  // Initialisation ultra-simple
   useEffect(() => {
-    const setupApp = async () => {
+    const initApp = async () => {
       try {
         console.log("🚀 Initialisation de l'app...");
 
-        // ✅ Initialisation simple et parallèle
-        await Promise.all([initializeTables(), menuManager.ensureLoaded()]);
+        // Initialisation en parallèle et simple
+        await Promise.all([initializeTables(), menuManager.load()]);
 
-        console.log('✅ App initialisée');
+        console.log('✅ App prête');
         setAppReady(true);
       } catch (error) {
-        console.error("❌ Erreur lors de l'initialisation:", error);
-        // ✅ Même en cas d'erreur, on démarre l'app
+        console.error("❌ Erreur d'initialisation:", error);
+        // Même en cas d'erreur, on démarre l'app
         setAppReady(true);
       }
     };
 
-    setupApp();
+    initApp();
   }, []);
 
-  // ✅ Écran de chargement simple
+  // Écran de chargement simple
   if (!appReady) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#4CAF50" />
-        <Text style={styles.loadingText}>Initialisation...</Text>
+        <Text style={styles.loadingText}>Manjo Carn</Text>
+        <Text style={styles.loadingSubtext}>Initialisation...</Text>
       </View>
     );
   }
 
-  // ✅ App structure simple
+  // Structure app simple
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SettingsProvider>
@@ -54,37 +55,17 @@ export default function RootLayout() {
               screenOptions={{
                 headerShown: false,
                 contentStyle: { backgroundColor: 'white' },
-                animation: 'fade_from_bottom',
+                animation: 'fade',
                 presentation: 'card',
-                gestureEnabled: true,
-                gestureDirection: 'horizontal',
               }}
             >
-              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-              <Stack.Screen
-                name="table/[id]"
-                options={{ presentation: 'card' }}
-              />
-              <Stack.Screen
-                name="payment/full"
-                options={{ presentation: 'card' }}
-              />
-              <Stack.Screen
-                name="payment/split"
-                options={{ presentation: 'card' }}
-              />
-              <Stack.Screen
-                name="payment/custom"
-                options={{ presentation: 'card' }}
-              />
-              <Stack.Screen
-                name="payment/items"
-                options={{ presentation: 'card' }}
-              />
-              <Stack.Screen
-                name="print-preview"
-                options={{ presentation: 'card' }}
-              />
+              <Stack.Screen name="(tabs)" />
+              <Stack.Screen name="table/[id]" />
+              <Stack.Screen name="payment/full" />
+              <Stack.Screen name="payment/split" />
+              <Stack.Screen name="payment/custom" />
+              <Stack.Screen name="payment/items" />
+              <Stack.Screen name="print-preview" />
             </Stack>
             <StatusBar style="auto" />
           </ToastProvider>
@@ -94,16 +75,23 @@ export default function RootLayout() {
   );
 }
 
-// ✅ Styles simples
+// Styles simples
 const styles = {
   loadingContainer: {
     flex: 1,
     justifyContent: 'center' as const,
     alignItems: 'center' as const,
     backgroundColor: '#f5f5f5',
+    padding: 20,
   },
   loadingText: {
-    marginTop: 16,
+    marginTop: 20,
+    fontSize: 24,
+    fontWeight: 'bold' as const,
+    color: '#333',
+  },
+  loadingSubtext: {
+    marginTop: 8,
     fontSize: 16,
     color: '#666',
   },

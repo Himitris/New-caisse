@@ -1,7 +1,5 @@
-// app/(tabs)/menu.tsx - VERSION AMÉLIORÉE COMPLÈTE
-import { useToast } from '@/utils/ToastContext';
-import { useSettings } from '@/utils/useSettings';
-import { Plus, Minus, Edit3, Trash2, X } from 'lucide-react-native';
+// app/(tabs)/menu.tsx - VERSION SIMPLE
+import { Plus, Edit3, Trash2, X } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
@@ -20,19 +18,11 @@ import {
   addCustomMenuItem,
   deleteCustomMenuItem,
   updateCustomMenuItem,
+  getMenuAvailability,
+  saveMenuAvailability,
 } from '../../utils/storage';
+import { useToast } from '../../utils/ToastContext';
 
-// ✅ Types
-interface MenuItem {
-  id: number;
-  name: string;
-  price: number;
-  category: string;
-  type: 'resto' | 'boisson';
-  available: boolean;
-}
-
-// ✅ Catégories par type
 const CATEGORIES_BY_TYPE = {
   resto: [
     'Plats Principaux',
@@ -46,41 +36,51 @@ const CATEGORIES_BY_TYPE = {
 };
 
 export default function MenuScreen() {
-  // ✅ ÉTAT LOCAL
+  const toast = useToast();
+  const { isLoaded, getAllItems, getCategories } = useMenu();
+
+  // États locaux simples
   const [activeType, setActiveType] = useState<'resto' | 'boisson' | null>(
-    null
+    'resto'
   );
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [availability, setAvailability] = useState<Record<number, boolean>>({});
 
-  // ✅ Modals
+  // Modals
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [addModalVisible, setAddModalVisible] = useState(false);
 
-  // ✅ États d'édition
-  const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
+  // États d'édition/ajout
+  const [editingItem, setEditingItem] = useState<any>(null);
   const [editItemName, setEditItemName] = useState('');
   const [editItemPrice, setEditItemPrice] = useState('');
-
-  // ✅ États d'ajout
   const [newItemName, setNewItemName] = useState('');
   const [newItemPrice, setNewItemPrice] = useState('');
   const [newItemType, setNewItemType] = useState<'resto' | 'boisson'>('resto');
   const [newItemCategory, setNewItemCategory] = useState('Plats Principaux');
   const [newItemAvailable, setNewItemAvailable] = useState(true);
 
-  // ✅ State pour forcer le re-render après toggle
-  const [, forceUpdate] = useState({});
+  // Chargement de la disponibilité
+  useEffect(() => {
+    const loadAvailability = async () => {
+      try {
+        const availabilityData = await getMenuAvailability();
+        const availabilityMap: Record<number, boolean> = {};
+        availabilityData.forEach((item) => {
+          availabilityMap[item.id] = item.available;
+        });
+        setAvailability(availabilityMap);
+      } catch (error) {
+        console.error('Error loading availability:', error);
+      }
+    };
 
-  const toast = useToast();
-  const {
-    isLoaded,
-    getAllItems,
-    getCategories,
-    toggleItemAvailability,
-    refresh,
-  } = useMenu();
+    if (isLoaded) {
+      loadAvailability();
+    }
+  }, [isLoaded]);
 
-  // ✅ FILTRAGE
+  // Items filtrés
   const filteredItems = getAllItems().filter((item) => {
     if (activeType && item.type !== activeType) return false;
     if (selectedCategory && item.category !== selectedCategory) return false;
@@ -89,29 +89,40 @@ export default function MenuScreen() {
 
   const categories = getCategories(activeType || undefined);
 
-  // ✅ TOGGLE DISPONIBILITÉ
+  // Toggle disponibilité
   const handleToggleAvailability = useCallback(
     async (itemId: number) => {
       try {
-        const success = await toggleItemAvailability(itemId);
-        if (success) {
-          // ✅ Forcer le re-render pour afficher le changement immédiatement
-          forceUpdate({});
-          toast.showToast('Disponibilité mise à jour', 'success');
-        } else {
-          toast.showToast('Erreur lors de la mise à jour', 'error');
-        }
+        const newAvailability = { ...availability };
+        newAvailability[itemId] = !newAvailability[itemId];
+        setAvailability(newAvailability);
+
+        // Sauvegarde en arrière-plan
+        const availabilityArray = Object.entries(newAvailability).map(
+          ([id, available]) => {
+            const item = getAllItems().find((i) => i.id === parseInt(id));
+            return {
+              id: parseInt(id),
+              available,
+              name: item?.name || '',
+              price: item?.price || 0,
+            };
+          }
+        );
+
+        await saveMenuAvailability(availabilityArray);
+        toast.showToast('Disponibilité mise à jour', 'success');
       } catch (error) {
         console.error('Error toggling availability:', error);
         toast.showToast('Erreur lors de la mise à jour', 'error');
       }
     },
-    [toggleItemAvailability, toast]
+    [availability, getAllItems, toast]
   );
 
-  // ✅ ÉDITION (seulement items personnalisés ID > 10000)
+  // Édition
   const handleEdit = useCallback(
-    (item: MenuItem) => {
+    (item: any) => {
       if (item.id <= 10000) {
         toast.showToast(
           'Les articles par défaut ne peuvent pas être modifiés',
@@ -128,7 +139,6 @@ export default function MenuScreen() {
     [toast]
   );
 
-  // ✅ SAUVEGARDE ÉDITION
   const handleSaveEdit = useCallback(async () => {
     if (!editingItem) return;
 
@@ -149,7 +159,6 @@ export default function MenuScreen() {
       };
 
       await updateCustomMenuItem(updatedItem);
-      await refresh(); // ✅ Rafraîchir le menu
 
       setEditModalVisible(false);
       setEditingItem(null);
@@ -157,15 +166,18 @@ export default function MenuScreen() {
       setEditItemPrice('');
 
       toast.showToast('Article mis à jour', 'success');
+
+      // Rechargement simple
+      setTimeout(() => window.location.reload(), 500);
     } catch (error) {
       console.error('Error updating item:', error);
       toast.showToast('Erreur lors de la mise à jour', 'error');
     }
-  }, [editingItem, editItemName, editItemPrice, toast, refresh]);
+  }, [editingItem, editItemName, editItemPrice, toast]);
 
-  // ✅ SUPPRESSION (seulement items personnalisés ID > 10000)
+  // Suppression
   const handleDelete = useCallback(
-    async (item: MenuItem) => {
+    async (item: any) => {
       if (item.id <= 10000) {
         toast.showToast(
           'Les articles par défaut ne peuvent pas être supprimés',
@@ -185,8 +197,8 @@ export default function MenuScreen() {
             onPress: async () => {
               try {
                 await deleteCustomMenuItem(item.id);
-                await refresh(); // ✅ Rafraîchir le menu
                 toast.showToast('Article supprimé', 'success');
+                setTimeout(() => window.location.reload(), 500);
               } catch (error) {
                 console.error('Error deleting item:', error);
                 toast.showToast('Erreur lors de la suppression', 'error');
@@ -196,23 +208,20 @@ export default function MenuScreen() {
         ]
       );
     },
-    [toast, refresh]
+    [toast]
   );
 
-  // ✅ AJOUT NOUVEL ITEM
+  // Ajout
   const handleAddItem = useCallback(async () => {
     const price = parseFloat(newItemPrice);
     if (!newItemName.trim() || isNaN(price) || price <= 0 || !newItemCategory) {
-      toast.showToast(
-        'Veuillez remplir tous les champs avec des valeurs valides',
-        'warning'
-      );
+      toast.showToast('Veuillez remplir tous les champs', 'warning');
       return;
     }
 
     try {
       const newItem: CustomMenuItem = {
-        id: Date.now(), // ID > 10000 pour les items personnalisés
+        id: Date.now(),
         name: newItemName.trim(),
         price: price,
         category: newItemCategory,
@@ -221,9 +230,7 @@ export default function MenuScreen() {
       };
 
       await addCustomMenuItem(newItem);
-      await refresh(); // ✅ Rafraîchir le menu
 
-      // Reset formulaire
       setNewItemName('');
       setNewItemPrice('');
       setNewItemCategory(CATEGORIES_BY_TYPE[newItemType][0]);
@@ -231,6 +238,7 @@ export default function MenuScreen() {
       setAddModalVisible(false);
 
       toast.showToast('Article ajouté avec succès', 'success');
+      setTimeout(() => window.location.reload(), 500);
     } catch (error) {
       console.error('Error adding item:', error);
       toast.showToast("Erreur lors de l'ajout", 'error');
@@ -242,21 +250,7 @@ export default function MenuScreen() {
     newItemType,
     newItemAvailable,
     toast,
-    refresh,
   ]);
-
-  // ✅ Mettre à jour les catégories disponibles quand le type change
-  useEffect(() => {
-    if (newItemType) {
-      const availableCategories = CATEGORIES_BY_TYPE[newItemType];
-      if (
-        availableCategories.length > 0 &&
-        !availableCategories.includes(newItemCategory)
-      ) {
-        setNewItemCategory(availableCategories[0]);
-      }
-    }
-  }, [newItemType, newItemCategory]);
 
   if (!isLoaded) {
     return (
@@ -268,7 +262,7 @@ export default function MenuScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Header amélioré */}
+      {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerTop}>
           <Text style={styles.title}>Gestion du Menu</Text>
@@ -338,7 +332,7 @@ export default function MenuScreen() {
         {/* Sidebar catégories */}
         <View style={styles.sidebar}>
           <Text style={styles.sidebarTitle}>Catégories</Text>
-          <ScrollView showsVerticalScrollIndicator={false}>
+          <ScrollView>
             <Pressable
               style={[
                 styles.categoryItem,
@@ -355,7 +349,6 @@ export default function MenuScreen() {
                 Toutes
               </Text>
             </Pressable>
-
             {categories.map((category) => (
               <Pressable
                 key={category}
@@ -380,109 +373,100 @@ export default function MenuScreen() {
 
         {/* Liste des items */}
         <View style={styles.itemsContainer}>
-          <View style={styles.itemsHeader}>
-            <Text style={styles.itemsTitle}>
-              Articles ({filteredItems.length})
-            </Text>
-          </View>
-
-          <ScrollView
-            style={styles.itemsScroll}
-            showsVerticalScrollIndicator={false}
-          >
+          <Text style={styles.itemsTitle}>
+            Articles ({filteredItems.length})
+          </Text>
+          <ScrollView style={styles.itemsScroll}>
             <View style={styles.itemsGrid}>
-              {filteredItems.map((item) => (
-                <View
-                  key={item.id}
-                  style={[
-                    styles.itemCard,
-                    !item.available && styles.unavailableItem,
-                  ]}
-                >
-                  <View style={styles.itemHeader}>
-                    <Text style={styles.itemName} numberOfLines={2}>
-                      {item.name}
-                    </Text>
-                    <Text style={styles.itemPrice}>
-                      {item.price.toFixed(2)} €
-                    </Text>
-                  </View>
+              {filteredItems.map((item) => {
+                const isAvailable = availability[item.id] !== false; // Par défaut disponible
 
-                  <View style={styles.itemCategory}>
-                    <Text style={styles.itemCategoryText}>{item.category}</Text>
-                    <View
-                      style={[
-                        styles.typeTag,
-                        {
-                          backgroundColor:
-                            item.type === 'resto' ? '#FF9800' : '#2196F3',
-                        },
-                      ]}
-                    >
-                      <Text style={styles.typeTagText}>
-                        {item.type === 'resto' ? 'Plat' : 'Boisson'}
+                return (
+                  <View
+                    key={item.id}
+                    style={[
+                      styles.itemCard,
+                      !isAvailable && styles.unavailableItem,
+                    ]}
+                  >
+                    <View style={styles.itemHeader}>
+                      <Text style={styles.itemName} numberOfLines={2}>
+                        {item.name}
+                      </Text>
+                      <Text style={styles.itemPrice}>
+                        {item.price.toFixed(2)} €
                       </Text>
                     </View>
-                  </View>
 
-                  <View style={styles.itemActions}>
-                    {/* Toggle disponibilité */}
-                    <Pressable
-                      style={[
-                        styles.actionButton,
-                        {
-                          backgroundColor: item.available
-                            ? '#4CAF50'
-                            : '#FF5722',
-                        },
-                      ]}
-                      onPress={() => handleToggleAvailability(item.id)}
-                    >
-                      <Text style={styles.actionText}>
-                        {item.available ? 'Disponible' : 'Indisponible'}
+                    <View style={styles.itemCategory}>
+                      <Text style={styles.itemCategoryText}>
+                        {item.category}
                       </Text>
-                    </Pressable>
+                      <View
+                        style={[
+                          styles.typeTag,
+                          {
+                            backgroundColor:
+                              item.type === 'resto' ? '#FF9800' : '#2196F3',
+                          },
+                        ]}
+                      >
+                        <Text style={styles.typeTagText}>
+                          {item.type === 'resto' ? 'Plat' : 'Boisson'}
+                        </Text>
+                      </View>
+                    </View>
 
-                    {/* Éditer (seulement items personnalisés) */}
-                    {item.id > 10000 && (
+                    <View style={styles.itemActions}>
                       <Pressable
                         style={[
-                          styles.iconActionButton,
-                          { backgroundColor: '#2196F3' },
+                          styles.actionButton,
+                          {
+                            backgroundColor: isAvailable
+                              ? '#4CAF50'
+                              : '#FF5722',
+                          },
                         ]}
-                        onPress={() => handleEdit(item)}
+                        onPress={() => handleToggleAvailability(item.id)}
                       >
-                        <Edit3 size={16} color="white" />
+                        <Text style={styles.actionText}>
+                          {isAvailable ? 'Disponible' : 'Indisponible'}
+                        </Text>
                       </Pressable>
-                    )}
 
-                    {/* Supprimer (seulement items personnalisés) */}
-                    {item.id > 10000 && (
-                      <Pressable
-                        style={[
-                          styles.iconActionButton,
-                          { backgroundColor: '#F44336' },
-                        ]}
-                        onPress={() => handleDelete(item)}
-                      >
-                        <Trash2 size={16} color="white" />
-                      </Pressable>
-                    )}
+                      {item.id > 10000 && (
+                        <>
+                          <Pressable
+                            style={[
+                              styles.iconActionButton,
+                              { backgroundColor: '#2196F3' },
+                            ]}
+                            onPress={() => handleEdit(item)}
+                          >
+                            <Edit3 size={16} color="white" />
+                          </Pressable>
+                          <Pressable
+                            style={[
+                              styles.iconActionButton,
+                              { backgroundColor: '#F44336' },
+                            ]}
+                            onPress={() => handleDelete(item)}
+                          >
+                            <Trash2 size={16} color="white" />
+                          </Pressable>
+                        </>
+                      )}
+                    </View>
                   </View>
-                </View>
-              ))}
+                );
+              })}
             </View>
           </ScrollView>
         </View>
       </View>
 
       {/* Modal d'édition */}
-      <Modal
-        visible={editModalVisible}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setEditModalVisible(false)}
-      >
+      <Modal visible={editModalVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
@@ -518,7 +502,6 @@ export default function MenuScreen() {
               >
                 <Text style={styles.cancelButtonText}>Annuler</Text>
               </Pressable>
-
               <Pressable
                 style={[styles.modalButton, styles.saveButton]}
                 onPress={handleSaveEdit}
@@ -531,12 +514,7 @@ export default function MenuScreen() {
       </Modal>
 
       {/* Modal d'ajout */}
-      <Modal
-        visible={addModalVisible}
-        transparent={true}
-        animationType="fade"
-        onRequestClose={() => setAddModalVisible(false)}
-      >
+      <Modal visible={addModalVisible} transparent animationType="fade">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeader}>
@@ -547,7 +525,7 @@ export default function MenuScreen() {
             </View>
 
             <ScrollView style={styles.modalBody}>
-              <Text style={styles.inputLabel}>Nom de l'article</Text>
+              <Text style={styles.inputLabel}>Nom</Text>
               <TextInput
                 style={styles.input}
                 value={newItemName}
@@ -602,11 +580,7 @@ export default function MenuScreen() {
               </View>
 
               <Text style={styles.inputLabel}>Catégorie</Text>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                style={styles.categorySelector}
-              >
+              <ScrollView horizontal style={styles.categorySelector}>
                 {CATEGORIES_BY_TYPE[newItemType].map((category) => (
                   <Pressable
                     key={category}
@@ -635,7 +609,6 @@ export default function MenuScreen() {
                 <Switch
                   value={newItemAvailable}
                   onValueChange={setNewItemAvailable}
-                  trackColor={{ false: '#e0e0e0', true: '#4CAF50' }}
                 />
               </View>
             </ScrollView>
@@ -647,7 +620,6 @@ export default function MenuScreen() {
               >
                 <Text style={styles.cancelButtonText}>Annuler</Text>
               </Pressable>
-
               <Pressable
                 style={[styles.modalButton, styles.saveButton]}
                 onPress={handleAddItem}
@@ -662,27 +634,16 @@ export default function MenuScreen() {
   );
 }
 
-// ✅ Styles améliorés
+// Styles (conservés mais simplifiés)
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f8f9fa' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadingText: {
-    textAlign: 'center',
-    marginTop: 50,
-    fontSize: 16,
-    color: '#666',
-  },
-
+  loadingText: { fontSize: 16, color: '#666' },
   header: {
     padding: 16,
     backgroundColor: 'white',
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 5,
   },
   headerTop: {
     flexDirection: 'row',
@@ -701,7 +662,6 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   addButtonText: { color: 'white', fontWeight: '600' },
-
   typeFilters: { flexDirection: 'row', gap: 8 },
   filterButton: {
     paddingVertical: 8,
@@ -712,9 +672,7 @@ const styles = StyleSheet.create({
   activeFilter: { backgroundColor: '#2196F3' },
   filterText: { fontWeight: '500', color: '#666' },
   activeFilterText: { color: 'white' },
-
   content: { flex: 1, flexDirection: 'row' },
-
   sidebar: {
     width: 200,
     backgroundColor: 'white',
@@ -737,13 +695,15 @@ const styles = StyleSheet.create({
   activeCategory: { backgroundColor: '#e3f2fd' },
   categoryText: { fontSize: 14, fontWeight: '500', color: '#666' },
   activeCategoryText: { color: '#2196F3', fontWeight: '600' },
-
   itemsContainer: { flex: 1, padding: 16 },
-  itemsHeader: { marginBottom: 16 },
-  itemsTitle: { fontSize: 18, fontWeight: '600', color: '#333' },
+  itemsTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 16,
+    color: '#333',
+  },
   itemsScroll: { flex: 1 },
   itemsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-
   itemCard: {
     width: '31%',
     minWidth: 280,
@@ -751,18 +711,11 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
   },
   unavailableItem: { opacity: 0.6, backgroundColor: '#f0f0f0' },
-
   itemHeader: { marginBottom: 8 },
   itemName: { fontSize: 16, fontWeight: '600', color: '#333', marginBottom: 4 },
   itemPrice: { fontSize: 18, color: '#4CAF50', fontWeight: '700' },
-
   itemCategory: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -770,27 +723,10 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   itemCategoryText: { fontSize: 12, color: '#666' },
-  typeTag: {
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 12,
-  },
+  typeTag: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 12 },
   typeTagText: { fontSize: 10, color: 'white', fontWeight: '600' },
-
-  itemActions: {
-    flexDirection: 'row',
-    gap: 8,
-    flexWrap: 'wrap',
-    alignItems: 'center',
-  },
-  actionButton: {
-    flex: 1,
-    minWidth: 80,
-    padding: 8,
-    borderRadius: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
+  itemActions: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  actionButton: { flex: 1, padding: 8, borderRadius: 6, alignItems: 'center' },
   iconActionButton: {
     width: 32,
     height: 32,
@@ -799,8 +735,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   actionText: { color: 'white', fontSize: 12, fontWeight: '500' },
-
-  // Modal styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -824,7 +758,6 @@ const styles = StyleSheet.create({
   },
   modalTitle: { fontSize: 18, fontWeight: 'bold', color: '#333' },
   modalBody: { padding: 20, maxHeight: 400 },
-
   inputLabel: {
     fontSize: 14,
     fontWeight: '600',
@@ -839,7 +772,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     fontSize: 16,
   },
-
   typeSelector: { flexDirection: 'row', gap: 8, marginBottom: 16 },
   typeSelectorButton: {
     flex: 1,
@@ -851,7 +783,6 @@ const styles = StyleSheet.create({
   activeTypeSelector: { backgroundColor: '#2196F3' },
   typeSelectorText: { fontWeight: '500', color: '#666' },
   activeTypeSelectorText: { color: 'white' },
-
   categorySelector: { marginBottom: 16 },
   categorySelectorButton: {
     paddingHorizontal: 12,
@@ -863,14 +794,12 @@ const styles = StyleSheet.create({
   activeCategorySelector: { backgroundColor: '#4CAF50' },
   categorySelectorText: { fontSize: 12, fontWeight: '500', color: '#666' },
   activeCategorySelectorText: { color: 'white' },
-
   availabilityRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 16,
   },
-
   modalActions: {
     flexDirection: 'row',
     gap: 12,
@@ -878,12 +807,7 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: '#e0e0e0',
   },
-  modalButton: {
-    flex: 1,
-    padding: 12,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
+  modalButton: { flex: 1, padding: 12, borderRadius: 8, alignItems: 'center' },
   cancelButton: { backgroundColor: '#f5f5f5' },
   saveButton: { backgroundColor: '#4CAF50' },
   cancelButtonText: { color: '#666', fontWeight: '500' },
