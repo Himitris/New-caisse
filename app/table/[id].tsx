@@ -33,6 +33,7 @@ import {
 import { useToast } from '../../utils/ToastContext';
 import { useMenu } from '../../utils/MenuManager';
 import SplitSelectionModal from '../components/SplitSelectionModal';
+import { useTableContext } from '@/utils/TableContext';
 
 // ✅ Types
 interface MenuItem {
@@ -67,6 +68,7 @@ export default function TableScreen() {
   const [loading, setLoading] = useState(true);
   const [guestCount, setGuestCount] = useState(1);
   const [saving, setSaving] = useState(false);
+  const { refreshTables } = useTableContext();
 
   // ✅ États manquants ajoutés
   const [activeType, setActiveType] = useState<'resto' | 'boisson' | null>(
@@ -125,18 +127,24 @@ export default function TableScreen() {
   useEffect(() => {
     if (!table) return;
 
-    const autoSaveInterval = setInterval(() => {
+    const autoSaveInterval = setInterval(async () => {
       if (table) {
         setSaving(true);
-        updateTable(table)
-          .then(() => console.log(`🔄 Auto-sauvegarde table ${tableId}`))
-          .catch(console.error)
-          .finally(() => setSaving(false));
+        try {
+          await updateTable(table);
+          // ✅ AJOUT : Rafraîchir le contexte périodiquement
+          await refreshTables();
+          console.log(`🔄 Auto-sauvegarde table ${tableId}`);
+        } catch (error) {
+          console.error('Auto-save failed:', error);
+        } finally {
+          setSaving(false);
+        }
       }
     }, 30000);
 
     return () => clearInterval(autoSaveInterval);
-  }, [table, tableId]);
+  }, [table, tableId, refreshTables]);
 
   // ✅ Fonction manquante ajoutée
   const getMenuItem = useCallback(
@@ -338,6 +346,8 @@ export default function TableScreen() {
     setSaving(true);
     try {
       await updateTable(table);
+      // ✅ AJOUT : Rafraîchir le contexte après sauvegarde
+      await refreshTables();
       console.log(`💾 Sauvegarde manuelle table ${tableId} réussie`);
       toast.showToast('Sauvegardé', 'success');
     } catch (error) {
@@ -346,7 +356,7 @@ export default function TableScreen() {
     } finally {
       setSaving(false);
     }
-  }, [table, tableId, toast]);
+  }, [table, tableId, toast, refreshTables]);
 
   // ✅ ACTIONS CRITIQUES avec sauvegarde immédiate
   const handleClearOrder = useCallback(async () => {
@@ -369,13 +379,13 @@ export default function TableScreen() {
               };
             });
 
-            // ✅ Sauvegarde immédiate pour actions critiques
             await saveTableNow();
+            await refreshTables();
           },
         },
       ]
     );
-  }, [table?.order, saveTableNow]);
+  }, [table?.order, saveTableNow, refreshTables]);
 
   const handleCloseTable = useCallback(async () => {
     if (!table) return;
@@ -391,6 +401,7 @@ export default function TableScreen() {
           onPress: async () => {
             try {
               await resetTable(tableId);
+              await refreshTables();
               toast.showToast(`Table ${table.name} fermée`, 'success');
               router.replace('/');
             } catch (error) {
@@ -401,7 +412,7 @@ export default function TableScreen() {
         },
       ]
     );
-  }, [table, tableId, router, toast]);
+  }, [table, tableId, router, toast, refreshTables]);
 
   const handlePayment = useCallback(
     (type: 'full' | 'split' | 'custom' | 'items'): void => {

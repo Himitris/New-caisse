@@ -61,6 +61,13 @@ export default function TablesScreen() {
     return activeSection ? [activeSection] : sections;
   }, [activeSection, sections]);
 
+  useFocusEffect(
+    useCallback(() => {
+      // Rafraîchir les tables quand on revient sur cet écran
+      refreshTables();
+    }, [refreshTables])
+  );
+
   // Rafraîchir les tables - SIMPLIFIÉ
   const handleRefreshTables = useCallback(async () => {
     setRefreshing(true);
