@@ -1,7 +1,7 @@
 // app/(tabs)/index.tsx - VERSION ULTRA-SIMPLE
 import * as Haptics from 'expo-haptics';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { Coffee, Filter, RefreshCcw, Users } from 'lucide-react-native';
 import { useCallback, useEffect, useState } from 'react';
 import {
@@ -62,6 +62,13 @@ export default function TablesScreen() {
   useEffect(() => {
     loadTables();
   }, [loadTables]);
+
+  useFocusEffect(
+    useCallback(() => {
+      // ✅ Rafraîchir les tables quand on revient sur cet écran
+      loadTables();
+    }, [loadTables])
+  );
 
   // Sauvegarde périodique simple (toutes les 30 secondes)
   useEffect(() => {

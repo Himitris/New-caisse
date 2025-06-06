@@ -1,5 +1,5 @@
-// app/table/[id].tsx - VERSION ULTRA-SIMPLE
-import { useLocalSearchParams, useRouter } from 'expo-router';
+// app/table/[id].tsx - VERSION CORRIGÉE DÉFINITIVE
+import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
 import {
   ArrowLeft,
   CreditCard,
@@ -13,7 +13,7 @@ import {
   Users,
   X,
 } from 'lucide-react-native';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -33,6 +33,7 @@ import {
 import { useToast } from '../../utils/ToastContext';
 import { useMenu } from '../../utils/MenuManager';
 import SplitSelectionModal from '../components/SplitSelectionModal';
+import { useTableContext } from '@/utils/TableContext';
 
 interface MenuItem {
   id: number;
@@ -48,6 +49,7 @@ export default function TableScreen() {
   const tableId = parseInt(id as string, 10);
   const router = useRouter();
   const toast = useToast();
+  const { refreshTables } = useTableContext();
 
   // États locaux simples
   const [table, setTable] = useState<Table | null>(null);
@@ -57,42 +59,83 @@ export default function TableScreen() {
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [splitModalVisible, setSplitModalVisible] = useState(false);
 
-  const {
-    isLoaded: menuLoaded,
-    getAvailableItems,
-    getCategories,
-    getItem,
-  } = useMenu();
+  // ✅ Simplification des refs
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nextItemIdRef = useRef<number>(Date.now());
 
-  // Chargement initial simple
-  useEffect(() => {
-    const loadTable = async () => {
-      try {
-        const tableData = await getTable(tableId);
-        if (tableData) {
-          setTable(tableData);
-        } else {
-          toast.showToast('Table introuvable', 'error');
-          router.back();
+  const { isLoaded: menuLoaded, getAvailableItems, getCategories, getItem } = useMenu();
+
+  // ✅ Chargement initial SANS rechargement automatique
+  const loadTable = useCallback(async () => {
+    try {
+      const tableData = await getTable(tableId);
+      if (tableData) {
+        setTable(tableData);
+        // ✅ Initialiser le compteur d'ID à partir des items existants
+        if (tableData.order?.items) {
+          const maxId = Math.max(...tableData.order.items.map(item => item.id), Date.now());
+          nextItemIdRef.current = maxId + 1;
         }
-      } catch (error) {
-        console.error('Error loading table:', error);
-        toast.showToast('Erreur de chargement', 'error');
-      } finally {
-        setLoading(false);
+      } else {
+        toast.showToast('Table introuvable', 'error');
+        router.back();
       }
-    };
-
-    loadTable();
+    } catch (error) {
+      console.error('Error loading table:', error);
+      toast.showToast('Erreur de chargement', 'error');
+    } finally {
+      setLoading(false);
+    }
   }, [tableId, toast, router]);
 
-  // Sauvegarde simple
+  useEffect(() => {
+    loadTable();
+  }, [loadTable]);
+
+  // ✅ Sauvegarde SIMPLE avec debounce plus long
+  const debouncedSave = useCallback(async (tableToSave: Table) => {
+    // Annuler la sauvegarde précédente
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+    }
+
+    // Programmer une nouvelle sauvegarde dans 3 secondes (plus long)
+    saveTimeoutRef.current = setTimeout(async () => {
+      try {
+        await updateTable(tableToSave);
+        console.log(`💾 Table ${tableId} sauvegardée automatiquement`);
+      } catch (error) {
+        console.error('Error auto-saving table:', error);
+      }
+    }, 3000); // ✅ 3 secondes au lieu de 1
+  }, [tableId]);
+
+  // ✅ Auto-save SEULEMENT si la table a changé significativement
+  useEffect(() => {
+    if (table && (table.order?.items?.length ?? 0) > 0) {
+      debouncedSave(table);
+    }
+
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, [table?.order?.total, table?.order?.items?.length]); // ✅ Seulement sur changements importants
+
+  // ✅ Sauvegarde manuelle
   const saveTable = useCallback(async () => {
-    if (!table) return;
+    if (!table || saving) return;
 
     setSaving(true);
     try {
+      // Annuler la sauvegarde automatique
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+
       await updateTable(table);
+      await refreshTables();
       toast.showToast('Sauvegardé', 'success');
     } catch (error) {
       console.error('Save error:', error);
@@ -100,111 +143,140 @@ export default function TableScreen() {
     } finally {
       setSaving(false);
     }
-  }, [table, toast]);
+  }, [table, saving, toast, refreshTables]);
 
-  // Auto-sauvegarde toutes les 30 secondes
-  useEffect(() => {
-    if (!table) return;
-
-    const interval = setInterval(() => {
-      updateTable(table).catch(console.error);
-    }, 30000);
-
-    return () => clearInterval(interval);
-  }, [table]);
-
-  // Actions simples
-  const addItemToOrder = useCallback(
-    (menuItem: MenuItem) => {
-      setTable((prevTable) => {
-        if (!prevTable) return prevTable;
-
-        const newTable = { ...prevTable };
-
-        if (!newTable.order) {
-          newTable.order = {
-            id: Date.now(),
-            items: [],
-            guests: newTable.guests || 1,
-            status: 'active',
-            timestamp: new Date().toISOString(),
-            total: 0,
-          };
+  // ✅ Sauvegarde avant de quitter SANS rechargement
+  useFocusEffect(
+    useCallback(() => {
+      return () => {
+        if (table) {
+          // ✅ Sauvegarde synchrone sans attendre
+          updateTable(table).then(() => refreshTables()).catch(console.error);
         }
-
-        const existingIndex = newTable.order.items.findIndex(
-          (item) => item.menuId === menuItem.id && item.name === menuItem.name
-        );
-
-        if (existingIndex >= 0) {
-          newTable.order.items[existingIndex].quantity += 1;
-        } else {
-          newTable.order.items.push({
-            id: Date.now() + Math.random(),
-            menuId: menuItem.id,
-            name: menuItem.name,
-            price: menuItem.price,
-            quantity: 1,
-            type: menuItem.type,
-          });
-        }
-
-        // Recalculer le total
-        newTable.order.total = newTable.order.items.reduce((sum, item) => {
-          return item.offered ? sum : sum + item.price * item.quantity;
-        }, 0);
-
-        return newTable;
-      });
-
-      toast.showToast(`${menuItem.name} ajouté`, 'success');
-    },
-    [toast]
+      };
+    }, [table, refreshTables])
   );
 
-  const updateItemQuantity = useCallback(
-    (itemId: number, increment: boolean) => {
-      setTable((prevTable) => {
-        if (!prevTable?.order) return prevTable;
+  // ✅ Ajout d'item ULTRA-SIMPLIFIÉ
+  const addItemToOrder = useCallback((menuItem: MenuItem) => {
+    setTable(prevTable => {
+      if (!prevTable) return prevTable;
 
-        const newTable = { ...prevTable };
-        const items = newTable.order!.items.filter((item) => {
-          if (item.id === itemId) {
-            const newQuantity = increment
-              ? item.quantity + 1
-              : item.quantity - 1;
-            if (newQuantity > 0) {
-              item.quantity = newQuantity;
-              return true;
-            }
-            return false;
-          }
-          return true;
+      // ✅ Copie simple sans JSON.parse/stringify
+      const newTable = { ...prevTable };
+      
+      // Initialiser la commande si nécessaire
+      if (!newTable.order) {
+        newTable.order = {
+          id: Date.now(),
+          items: [],
+          guests: newTable.guests || 1,
+          status: 'active',
+          timestamp: new Date().toISOString(),
+          total: 0,
+        };
+      }
+
+      // ✅ Copie simple du tableau d'items
+      const items = [...newTable.order.items];
+      
+      // Chercher un item existant
+      const existingIndex = items.findIndex(
+        item => item.menuId === menuItem.id && 
+                item.name === menuItem.name && 
+                item.price === menuItem.price &&
+                !item.offered
+      );
+
+      if (existingIndex >= 0) {
+        // ✅ Mise à jour simple
+        items[existingIndex] = {
+          ...items[existingIndex],
+          quantity: items[existingIndex].quantity + 1
+        };
+      } else {
+        // ✅ ID séquentiel stable
+        const newItemId = nextItemIdRef.current++;
+        items.push({
+          id: newItemId,
+          menuId: menuItem.id,
+          name: menuItem.name,
+          price: menuItem.price,
+          quantity: 1,
+          type: menuItem.type,
+          offered: false,
         });
+      }
 
-        newTable.order!.items = items;
-        newTable.order!.total = items.reduce((sum, item) => {
-          return item.offered ? sum : sum + item.price * item.quantity;
-        }, 0);
+      // ✅ Calcul simple du total
+      const newTotal = items.reduce((sum, item) => {
+        return item.offered ? sum : sum + (item.price * item.quantity);
+      }, 0);
 
-        return newTable;
-      });
-    },
-    []
-  );
+      // ✅ Mise à jour simple
+      newTable.order = {
+        ...newTable.order,
+        items,
+        total: newTotal,
+      };
 
-  const toggleItemOffered = useCallback((itemId: number) => {
-    setTable((prevTable) => {
+      return newTable;
+    });
+
+    toast.showToast(`${menuItem.name} ajouté`, 'success');
+  }, [toast]);
+
+  // ✅ Mise à jour quantité SIMPLIFIÉE
+  const updateItemQuantity = useCallback((itemId: number, increment: boolean) => {
+    setTable(prevTable => {
       if (!prevTable?.order) return prevTable;
 
       const newTable = { ...prevTable };
-      newTable.order!.items = newTable.order!.items.map((item) =>
+      if (!newTable.order) return newTable;
+      const items = newTable.order.items
+        .map(item => {
+          if (item.id === itemId) {
+            const newQuantity = increment ? item.quantity + 1 : item.quantity - 1;
+            return newQuantity > 0 ? { ...item, quantity: newQuantity } : null;
+          }
+          return item;
+        })
+        .filter((item): item is OrderItem => item !== null);
+
+      const newTotal = items.reduce((sum, item) => {
+        return item.offered ? sum : sum + (item.price * item.quantity);
+      }, 0);
+
+      newTable.order = {
+        ...newTable.order,
+        items,
+        total: newTotal,
+      };
+
+      return newTable;
+    });
+  }, []);
+
+  // ✅ Toggle offert SIMPLIFIÉ
+  const toggleItemOffered = useCallback((itemId: number) => {
+    setTable(prevTable => {
+      if (!prevTable?.order) return prevTable;
+
+      const newTable = { ...prevTable };
+      if (!newTable.order) return newTable;
+      const items = newTable.order.items.map(item => 
         item.id === itemId ? { ...item, offered: !item.offered } : item
       );
 
-      newTable.order!.total = newTable.order!.items.reduce((sum, item) => {
-        return item.offered ? sum : sum + item.price * item.quantity;
+      const newTotal = items.reduce((sum, item) => {
+        return item.offered ? sum : sum + (item.price * item.quantity);
       }, 0);
+
+      newTable.order = {
+        ...newTable.order,
+        items,
+        total: newTotal,
+      };
 
       return newTable;
     });
@@ -212,12 +284,12 @@ export default function TableScreen() {
 
   const updateGuestCount = useCallback((newCount: number) => {
     const validCount = Math.max(1, newCount);
-    setTable((prevTable) => {
+    setTable(prevTable => {
       if (!prevTable) return prevTable;
-
+      
       const newTable = { ...prevTable, guests: validCount };
       if (newTable.order) {
-        newTable.order.guests = validCount;
+        newTable.order = { ...newTable.order, guests: validCount };
       }
       return newTable;
     });
@@ -232,7 +304,7 @@ export default function TableScreen() {
         text: 'Supprimer',
         style: 'destructive',
         onPress: () => {
-          setTable((prevTable) => {
+          setTable(prevTable => {
             if (!prevTable?.order) return prevTable;
             return {
               ...prevTable,
@@ -256,6 +328,7 @@ export default function TableScreen() {
           onPress: async () => {
             try {
               await resetTable(tableId);
+              await refreshTables();
               toast.showToast(`Table fermée`, 'success');
               router.replace('/');
             } catch (error) {
@@ -265,54 +338,46 @@ export default function TableScreen() {
         },
       ]
     );
-  }, [table?.name, tableId, router, toast]);
+  }, [table?.name, tableId, router, toast, refreshTables]);
 
-  const handlePayment = useCallback(
-    (type: 'full' | 'split' | 'custom' | 'items') => {
-      if (!table?.order || table.order.total <= 0) {
-        toast.showToast('Rien à payer', 'warning');
-        return;
-      }
+  const handlePayment = useCallback((type: 'full' | 'split' | 'custom' | 'items') => {
+    if (!table?.order || table.order.total <= 0) {
+      toast.showToast('Rien à payer', 'warning');
+      return;
+    }
 
-      const params = {
-        tableId: tableId.toString(),
-        total: table.order.total.toString(),
-        items: JSON.stringify(table.order.items),
-      };
+    const params = {
+      tableId: tableId.toString(),
+      total: table.order.total.toString(),
+      items: JSON.stringify(table.order.items),
+    };
 
-      switch (type) {
-        case 'full':
-          router.push({ pathname: '/payment/full', params });
-          break;
-        case 'split':
-          if ((table.guests || 1) <= 1) {
-            toast.showToast('Il faut au moins 2 convives', 'warning');
-            return;
-          }
-          setSplitModalVisible(true);
-          break;
-        case 'custom':
-          router.push({ pathname: '/payment/custom', params });
-          break;
-        case 'items':
-          router.push({
-            pathname: '/payment/items',
-            params: { tableId: tableId.toString() },
-          });
-          break;
-      }
-    },
-    [table, tableId, router, toast]
-  );
+    switch (type) {
+      case 'full':
+        router.push({ pathname: '/payment/full', params });
+        break;
+      case 'split':
+        if ((table.guests || 1) <= 1) {
+          toast.showToast('Il faut au moins 2 convives', 'warning');
+          return;
+        }
+        setSplitModalVisible(true);
+        break;
+      case 'custom':
+        router.push({ pathname: '/payment/custom', params });
+        break;
+      case 'items':
+        router.push({ pathname: '/payment/items', params: { tableId: tableId.toString() } });
+        break;
+    }
+  }, [table, tableId, router, toast]);
 
   // Filtrage simple du menu
-  const menuItems = menuLoaded
-    ? getAvailableItems().filter((item) => {
-        if (item.type !== activeType) return false;
-        if (activeCategory && item.category !== activeCategory) return false;
-        return true;
-      })
-    : [];
+  const menuItems = menuLoaded ? getAvailableItems().filter(item => {
+    if (item.type !== activeType) return false;
+    if (activeCategory && item.category !== activeCategory) return false;
+    return true;
+  }) : [];
 
   const categories = menuLoaded ? getCategories(activeType) : [];
 
@@ -320,20 +385,19 @@ export default function TableScreen() {
   const orderItems = table?.order?.items || [];
   const total = table?.order?.total || 0;
   const guestCount = table?.guests || 1;
-  const offeredTotal = orderItems.reduce(
-    (sum, item) => (item.offered ? sum + item.price * item.quantity : sum),
-    0
+  const offeredTotal = orderItems.reduce((sum, item) => 
+    item.offered ? sum + (item.price * item.quantity) : sum, 0
   );
 
-  // Catégorisation simple des items
-  const plats = orderItems.filter((item) => {
+  // ✅ Catégorisation stable
+  const plats = orderItems.filter(item => {
     const menuItem = getItem(item.menuId || item.id);
-    return (menuItem?.type || 'resto') === 'resto';
+    return (menuItem?.type || item.type || 'resto') === 'resto';
   });
 
-  const boissons = orderItems.filter((item) => {
+  const boissons = orderItems.filter(item => {
     const menuItem = getItem(item.menuId || item.id);
-    return (menuItem?.type || 'resto') === 'boisson';
+    return (menuItem?.type || item.type || 'resto') === 'boisson';
   });
 
   if (loading) {
@@ -348,7 +412,7 @@ export default function TableScreen() {
   if (!table) {
     return (
       <View style={styles.loadingContainer}>
-        <Text>Table introuvable</Text>
+        <Text style={styles.loadingText}>Table introuvable</Text>
         <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Text style={styles.backButtonText}>Retour</Text>
         </Pressable>
@@ -366,9 +430,11 @@ export default function TableScreen() {
 
         <View style={styles.headerTitleContainer}>
           <Text style={styles.title}>{table.name}</Text>
-          <View style={styles.sectionBadge}>
-            <Text style={styles.sectionText}>{table.section}</Text>
-          </View>
+          {table.section && (
+            <View style={styles.sectionBadge}>
+              <Text style={styles.sectionText}>{table.section}</Text>
+            </View>
+          )}
         </View>
 
         <View style={styles.guestCounter}>
@@ -382,11 +448,7 @@ export default function TableScreen() {
           </Pressable>
         </View>
 
-        <Pressable
-          style={styles.saveButton}
-          onPress={saveTable}
-          disabled={saving}
-        >
+        <Pressable style={styles.saveButton} onPress={saveTable} disabled={saving}>
           <Save size={24} color="white" />
           <Text style={styles.saveButtonText}>
             {saving ? 'Sauvegarde...' : 'Sauver'}
@@ -410,9 +472,7 @@ export default function TableScreen() {
           <Text style={styles.sectionTitle}>Commande actuelle</Text>
 
           {orderItems.length === 0 ? (
-            <Text style={styles.emptyOrder}>
-              Aucun article dans la commande
-            </Text>
+            <Text style={styles.emptyOrder}>Aucun article dans la commande</Text>
           ) : (
             <View style={styles.orderColumns}>
               {/* Plats */}
@@ -421,30 +481,17 @@ export default function TableScreen() {
                 <ScrollView style={styles.orderColumnScroll}>
                   {plats.map((item) => (
                     <View
-                      key={item.id}
-                      style={[
-                        styles.orderItem,
-                        item.offered && styles.offeredItem,
-                      ]}
+                      key={`plat-${item.id}`} // ✅ Clé stable et unique
+                      style={[styles.orderItem, item.offered && styles.offeredItem]}
                     >
                       <View style={styles.itemHeader}>
                         <View style={styles.itemNameContainer}>
                           {item.offered && <Gift size={14} color="#FF9800" />}
-                          <Text
-                            style={[
-                              styles.itemName,
-                              item.offered && styles.offeredItemText,
-                            ]}
-                          >
-                            {item.name} {item.offered ? '(Offert)' : ''}
+                          <Text style={[styles.itemName, item.offered && styles.offeredItemText]}>
+                            {item.name}{item.offered ? ' (Offert)' : ''}
                           </Text>
                         </View>
-                        <Text
-                          style={[
-                            styles.itemPrice,
-                            item.offered && styles.offeredPrice,
-                          ]}
-                        >
+                        <Text style={[styles.itemPrice, item.offered && styles.offeredPrice]}>
                           {(item.price * item.quantity).toFixed(2)} €
                         </Text>
                       </View>
@@ -482,36 +529,21 @@ export default function TableScreen() {
 
               {/* Boissons */}
               <View style={styles.orderColumn}>
-                <Text style={styles.columnTitle}>
-                  Boissons ({boissons.length})
-                </Text>
+                <Text style={styles.columnTitle}>Boissons ({boissons.length})</Text>
                 <ScrollView style={styles.orderColumnScroll}>
                   {boissons.map((item) => (
                     <View
-                      key={item.id}
-                      style={[
-                        styles.orderItem,
-                        item.offered && styles.offeredItem,
-                      ]}
+                      key={`boisson-${item.id}`} // ✅ Clé stable et unique
+                      style={[styles.orderItem, item.offered && styles.offeredItem]}
                     >
                       <View style={styles.itemHeader}>
                         <View style={styles.itemNameContainer}>
                           {item.offered && <Gift size={14} color="#FF9800" />}
-                          <Text
-                            style={[
-                              styles.itemName,
-                              item.offered && styles.offeredItemText,
-                            ]}
-                          >
-                            {item.name} {item.offered ? '(Offert)' : ''}
+                          <Text style={[styles.itemName, item.offered && styles.offeredItemText]}>
+                            {item.name}{item.offered ? ' (Offert)' : ''}
                           </Text>
                         </View>
-                        <Text
-                          style={[
-                            styles.itemPrice,
-                            item.offered && styles.offeredPrice,
-                          ]}
-                        >
+                        <Text style={[styles.itemPrice, item.offered && styles.offeredPrice]}>
                           {(item.price * item.quantity).toFixed(2)} €
                         </Text>
                       </View>
@@ -554,9 +586,7 @@ export default function TableScreen() {
             <View style={styles.finalTotal}>
               <Text style={styles.totalLabel}>Total:</Text>
               {offeredTotal > 0 && (
-                <Text style={styles.offeredTotal}>
-                  Offerts: {offeredTotal.toFixed(2)} €
-                </Text>
+                <Text style={styles.offeredTotal}>Offerts: {offeredTotal.toFixed(2)} €</Text>
               )}
               <Text style={styles.totalAmount}>{total.toFixed(2)} €</Text>
             </View>
@@ -604,40 +634,24 @@ export default function TableScreen() {
             <Text style={styles.sectionTitle}>Menu</Text>
             <View style={styles.typeFilters}>
               <Pressable
-                style={[
-                  styles.typeFilterButton,
-                  activeType === 'resto' && styles.activeTypeButton,
-                ]}
+                style={[styles.typeFilterButton, activeType === 'resto' && styles.activeTypeButton]}
                 onPress={() => {
                   setActiveType('resto');
                   setActiveCategory(null);
                 }}
               >
-                <Text
-                  style={[
-                    styles.typeFilterText,
-                    activeType === 'resto' && styles.activeTypeText,
-                  ]}
-                >
+                <Text style={[styles.typeFilterText, activeType === 'resto' && styles.activeTypeText]}>
                   Plats
                 </Text>
               </Pressable>
               <Pressable
-                style={[
-                  styles.typeFilterButton,
-                  activeType === 'boisson' && styles.activeTypeButton,
-                ]}
+                style={[styles.typeFilterButton, activeType === 'boisson' && styles.activeTypeButton]}
                 onPress={() => {
                   setActiveType('boisson');
                   setActiveCategory(null);
                 }}
               >
-                <Text
-                  style={[
-                    styles.typeFilterText,
-                    activeType === 'boisson' && styles.activeTypeText,
-                  ]}
-                >
+                <Text style={[styles.typeFilterText, activeType === 'boisson' && styles.activeTypeText]}>
                   Boissons
                 </Text>
               </Pressable>
@@ -645,42 +659,22 @@ export default function TableScreen() {
           </View>
 
           {/* Catégories */}
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.categoryTabs}
-          >
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.categoryTabs}>
             <Pressable
-              style={[
-                styles.categoryTab,
-                !activeCategory && styles.activeCategoryTab,
-              ]}
+              style={[styles.categoryTab, !activeCategory && styles.activeCategoryTab]}
               onPress={() => setActiveCategory(null)}
             >
-              <Text
-                style={[
-                  styles.categoryTabText,
-                  !activeCategory && styles.activeCategoryTabText,
-                ]}
-              >
+              <Text style={[styles.categoryTabText, !activeCategory && styles.activeCategoryTabText]}>
                 Tout
               </Text>
             </Pressable>
             {categories.map((category) => (
               <Pressable
                 key={category}
-                style={[
-                  styles.categoryTab,
-                  activeCategory === category && styles.activeCategoryTab,
-                ]}
+                style={[styles.categoryTab, activeCategory === category && styles.activeCategoryTab]}
                 onPress={() => setActiveCategory(category)}
               >
-                <Text
-                  style={[
-                    styles.categoryTabText,
-                    activeCategory === category && styles.activeCategoryTabText,
-                  ]}
-                >
+                <Text style={[styles.categoryTabText, activeCategory === category && styles.activeCategoryTabText]}>
                   {category}
                 </Text>
               </Pressable>
@@ -692,14 +686,12 @@ export default function TableScreen() {
             <View style={styles.menuGrid}>
               {menuItems.map((item) => (
                 <Pressable
-                  key={item.id}
+                  key={`menu-${item.id}`} // ✅ Clé stable
                   style={[styles.menuItem, { borderLeftColor: item.color }]}
                   onPress={() => addItemToOrder(item)}
                 >
                   <Text style={styles.menuItemName}>{item.name}</Text>
-                  <Text style={styles.menuItemPrice}>
-                    {item.price.toFixed(2)} €
-                  </Text>
+                  <Text style={styles.menuItemPrice}>{item.price.toFixed(2)} €</Text>
                 </Pressable>
               ))}
             </View>
@@ -728,252 +720,73 @@ export default function TableScreen() {
   );
 }
 
-// Styles simplifiés (conservés mais allégés)
+// Styles identiques (pas de changement)
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
   loadingText: { marginTop: 15, fontSize: 16, color: '#333' },
-  backButton: {
-    marginTop: 20,
-    padding: 10,
-    backgroundColor: '#2196F3',
-    borderRadius: 8,
-  },
+  backButton: { marginTop: 20, padding: 10, backgroundColor: '#2196F3', borderRadius: 8 },
   backButtonText: { color: 'white', fontWeight: '600' },
-  header: {
-    padding: 12,
-    backgroundColor: 'white',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
+  header: { padding: 12, backgroundColor: 'white', borderBottomWidth: 1, borderBottomColor: '#e0e0e0', flexDirection: 'row', alignItems: 'center', gap: 8 },
   backLink: { padding: 8, borderRadius: 8, backgroundColor: '#f5f5f5' },
   headerTitleContainer: { flex: 1 },
   title: { fontSize: 20, fontWeight: 'bold' },
-  sectionBadge: {
-    backgroundColor: '#E1F5FE',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 16,
-    alignSelf: 'flex-start',
-    marginTop: 4,
-  },
+  sectionBadge: { backgroundColor: '#E1F5FE', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 16, alignSelf: 'flex-start', marginTop: 4 },
   sectionText: { color: '#0288D1', fontWeight: '600', fontSize: 11 },
-  guestCounter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#f5f5f5',
-    padding: 6,
-    borderRadius: 8,
-  },
-  guestCount: {
-    fontSize: 16,
-    fontWeight: '600',
-    minWidth: 20,
-    textAlign: 'center',
-  },
-  saveButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#2196F3',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    gap: 4,
-  },
+  guestCounter: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#f5f5f5', padding: 6, borderRadius: 8 },
+  guestCount: { fontSize: 16, fontWeight: '600', minWidth: 20, textAlign: 'center' },
+  saveButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#2196F3', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, gap: 4 },
   saveButtonText: { color: 'white', fontWeight: '600' },
-  clearButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FF6600',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    gap: 4,
-  },
+  clearButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FF6600', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, gap: 4 },
   clearButtonText: { color: 'white', fontWeight: '600' },
-  closeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#F44336',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    gap: 4,
-  },
+  closeButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F44336', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, gap: 4 },
   closeButtonText: { color: 'white', fontWeight: '600' },
   content: { flex: 1, padding: 8, gap: 8, flexDirection: 'row' },
-  orderSection: {
-    flex: 2,
-    minWidth: 300,
-    backgroundColor: 'white',
-    borderRadius: 8,
-    padding: 12,
-  },
-  menuSection: {
-    flex: 3,
-    minWidth: 300,
-    backgroundColor: 'white',
-    borderRadius: 8,
-    padding: 12,
-  },
+  orderSection: { flex: 2, minWidth: 300, backgroundColor: 'white', borderRadius: 8, padding: 12 },
+  menuSection: { flex: 3, minWidth: 300, backgroundColor: 'white', borderRadius: 8, padding: 12 },
   sectionTitle: { fontSize: 18, fontWeight: '600', marginBottom: 12 },
   emptyOrder: { flex: 1, textAlign: 'center', color: '#666', paddingTop: 40 },
   orderColumns: { flexDirection: 'row', gap: 12, flex: 1 },
   orderColumn: { flex: 1 },
-  columnTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 8,
-    paddingBottom: 4,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e0e0e0',
-  },
+  columnTitle: { fontSize: 14, fontWeight: '600', marginBottom: 8, paddingBottom: 4, borderBottomWidth: 1, borderBottomColor: '#e0e0e0' },
   orderColumnScroll: { maxHeight: 300 },
-  orderItem: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#f0f0f0',
-    paddingVertical: 8,
-    marginBottom: 4,
-  },
-  offeredItem: {
-    backgroundColor: '#FFF8E1',
-    borderLeftWidth: 2,
-    borderLeftColor: '#FF9800',
-    paddingLeft: 8,
-    borderRadius: 4,
-  },
-  itemHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  itemNameContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
+  orderItem: { borderBottomWidth: 1, borderBottomColor: '#f0f0f0', paddingVertical: 8, marginBottom: 4 },
+  offeredItem: { backgroundColor: '#FFF8E1', borderLeftWidth: 2, borderLeftColor: '#FF9800', paddingLeft: 8, borderRadius: 4 },
+  itemHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  itemNameContainer: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 4 },
   itemName: { fontSize: 12, fontWeight: '500', flex: 1 },
   offeredItemText: { fontStyle: 'italic', color: '#FF9800' },
   itemPrice: { fontSize: 13, fontWeight: '600', color: '#4CAF50' },
   offeredPrice: { textDecorationLine: 'line-through', color: '#FF9800' },
-  itemActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  quantityControl: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#f5f5f5',
-    padding: 4,
-    borderRadius: 6,
-  },
-  quantityButton: {
-    padding: 4,
-    borderRadius: 4,
-    backgroundColor: '#e0e0e0',
-    width: 24,
-    height: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  quantity: {
-    fontSize: 14,
-    fontWeight: '500',
-    minWidth: 20,
-    textAlign: 'center',
-  },
-  offerButton: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    backgroundColor: '#f5f5f5',
-    borderWidth: 1,
-    borderColor: '#FF9800',
-    borderRadius: 4,
-  },
+  itemActions: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  quantityControl: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#f5f5f5', padding: 4, borderRadius: 6 },
+  quantityButton: { padding: 4, borderRadius: 4, backgroundColor: '#e0e0e0', width: 24, height: 24, justifyContent: 'center', alignItems: 'center' },
+  quantity: { fontSize: 14, fontWeight: '500', minWidth: 20, textAlign: 'center' },
+  offerButton: { paddingHorizontal: 8, paddingVertical: 3, backgroundColor: '#f5f5f5', borderWidth: 1, borderColor: '#FF9800', borderRadius: 4 },
   offerButtonText: { fontSize: 10, color: '#FF9800' },
-  totalSection: {
-    borderTopWidth: 2,
-    borderTopColor: '#e0e0e0',
-    marginTop: 12,
-    paddingTop: 12,
-  },
-  finalTotal: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
+  totalSection: { borderTopWidth: 2, borderTopColor: '#e0e0e0', marginTop: 12, paddingTop: 12 },
+  finalTotal: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   totalLabel: { fontSize: 16, fontWeight: '600' },
   offeredTotal: { fontSize: 14, color: '#FF9800', fontWeight: '500' },
   totalAmount: { fontSize: 20, fontWeight: 'bold', color: '#4CAF50' },
   paymentActions: { marginTop: 12, gap: 8 },
   paymentRow: { flexDirection: 'row', gap: 8 },
-  paymentButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 10,
-    borderRadius: 8,
-    gap: 6,
-  },
+  paymentButton: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 10, borderRadius: 8, gap: 6 },
   paymentButtonText: { color: 'white', fontSize: 13, fontWeight: '600' },
-  menuHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
+  menuHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   typeFilters: { flexDirection: 'row', gap: 6 },
-  typeFilterButton: {
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 16,
-    backgroundColor: '#f0f0f0',
-  },
+  typeFilterButton: { paddingVertical: 4, paddingHorizontal: 10, borderRadius: 16, backgroundColor: '#f0f0f0' },
   activeTypeButton: { backgroundColor: '#2196F3' },
   typeFilterText: { fontSize: 13, fontWeight: '500', color: '#666' },
   activeTypeText: { color: 'white', fontWeight: '600' },
   categoryTabs: { marginBottom: 12 },
-  categoryTab: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    marginRight: 8,
-    borderBottomWidth: 2,
-    borderBottomColor: 'transparent',
-  },
+  categoryTab: { paddingHorizontal: 12, paddingVertical: 6, marginRight: 8, borderBottomWidth: 2, borderBottomColor: 'transparent' },
   activeCategoryTab: { borderBottomColor: '#2196F3' },
   categoryTabText: { fontSize: 13, fontWeight: '500', color: '#666' },
   activeCategoryTabText: { fontWeight: '600', color: '#2196F3' },
   menuItems: { flex: 1 },
   menuGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  menuItem: {
-    width: '30%',
-    minWidth: 100,
-    backgroundColor: '#f9f9f9',
-    borderRadius: 6,
-    padding: 8,
-    borderLeftWidth: 4,
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  menuItemName: {
-    fontSize: 11,
-    fontWeight: '500',
-    marginBottom: 2,
-    textAlign: 'center',
-  },
+  menuItem: { width: '30%', minWidth: 100, backgroundColor: '#f9f9f9', borderRadius: 6, padding: 8, borderLeftWidth: 4, alignItems: 'center', marginBottom: 8 },
+  menuItemName: { fontSize: 11, fontWeight: '500', marginBottom: 2, textAlign: 'center' },
   menuItemPrice: { fontSize: 11, fontWeight: '600', color: '#4CAF50' },
 });
