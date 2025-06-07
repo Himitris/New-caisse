@@ -23,7 +23,7 @@ import {
   getTables,
   resetAllTables,
   saveBills,
-  saveMenuAvailability
+  saveMenuAvailability,
 } from '../../utils/storage';
 import { useToast } from '../../utils/ToastContext';
 import PasswordModal from '../components/PasswordModal';
@@ -372,8 +372,8 @@ export default function SettingsScreen() {
       </View>
 
       <VersionFooter
-        version="1.2.0"
-        buildNumber="42"
+        version="1.5.0"
+        buildNumber="62"
         style={{ borderTopWidth: 1, borderTopColor: '#e0e0e0' }}
       />
 

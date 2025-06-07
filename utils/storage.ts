@@ -819,4 +819,115 @@ export class BillManager {
       issues,
     };
   }
+  /**
+   * Supprime TOUTES les factures de manière sécurisée
+   */
+  static async clearAllBills(): Promise<void> {
+    try {
+      console.log('🗑️ Suppression de toutes les factures demandée');
+      await saveBills([]);
+      console.log('✅ Toutes les factures ont été supprimées');
+    } catch (error) {
+      console.error(
+        '❌ Erreur lors de la suppression de toutes les factures:',
+        error
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Supprime une liste spécifique de factures
+   * @param billsToDelete - Array des IDs des factures à supprimer
+   */
+  static async deleteBills(billsToDelete: number[]): Promise<void> {
+    try {
+      console.log(
+        `🗑️ Suppression de ${billsToDelete.length} factures spécifiques`
+      );
+
+      const allBills = await getBills();
+      const billIdsSet = new Set(billsToDelete);
+      const remainingBills = allBills.filter(
+        (bill) => !billIdsSet.has(bill.id)
+      );
+
+      await saveBills(remainingBills);
+      console.log(
+        `✅ ${billsToDelete.length} factures supprimées, ${remainingBills.length} conservées`
+      );
+    } catch (error) {
+      console.error(
+        '❌ Erreur lors de la suppression des factures spécifiques:',
+        error
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Supprime les factures selon des critères de filtrage
+   * @param filters - Critères de filtrage identiques à getFilteredBills
+   */
+  static async clearFilteredBills(filters: {
+    searchText?: string;
+    dateRange?: { start: Date; end: Date };
+    paymentMethod?: string;
+  }): Promise<number> {
+    try {
+      console.log('🗑️ Suppression des factures filtrées demandée');
+
+      const allBills = await getBills();
+      const billsToDelete = allBills.filter((bill) => {
+        // Même logique que getFilteredBills
+        if (filters.dateRange) {
+          const billDate = new Date(bill.timestamp);
+          if (
+            billDate < filters.dateRange.start ||
+            billDate > filters.dateRange.end
+          ) {
+            return false;
+          }
+        }
+
+        if (
+          filters.paymentMethod &&
+          bill.paymentMethod !== filters.paymentMethod
+        ) {
+          return false;
+        }
+
+        if (filters.searchText) {
+          const search = filters.searchText.toLowerCase();
+          const tableName = bill.tableName || `Table ${bill.tableNumber}`;
+          return (
+            tableName.toLowerCase().includes(search) ||
+            bill.amount.toString().includes(search)
+          );
+        }
+
+        return true;
+      });
+
+      const billIdsToDelete = new Set(billsToDelete.map((bill) => bill.id));
+      const remainingBills = allBills.filter(
+        (bill) => !billIdsToDelete.has(bill.id)
+      );
+
+      await saveBills(remainingBills);
+
+      const deletedCount = billsToDelete.length;
+      console.log(
+        `✅ ${deletedCount} factures filtrées supprimées, ${remainingBills.length} conservées`
+      );
+
+      return deletedCount;
+    } catch (error) {
+      console.error(
+        '❌ Erreur lors de la suppression des factures filtrées:',
+        error
+      );
+      throw error;
+    }
+  }
 }
