@@ -915,7 +915,7 @@ export default function ItemsPaymentScreen() {
                 <ScrollView style={styles.itemsList}>
                   {categorizeItems(selectedItems).plat.map((item) => (
                     <ItemCard
-                      key={item.uniqueKey || `selected-plat-${item.id}`}
+                      key={`selected-plat-${item.uniqueKey}`}
                       item={item}
                       isSelected={true}
                       onQuantityChange={(increment) =>
@@ -932,7 +932,7 @@ export default function ItemsPaymentScreen() {
                 <ScrollView style={styles.itemsList}>
                   {categorizeItems(selectedItems).boisson.map((item) => (
                     <ItemCard
-                      key={item.uniqueKey || `selected-boisson-${item.id}`}
+                      key={`selected-boisson-${item.uniqueKey}`}
                       item={item}
                       isSelected={true}
                       onQuantityChange={(increment) =>

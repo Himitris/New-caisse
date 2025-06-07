@@ -75,6 +75,41 @@ export default function RootLayout() {
     };
   }, [appReady]);
 
+  useEffect(() => {
+    let memoryInterval: ReturnType<typeof setInterval>;
+
+    if (appReady) {
+      console.log('🧠 [APP_MEMORY] Surveillance mémoire activée');
+
+      memoryInterval = setInterval(() => {
+        // ✅ Forcer le garbage collection périodique (si disponible)
+        if (global.gc) {
+          global.gc();
+          console.log('🗑️ [APP_MEMORY] Garbage collection forcé');
+        }
+
+        // ✅ Diagnostic mémoire simple
+        const memUsage = process.memoryUsage?.() || {};
+        if (memUsage.heapUsed) {
+          const heapMB = (memUsage.heapUsed / 1024 / 1024).toFixed(1);
+          console.log(`🧠 [APP_MEMORY] Heap utilisé: ${heapMB}MB`);
+
+          if (memUsage.heapUsed > 150 * 1024 * 1024) {
+            // > 150MB
+            console.warn(`⚠️ [APP_MEMORY] Mémoire élevée: ${heapMB}MB`);
+          }
+        }
+      }, 20000); // Toutes les 20 secondes
+    }
+
+    return () => {
+      if (memoryInterval) {
+        clearInterval(memoryInterval);
+        console.log('🧠 [APP_MEMORY] Surveillance mémoire arrêtée');
+      }
+    };
+  }, [appReady]);
+
   // ✅ Gestion simplifiée des changements d'état de l'app
   useEffect(() => {
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
@@ -127,32 +162,57 @@ export default function RootLayout() {
                 presentation: 'card',
                 gestureEnabled: true,
                 gestureDirection: 'horizontal',
+                freezeOnBlur: true,
               }}
             >
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
               <Stack.Screen
                 name="table/[id]"
-                options={{ presentation: 'card' }}
+                options={{
+                  presentation: 'card',
+                  freezeOnBlur: true,
+                  gestureEnabled: true,
+                }}
               />
               <Stack.Screen
                 name="payment/full"
-                options={{ presentation: 'card' }}
+                options={{
+                  presentation: 'card',
+                  freezeOnBlur: true,
+                  gestureEnabled: true,
+                }}
               />
               <Stack.Screen
                 name="payment/split"
-                options={{ presentation: 'card' }}
+                options={{
+                  presentation: 'card',
+                  freezeOnBlur: true,
+                  gestureEnabled: true,
+                }}
               />
               <Stack.Screen
                 name="payment/custom"
-                options={{ presentation: 'card' }}
+                options={{
+                  presentation: 'card',
+                  freezeOnBlur: true,
+                  gestureEnabled: true,
+                }}
               />
               <Stack.Screen
                 name="payment/items"
-                options={{ presentation: 'card' }}
+                options={{
+                  presentation: 'card',
+                  freezeOnBlur: true,
+                  gestureEnabled: true,
+                }}
               />
               <Stack.Screen
                 name="print-preview"
-                options={{ presentation: 'card' }}
+                options={{
+                  presentation: 'card',
+                  freezeOnBlur: true,
+                  gestureEnabled: true,
+                }}
               />
             </Stack>
             <StatusBar style="auto" />

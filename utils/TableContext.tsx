@@ -28,9 +28,8 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
   const [tables, setTables] = useState<Table[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const mountedRef = useRef(true);
-  
 
-  // ✅ Chargement simple direct
+  // ✅ Chargement simple direct (INCHANGÉ)
   const loadTables = useCallback(async () => {
     if (!mountedRef.current) return;
 
@@ -53,7 +52,7 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
     await loadTables();
   }, [loadTables]);
 
-  // ✅ Mise à jour simple sans cache
+  // ✅ Mise à jour simple sans cache (INCHANGÉ)
   const updateTableData = useCallback(
     async (tableId: number, updatedData: Partial<Table>) => {
       if (!mountedRef.current) return;
@@ -80,7 +79,7 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
     []
   );
 
-  // ✅ Getter simple sans cache
+  // ✅ Getter simple sans cache (INCHANGÉ)
   const getTableById = useCallback(
     (id: number) => {
       return tables.find((table) => table.id === id);
@@ -88,11 +87,42 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
     [tables]
   );
 
-  // ✅ Supprimer clearCache
   const clearCache = useCallback(() => {
-    // Ne fait plus rien - gardé pour compatibilité
+    // Ne fait plus rien - gardé pour compatibilité (INCHANGÉ)
   }, []);
 
+  // ✅ AJOUT SEULEMENT : Nettoyage périodique intelligent
+  useEffect(() => {
+    const cleanupInterval = setInterval(() => {
+      if (mountedRef.current) {
+        setTables((prevTables) => {
+          // Garder seulement les tables avec du contenu
+          const activeTables = prevTables.filter(
+            (table) =>
+              table.status === 'occupied' ||
+              table.status === 'reserved' ||
+              (table.order && table.order.items.length > 0) ||
+              (table.guests && table.guests > 0)
+          );
+
+          const removed = prevTables.length - activeTables.length;
+          if (removed > 0) {
+            console.log(
+              `🧹 [TABLE_CONTEXT] ${removed} table(s) vide(s) nettoyée(s) de la mémoire`
+            );
+          }
+
+          return activeTables;
+        });
+      }
+    }, 60000); // Toutes les minutes
+
+    return () => {
+      clearInterval(cleanupInterval);
+    };
+  }, []);
+
+  // ✅ Chargement initial (INCHANGÉ)
   useEffect(() => {
     loadTables();
     return () => {
@@ -106,7 +136,7 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
     refreshTables,
     updateTableData,
     getTableById,
-    clearCache, // Gardé pour compatibilité
+    clearCache,
   };
 
   return (

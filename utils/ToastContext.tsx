@@ -62,10 +62,26 @@ export const ToastProvider: React.FC<{ children: ReactNode }> = ({
     };
   }, []);
   const removeToast = useCallback((id: number) => {
+    console.log(`🍞 [MEMORY] Suppression toast ${id}`);
+
     setToasts((prevToasts) => {
       const toastIndex = prevToasts.findIndex((t) => t.id === id);
       if (toastIndex === -1 || prevToasts[toastIndex].isRemoving) {
+        console.log(`🍞 [MEMORY] Toast ${id} déjà supprimé ou en cours`);
         return prevToasts;
+      }
+
+      // ✅ Nettoyer IMMÉDIATEMENT les refs pour éviter l'accumulation
+      if (timeoutRefs.current[id]) {
+        clearTimeout(timeoutRefs.current[id]);
+        delete timeoutRefs.current[id];
+        console.log(`🍞 [MEMORY] Timeout ${id} nettoyé`);
+      }
+
+      if (animationRefs.current[id]) {
+        animationRefs.current[id].stop();
+        delete animationRefs.current[id];
+        console.log(`🍞 [MEMORY] Animation ${id} stoppée`);
       }
 
       const updatedToasts = [...prevToasts];
@@ -81,17 +97,9 @@ export const ToastProvider: React.FC<{ children: ReactNode }> = ({
         useNativeDriver: true,
       });
 
-      animationRefs.current[id] = animation;
-
       animation.start(() => {
+        console.log(`🍞 [MEMORY] Animation ${id} terminée`);
         setToasts((currentToasts) => currentToasts.filter((t) => t.id !== id));
-
-        if (timeoutRefs.current[id]) {
-          clearTimeout(timeoutRefs.current[id]);
-          delete timeoutRefs.current[id];
-        }
-
-        delete animationRefs.current[id];
       });
 
       return updatedToasts;
@@ -100,16 +108,24 @@ export const ToastProvider: React.FC<{ children: ReactNode }> = ({
 
   const showToast = useCallback(
     (message: string, type: ToastType = 'info') => {
+      console.log(`🍞 [TOAST] Nouveau toast: ${message.substring(0, 30)}...`);
+
       const id = Date.now();
       const opacity = new Animated.Value(0);
 
       setToasts((prevToasts) => {
+        console.log(`🍞 [TOAST] Toasts avant ajout: ${prevToasts.length}`);
+
         let newToasts = [...prevToasts];
 
-        // Supprimer les plus anciens si > 2
-        if (newToasts.length >= 2) {
-          const toRemove = newToasts.slice(0, newToasts.length - 1);
-          toRemove.forEach((toast) => {
+        // ✅ LIMITE STRICTE : Maximum 1 toast à la fois
+        if (newToasts.length >= 1) {
+          console.log(
+            `🍞 [TOAST] Suppression forcée de ${newToasts.length} toast(s) existant(s)`
+          );
+
+          // Nettoyer TOUS les toasts existants immédiatement
+          newToasts.forEach((toast) => {
             if (timeoutRefs.current[toast.id]) {
               clearTimeout(timeoutRefs.current[toast.id]);
               delete timeoutRefs.current[toast.id];
@@ -119,18 +135,17 @@ export const ToastProvider: React.FC<{ children: ReactNode }> = ({
               delete animationRefs.current[toast.id];
             }
           });
-          newToasts = newToasts.slice(-1); // Garder seulement le dernier
+
+          newToasts = []; // ✅ Vider complètement
         }
 
-        const id = Date.now();
-        const opacity = new Animated.Value(0);
+        const newToast = { id, message, type, opacity, isRemoving: false };
+        console.log(`🍞 [TOAST] Toast ajouté, total: 1`);
 
-        return [
-          ...newToasts,
-          { id, message, type, opacity, isRemoving: false },
-        ];
+        return [newToast];
       });
 
+      // Animation et timer pour le nouveau toast
       requestAnimationFrame(() => {
         const animation = Animated.timing(opacity, {
           toValue: 1,
@@ -143,7 +158,7 @@ export const ToastProvider: React.FC<{ children: ReactNode }> = ({
 
         const timeout = setTimeout(() => {
           removeToast(id);
-        }, 3000);
+        }, 2000); // ✅ Réduit de 3000ms à 2000ms
 
         timeoutRefs.current[id] = timeout;
       });

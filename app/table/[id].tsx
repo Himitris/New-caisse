@@ -24,6 +24,7 @@ import {
   startTransition,
   useDeferredValue,
   JSX,
+  useRef,
 } from 'react';
 import {
   ActivityIndicator,
@@ -85,7 +86,7 @@ export default function TableScreen(): JSX.Element {
   const { refreshTables, getTableById, updateTableData } = useTableContext();
   const { restaurantInfo } = useSettings();
 
-  // ✅ Utilisation des nouveaux hooks
+  const saveTimerRef = useRef<NodeJS.Timeout | number | null>(null);
   const { instanceId, isMounted, safeExecute, setSafeTimeout, addCleanup } =
     useInstanceManager('TableScreen');
   const {
@@ -311,6 +312,54 @@ export default function TableScreen(): JSX.Element {
     }
   }, [tableId, getTableById, isMounted]);
 
+  const debouncedSave = useCallback(async () => {
+    console.log(`💾 [SAVE] Sauvegarde demandée pour table ${tableId}`);
+
+    // Annuler le timer précédent s'il existe
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+      console.log(`💾 [SAVE] Timer précédent annulé`);
+    }
+
+    // Créer un nouveau timer
+    saveTimerRef.current = setTimeout(async () => {
+      if (!isMounted()) {
+        console.log(`💾 [SAVE] Sauvegarde annulée - composant démonté`);
+        return;
+      }
+
+      try {
+        console.log(`💾 [SAVE] Exécution sauvegarde table ${tableId}`);
+        const currentTable = getTableById(tableId);
+        if (currentTable) {
+          await updateTableData(tableId, currentTable);
+          console.log(`💾 [SAVE] Sauvegarde réussie table ${tableId}`);
+        }
+      } catch (error) {
+        console.error('💾 [SAVE] Erreur sauvegarde:', error);
+        if (isMounted()) {
+          loadTable();
+          toast.showToast('Erreur lors de la sauvegarde', 'error');
+        }
+      } finally {
+        saveTimerRef.current = null;
+      }
+    }, 300); // ✅ Réduit de 500ms à 300ms pour plus de réactivité
+
+    console.log(`💾 [SAVE] Nouveau timer créé (300ms)`);
+  }, [tableId, updateTableData, getTableById, loadTable, toast, isMounted]);
+
+  useEffect(() => {
+    addCleanup(() => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+        console.log(`💾 [SAVE] Timer nettoyé au démontage`);
+      }
+    });
+  }, [addCleanup]);
+
   // ✅ Chargement initial et focus
   useEffect(() => {
     loadTable();
@@ -322,23 +371,29 @@ export default function TableScreen(): JSX.Element {
 
   // ✅ Modifier la gestion du bouton retour pour être plus brutal
   useEffect(() => {
+    console.log(`📱 [MEMORY] BackHandler ajouté pour table ${tableId}`);
+
     const backHandler = BackHandler.addEventListener(
       'hardwareBackPress',
       () => {
+        console.log(`📱 [MEMORY] BackHandler déclenché pour table ${tableId}`);
         router.back();
         return true;
       }
     );
 
     return () => {
+      console.log(`📱 [MEMORY] BackHandler supprimé pour table ${tableId}`);
       backHandler.remove();
     };
-  }, [router]);
+  }, [router, tableId]);
 
   // ✅ Handler pour ajouter un item (avec debounce)
   const addItemToOrder = useCallback(
     (item: MenuItem): void => {
       if (!table || !isMounted()) return;
+
+      console.log(`➕ [ITEM] Ajout item: ${item.name}`);
 
       safeExecute(() => {
         setTable((prevTable) => {
@@ -388,36 +443,10 @@ export default function TableScreen(): JSX.Element {
         });
       });
 
-      setSafeTimeout(async () => {
-        if (!isMounted()) return;
-
-        try {
-          const currentTable = getTableById(tableId);
-          if (currentTable) {
-            await updateTableData(tableId, currentTable);
-          }
-        } catch (error) {
-          console.error('Error saving table updates:', error);
-          if (isMounted()) {
-            loadTable();
-            toast.showToast('Erreur lors de la sauvegarde', 'error');
-          }
-        }
-      }, 500);
+      // ✅ UTILISEZ la fonction debounced au lieu de setSafeTimeout
+      debouncedSave();
     },
-    [
-      table,
-      guestCount,
-      tableId,
-      updateTableData,
-      getTableById,
-      loadTable,
-      toast,
-      calculateTotal,
-      isMounted,
-      safeExecute,
-      setSafeTimeout,
-    ]
+    [table, guestCount, calculateTotal, isMounted, safeExecute, debouncedSave]
   );
 
   // ✅ Items de menu filtrés (utilise le nouveau système)
@@ -469,6 +498,12 @@ export default function TableScreen(): JSX.Element {
     (itemId: number, increment: boolean): void => {
       if (!table?.order || !isMounted()) return;
 
+      console.log(
+        `🔢 [QUANTITY] Modification quantité item ${itemId}: ${
+          increment ? '+1' : '-1'
+        }`
+      );
+
       safeExecute(() => {
         setTable((prevTable) => {
           if (!prevTable?.order) return prevTable;
@@ -496,33 +531,17 @@ export default function TableScreen(): JSX.Element {
         });
       });
 
-      setSafeTimeout(async () => {
-        if (!isMounted()) return;
-        try {
-          const currentTable = getTableById(tableId);
-          if (currentTable) {
-            await updateTableData(tableId, currentTable);
-          }
-        } catch (error) {
-          console.error('Error updating quantity:', error);
-        }
-      }, 500);
+      // ✅ UTILISEZ la fonction debounced
+      debouncedSave();
     },
-    [
-      table?.order,
-      tableId,
-      updateTableData,
-      getTableById,
-      calculateTotal,
-      isMounted,
-      safeExecute,
-      setSafeTimeout,
-    ]
+    [table?.order, calculateTotal, isMounted, safeExecute, debouncedSave]
   );
 
   const toggleItemOffered = useCallback(
     (itemId: number): void => {
       if (!table?.order || !isMounted()) return;
+
+      console.log(`🎁 [OFFERED] Toggle offert item ${itemId}`);
 
       safeExecute(() => {
         setTable((prevTable) => {
@@ -542,28 +561,10 @@ export default function TableScreen(): JSX.Element {
         });
       });
 
-      setSafeTimeout(async () => {
-        if (!isMounted()) return;
-        try {
-          const currentTable = getTableById(tableId);
-          if (currentTable) {
-            await updateTableData(tableId, currentTable);
-          }
-        } catch (error) {
-          console.error('Error toggling offered:', error);
-        }
-      }, 500);
+      // ✅ UTILISEZ la fonction debounced
+      debouncedSave();
     },
-    [
-      table?.order,
-      tableId,
-      updateTableData,
-      getTableById,
-      calculateTotal,
-      isMounted,
-      safeExecute,
-      setSafeTimeout,
-    ]
+    [table?.order, calculateTotal, isMounted, safeExecute, debouncedSave]
   );
 
   const updateGuestCount = useCallback(
@@ -571,6 +572,8 @@ export default function TableScreen(): JSX.Element {
       if (!table) return;
 
       const validCount = Math.max(1, newCount);
+      console.log(`👥 [GUESTS] Modification nombre invités: ${validCount}`);
+
       setGuestCount(validCount);
 
       setTable((prevTable) => {
@@ -584,18 +587,28 @@ export default function TableScreen(): JSX.Element {
         };
       });
 
-      setSafeTimeout(async () => {
+      // ✅ UTILISEZ la fonction debounced avec délai plus long pour les invités
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+
+      saveTimerRef.current = setTimeout(async () => {
+        if (!isMounted()) return;
         try {
           const currentTable = getTableById(tableId);
           if (currentTable) {
             await updateTableData(tableId, currentTable);
+            console.log(`👥 [GUESTS] Sauvegarde invités réussie`);
           }
         } catch (error) {
-          console.error('Error updating guest count:', error);
+          console.error('👥 [GUESTS] Erreur sauvegarde invités:', error);
+        } finally {
+          saveTimerRef.current = null;
         }
-      }, 1000);
+      }, 1000); // Plus long pour les invités car moins fréquent
     },
-    [table, tableId, updateTableData, getTableById, setSafeTimeout]
+    [table, tableId, updateTableData, getTableById, isMounted]
   );
 
   // ✅ Handlers d'actions
@@ -680,7 +693,12 @@ export default function TableScreen(): JSX.Element {
 
   const handlePayment = useCallback(
     (type: 'full' | 'split' | 'custom' | 'items'): void => {
-      if (!table?.order) return;
+      console.log(`💳 [MEMORY] Début paiement ${type} pour table ${tableId}`);
+
+      if (!table?.order) {
+        console.log(`💳 [MEMORY] Pas de commande pour table ${tableId}`);
+        return;
+      }
 
       const total = table.order.total;
       if (total <= 0) {
@@ -690,8 +708,10 @@ export default function TableScreen(): JSX.Element {
 
       const serializedItems = JSON.stringify(table.order.items);
 
+      // ✅ Utiliser push au lieu de replace pour éviter l'accumulation de history
       switch (type) {
         case 'full':
+          console.log(`💳 [MEMORY] Navigation vers payment/full`);
           router.push({
             pathname: '/payment/full',
             params: {
