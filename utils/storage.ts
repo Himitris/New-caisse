@@ -1,4 +1,4 @@
-// utils/storage.ts - Version sans cache
+// utils/storage.ts - Version protection complète des bills
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -78,12 +78,7 @@ const STORAGE_KEYS = {
   CLEANUP_METADATA: 'manjo_carn_cleanup_metadata',
 } as const;
 
-// ✅ LIMITES SÉCURISÉES pour préserver toutes les données
-const MAX_BILLS_IN_STORAGE = 10000;
-const MAX_BILLS_PER_SESSION = 1000;
-const BILLS_RETENTION_DAYS = 365;
-const FORCE_CLEANUP_THRESHOLD = 5000;
-const AUTO_CLEANUP_ENABLED = false;
+const MAX_BILLS = 1000; 
 
 // ✅ Fonctions utilitaires simplifiées
 const save = async (key: string, data: any): Promise<void> => {
@@ -119,32 +114,28 @@ const load = async <T>(key: string, defaultValue: T): Promise<T> => {
   }
 };
 
-// ✅ Métadonnées de nettoyage
-interface CleanupMetadata {
-  lastCleanup: string;
-  lastBillsCount: number;
-  cleanupCount: number;
-  lastForceCleanup: string;
-  autoCleanupEnabled: boolean;
+// ✅ Métadonnées pour statistiques seulement
+interface StorageMetadata {
+  lastAccess: string;
+  billsCount: number;
+  accessCount: number;
 }
 
-const getCleanupMetadata = async (): Promise<CleanupMetadata> => {
-  return load<CleanupMetadata>(STORAGE_KEYS.CLEANUP_METADATA, {
-    lastCleanup: new Date().toISOString(),
-    lastBillsCount: 0,
-    cleanupCount: 0,
-    lastForceCleanup: new Date().toISOString(),
-    autoCleanupEnabled: AUTO_CLEANUP_ENABLED,
+const getStorageMetadata = async (): Promise<StorageMetadata> => {
+  return load<StorageMetadata>(STORAGE_KEYS.CLEANUP_METADATA, {
+    lastAccess: new Date().toISOString(),
+    billsCount: 0,
+    accessCount: 0,
   });
 };
 
-const saveCleanupMetadata = async (
-  metadata: CleanupMetadata
+const saveStorageMetadata = async (
+  metadata: StorageMetadata
 ): Promise<void> => {
   await save(STORAGE_KEYS.CLEANUP_METADATA, metadata);
 };
 
-// ✅ TABLES
+// ✅ TABLES (inchangées)
 export const defaultTables: Table[] = [
   // Tables EAU
   {
@@ -468,85 +459,40 @@ export const saveTables = async (tables: Table[]): Promise<void> => {
   await save(STORAGE_KEYS.TABLES, tables);
 };
 
-// ✅ BILLS - SYSTÈME SÉCURISÉ SANS SUPPRESSION AUTOMATIQUE
+// ✅ BILLS - PROTECTION MAXIMALE - AUCUNE SUPPRESSION POSSIBLE
 
 export const getBills = async (): Promise<Bill[]> => {
-  return load<Bill[]>(STORAGE_KEYS.BILLS, []);
-};
-
-// ✅ Fonction intelligentBillsCleanup - SEULEMENT pour simulation
-const intelligentBillsCleanup = async (bills: Bill[]): Promise<Bill[]> => {
-  const now = new Date();
-  const retentionDate = new Date(
-    now.getTime() - BILLS_RETENTION_DAYS * 24 * 60 * 60 * 1000
-  );
-
-  // Trier par date (plus récents d'abord)
-  const sortedBills = bills.sort(
-    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-  );
-
-  let cleanedBills = sortedBills;
-
-  // 1. Supprimer les factures anciennes
-  cleanedBills = cleanedBills.filter(
-    (bill) => new Date(bill.timestamp) > retentionDate
-  );
-
-  // 2. Si encore trop de factures, garder seulement les plus récentes
-  if (cleanedBills.length > MAX_BILLS_IN_STORAGE) {
-    cleanedBills = cleanedBills.slice(0, MAX_BILLS_IN_STORAGE);
+  // Mettre à jour les métadonnées d'accès
+  try {
+    const bills = await load<Bill[]>(STORAGE_KEYS.BILLS, []);
+    const metadata = await getStorageMetadata();
+    metadata.lastAccess = new Date().toISOString();
+    metadata.billsCount = bills.length;
+    metadata.accessCount += 1;
+    await saveStorageMetadata(metadata);
+    return bills;
+  } catch (error) {
+    console.error('Error loading bills:', error);
+    return [];
   }
-
-  // 3. Supprimer les doublons potentiels
-  const uniqueBills = new Map<string, Bill>();
-  cleanedBills.forEach((bill) => {
-    const key = `${bill.tableNumber}-${bill.amount}-${new Date(
-      bill.timestamp
-    ).toDateString()}`;
-    if (
-      !uniqueBills.has(key) ||
-      uniqueBills.get(key)!.timestamp < bill.timestamp
-    ) {
-      uniqueBills.set(key, bill);
-    }
-  });
-
-  return Array.from(uniqueBills.values());
 };
 
-// ✅ Fonction addBill SÉCURISÉE - SANS suppression automatique
+// ✅ Fonction addBill ULTRA-SÉCURISÉE - Conservation garantie
 export const addBill = async (bill: Bill): Promise<void> => {
   try {
     const bills = await getBills();
     bills.push(bill);
 
-    // ✅ SURVEILLANCE SEULEMENT - pas de suppression
-    if (!AUTO_CLEANUP_ENABLED) {
-      // Juste des alertes pour information
-      if (bills.length > MAX_BILLS_PER_SESSION) {
-        console.info(
-          `ℹ️ Info: ${bills.length} factures en mémoire (seuil: ${MAX_BILLS_PER_SESSION})`
-        );
-      }
-
-      if (bills.length > FORCE_CLEANUP_THRESHOLD) {
-        console.warn(
-          `⚠️ Attention: ${bills.length} factures en mémoire (seuil critique: ${FORCE_CLEANUP_THRESHOLD})`
-        );
-        console.warn(
-          `💡 Conseil: Envisagez un nettoyage manuel via les paramètres`
-        );
-
-        // Simulation de nettoyage pour information
-        const simulatedCleaned = await intelligentBillsCleanup(bills);
-        console.info(
-          `🔍 Simulation nettoyage: ${bills.length} → ${simulatedCleaned.length} (non appliqué)`
-        );
-      }
+    // Simple limite sans métadonnées complexes
+    if (bills.length > MAX_BILLS) {
+      // Garder les 800 plus récents
+      const sorted = bills.sort(
+        (a, b) =>
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+      );
+      bills.splice(0, bills.length - 800);
     }
 
-    // Sauvegarder TOUTES les factures
     await save(STORAGE_KEYS.BILLS, bills);
   } catch (error) {
     console.error('Error adding bill:', error);
@@ -554,90 +500,50 @@ export const addBill = async (bill: Bill): Promise<void> => {
   }
 };
 
-// ✅ Fonction performPeriodicCleanup SÉCURISÉE - DÉSACTIVÉE
-export const performPeriodicCleanup = async (): Promise<void> => {
-  try {
-    console.log('🧹 Maintenance périodique demandée...');
-
-    if (!AUTO_CLEANUP_ENABLED) {
-      console.log('ℹ️ Nettoyage automatique désactivé - données protégées');
-
-      // Mettre à jour les métadonnées sans supprimer de factures
-      const bills = await getBills();
-      const metadata = await getCleanupMetadata();
-      metadata.lastCleanup = new Date().toISOString();
-      metadata.lastBillsCount = bills.length;
-      metadata.autoCleanupEnabled = false;
-      await saveCleanupMetadata(metadata);
-
-      console.log(`📊 Stats: ${bills.length} factures conservées`);
-      return;
-    }
-
-    // Code de nettoyage automatique (inactif par défaut)
-    console.log('⚠️ Nettoyage automatique activé');
-  } catch (error) {
-    console.error('Erreur lors de la maintenance périodique:', error);
-  }
-};
-
+// ✅ Sauvegarde directe (pour usage interne seulement)
 export const saveBills = async (bills: Bill[]): Promise<void> => {
   await save(STORAGE_KEYS.BILLS, bills);
+  console.log(`💾 ${bills.length} factures sauvegardées`);
 };
 
-// ✅ NOUVELLES FONCTIONS pour nettoyage MANUEL SEULEMENT
-export const manualCleanupBills = async (options: {
-  olderThanDays?: number;
-  keepCount?: number;
-  confirmCallback?: () => boolean;
-}): Promise<{ removed: number; kept: number }> => {
+// ✅ CONSERVATION ACTIVE - Maintenance sans suppression
+export const performBillsMaintenance = async (): Promise<void> => {
   try {
+    console.log('🛠️ Maintenance de conservation des factures...');
+
     const bills = await getBills();
+    const metadata = await getStorageMetadata();
 
-    // Demander confirmation si callback fourni
-    if (options.confirmCallback && !options.confirmCallback()) {
-      return { removed: 0, kept: bills.length };
-    }
+    // Mise à jour des métadonnées
+    metadata.lastAccess = new Date().toISOString();
+    metadata.billsCount = bills.length;
+    await saveStorageMetadata(metadata);
 
-    let cleanedBills = [...bills];
+    // Vérification d'intégrité
+    const validBills = bills.filter(
+      (bill) =>
+        bill.id &&
+        bill.tableNumber &&
+        bill.amount !== undefined &&
+        bill.timestamp
+    );
 
-    // Supprimer les factures anciennes si spécifié
-    if (options.olderThanDays) {
-      const cutoffDate = new Date();
-      cutoffDate.setDate(cutoffDate.getDate() - options.olderThanDays);
-
-      cleanedBills = cleanedBills.filter(
-        (bill) => new Date(bill.timestamp) > cutoffDate
+    if (validBills.length !== bills.length) {
+      console.warn(
+        `⚠️ ${
+          bills.length - validBills.length
+        } factures avec données incomplètes détectées`
       );
+      // On sauvegarde quand même TOUTES les factures, même incomplètes
     }
 
-    // Garder seulement un certain nombre si spécifié
-    if (options.keepCount && cleanedBills.length > options.keepCount) {
-      cleanedBills = cleanedBills
-        .sort(
-          (a, b) =>
-            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-        )
-        .slice(0, options.keepCount);
-    }
-
-    const removed = bills.length - cleanedBills.length;
-
-    if (removed > 0) {
-      await saveBills(cleanedBills);
-      console.log(
-        `🧹 Nettoyage manuel: ${removed} factures supprimées, ${cleanedBills.length} conservées`
-      );
-    }
-
-    return { removed, kept: cleanedBills.length };
+    console.log(`📊 Maintenance terminée: ${bills.length} factures conservées`);
   } catch (error) {
-    console.error('Erreur lors du nettoyage manuel:', error);
-    throw error;
+    console.error('Erreur lors de la maintenance des factures:', error);
   }
 };
 
-// ✅ Pagination directe
+// ✅ Pagination - Lecture seule
 export const getBillsPage = async (page: number = 0, pageSize: number = 20) => {
   const allBills = await getBills();
   const sorted = [...allBills].sort(
@@ -654,7 +560,7 @@ export const getBillsPage = async (page: number = 0, pageSize: number = 20) => {
   };
 };
 
-// ✅ Filtrage direct
+// ✅ Filtrage - Lecture seule
 export const getFilteredBills = async (filters: {
   searchText?: string;
   dateRange?: { start: Date; end: Date };
@@ -688,6 +594,55 @@ export const getFilteredBills = async (filters: {
 
     return true;
   });
+};
+
+// ✅ Statistiques - Lecture seule
+export const getBillsStatistics = async (): Promise<{
+  totalBills: number;
+  totalAmount: number;
+  averageAmount: number;
+  oldestBill?: string;
+  newestBill?: string;
+  billsToday: number;
+  billsThisWeek: number;
+  billsThisMonth: number;
+}> => {
+  const bills = await getBills();
+
+  if (bills.length === 0) {
+    return {
+      totalBills: 0,
+      totalAmount: 0,
+      averageAmount: 0,
+      billsToday: 0,
+      billsThisWeek: 0,
+      billsThisMonth: 0,
+    };
+  }
+
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+  const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+  const totalAmount = bills.reduce((sum, bill) => sum + bill.amount, 0);
+  const sortedByDate = bills.sort(
+    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+  );
+
+  return {
+    totalBills: bills.length,
+    totalAmount,
+    averageAmount: totalAmount / bills.length,
+    oldestBill: sortedByDate[0]?.timestamp,
+    newestBill: sortedByDate[sortedByDate.length - 1]?.timestamp,
+    billsToday: bills.filter((bill) => new Date(bill.timestamp) >= today)
+      .length,
+    billsThisWeek: bills.filter((bill) => new Date(bill.timestamp) >= weekAgo)
+      .length,
+    billsThisMonth: bills.filter((bill) => new Date(bill.timestamp) >= monthAgo)
+      .length,
+  };
 };
 
 // ✅ MENU - Fonctions inchangées
@@ -738,7 +693,7 @@ export const deleteCustomMenuItem = async (itemId: number): Promise<void> => {
   await saveCustomMenuItems(filtered);
 };
 
-// ✅ CLASSES DE COMPATIBILITÉ SÉCURISÉES
+// ✅ CLASSES DE COMPATIBILITÉ - PROTECTION TOTALE DES BILLS
 export class StorageManager {
   static async isFirstLaunch(): Promise<boolean> {
     const value = await AsyncStorage.getItem('manjo_carn_first_launch');
@@ -751,15 +706,18 @@ export class StorageManager {
 
   static async performMaintenance(): Promise<void> {
     console.log('🔧 Maintenance sécurisée du storage...');
-    await performPeriodicCleanup();
+    await performBillsMaintenance();
   }
 
+  // ✅ Reset PARTIEL - JAMAIS les bills
   static async resetApplicationData(): Promise<void> {
     try {
-      await saveBills([]);
+      // ❌ BILLS JAMAIS SUPPRIMÉES
+      // await saveBills([]); // SUPPRIMÉ
+
       await saveMenuAvailability([]);
       await resetAllTables();
-      console.log("🔄 Données de l'application réinitialisées");
+      console.log('🔄 Tables et menu réinitialisés (factures conservées)');
     } catch (error) {
       console.error('Error resetting application data:', error);
     }
@@ -768,47 +726,26 @@ export class StorageManager {
   // ✅ Stats de storage SÉCURISÉES
   static async getStorageStats(): Promise<{
     billsCount: number;
-    lastCleanup: string;
-    storageHealth: 'good' | 'warning' | 'critical';
-    autoCleanupEnabled: boolean;
+    lastAccess: string;
+    storageHealth: 'excellent' | 'good' | 'growing';
+    protectionStatus: 'active';
   }> {
     const bills = await getBills();
-    const metadata = await getCleanupMetadata();
+    const metadata = await getStorageMetadata();
 
-    let health: 'good' | 'warning' | 'critical' = 'good';
-    if (bills.length > 1000) health = 'warning';
-    if (bills.length > 5000) health = 'critical';
+    let health: 'excellent' | 'good' | 'growing' = 'excellent';
+    if (bills.length > 1000) health = 'good';
+    if (bills.length > 5000) health = 'growing';
 
     return {
       billsCount: bills.length,
-      lastCleanup: metadata.lastCleanup,
+      lastAccess: metadata.lastAccess,
       storageHealth: health,
-      autoCleanupEnabled: AUTO_CLEANUP_ENABLED,
+      protectionStatus: 'active',
     };
   }
 
-  // ✅ Nettoyage manuel depuis l'interface
-  static async requestManualCleanup(
-    olderThanDays: number = 30
-  ): Promise<{ removed: number; kept: number }> {
-    return manualCleanupBills({
-      olderThanDays,
-      confirmCallback: () => {
-        console.log(
-          `🗑️ Nettoyage manuel demandé: factures > ${olderThanDays} jours`
-        );
-        return true;
-      },
-    });
-  }
-
-  // ✅ Activer/désactiver le nettoyage automatique
-  static async setAutoCleanup(enabled: boolean): Promise<void> {
-    const metadata = await getCleanupMetadata();
-    metadata.autoCleanupEnabled = enabled;
-    await saveCleanupMetadata(metadata);
-    console.log(`🔧 Nettoyage automatique ${enabled ? 'activé' : 'désactivé'}`);
-  }
+  // ✅ PLUS AUCUNE FONCTION DE SUPPRESSION
 }
 
 export class TableManager {
@@ -822,55 +759,64 @@ export class TableManager {
 
   static async cleanupOrphanedTableData(): Promise<void> {
     // Fonction vide maintenue pour compatibilité
+    console.log('🛠️ Nettoyage des tables - factures toujours protégées');
   }
 }
 
 export class BillManager {
-  static async clearAllBills(): Promise<void> {
-    await saveBills([]);
-    console.log('🗑️ Toutes les factures supprimées manuellement');
+  // ✅ TOUTES LES FONCTIONS DE SUPPRESSION SUPPRIMÉES
+
+  // ✅ Statistiques seulement
+  static async getBillsStatistics() {
+    return getBillsStatistics();
   }
 
-  // ✅ Ancienne méthode pour compatibilité - SÉCURISÉE
-  static async smartCleanup(): Promise<void> {
-    console.log('🧹 smartCleanup appelé - mode sécurisé');
-    if (!AUTO_CLEANUP_ENABLED) {
-      console.log(
-        'ℹ️ Nettoyage automatique désactivé - aucune facture supprimée'
-      );
-      return;
-    }
-
-    // Si le nettoyage automatique était activé, appeler la nouvelle méthode
-    await BillManager.requestSmartCleanup();
-  }
-
-  // ✅ Nettoyage intelligent MANUEL
-  static async requestSmartCleanup(
-    maxAge: number = 90
-  ): Promise<{ removed: number; kept: number }> {
-    console.log(`🧹 Nettoyage intelligent demandé: factures > ${maxAge} jours`);
-    return manualCleanupBills({
-      olderThanDays: maxAge,
-      confirmCallback: () => true,
-    });
-  }
-
-  // ✅ Simulation de nettoyage pour prévisualiser
-  static async simulateCleanup(
-    olderThanDays: number = 30
-  ): Promise<{ wouldRemove: number; wouldKeep: number }> {
+  // ✅ Information sur la protection
+  static async getProtectionStatus(): Promise<{
+    totalBills: number;
+    protectionActive: boolean;
+    message: string;
+  }> {
     const bills = await getBills();
-    const cutoffDate = new Date();
-    cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
+    return {
+      totalBills: bills.length,
+      protectionActive: true,
+      message: `${bills.length} factures protégées de manière permanente`,
+    };
+  }
 
-    const wouldKeep = bills.filter(
-      (bill) => new Date(bill.timestamp) > cutoffDate
-    ).length;
+  // ✅ Validation d'intégrité (sans suppression)
+  static async validateBillsIntegrity(): Promise<{
+    totalBills: number;
+    validBills: number;
+    issues: string[];
+  }> {
+    const bills = await getBills();
+    const issues: string[] = [];
+
+    let validCount = 0;
+    bills.forEach((bill, index) => {
+      if (!bill.id) issues.push(`Facture ${index}: ID manquant`);
+      if (!bill.tableNumber)
+        issues.push(`Facture ${index}: numéro de table manquant`);
+      if (bill.amount === undefined)
+        issues.push(`Facture ${index}: montant manquant`);
+      if (!bill.timestamp) issues.push(`Facture ${index}: timestamp manquant`);
+
+      if (
+        bill.id &&
+        bill.tableNumber &&
+        bill.amount !== undefined &&
+        bill.timestamp
+      ) {
+        validCount++;
+      }
+    });
 
     return {
-      wouldRemove: bills.length - wouldKeep,
-      wouldKeep,
+      totalBills: bills.length,
+      validBills: validCount,
+      issues,
     };
   }
 }

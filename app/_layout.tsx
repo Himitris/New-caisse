@@ -14,10 +14,7 @@ import {
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { menuManager } from '../utils/MenuManager';
 import { SettingsProvider } from '../utils/SettingsContext';
-import {
-  initializeTables,
-  performPeriodicCleanup
-} from '../utils/storage';
+import { initializeTables, performBillsMaintenance } from '../utils/storage';
 import { ToastProvider } from '../utils/ToastContext';
 
 // ✅ Constantes simplifiées
@@ -41,7 +38,7 @@ export default function RootLayout() {
         ]);
 
         // Nettoyage léger initial
-        await performPeriodicCleanup();
+        await performBillsMaintenance();
 
         setInitialized(true);
 
@@ -67,7 +64,7 @@ export default function RootLayout() {
     console.log('⏰ Setup nettoyage automatique');
 
     const cleanupInterval = setInterval(() => {
-      performPeriodicCleanup();
+      performBillsMaintenance();
     }, CLEANUP_INTERVAL);
 
     return () => {
@@ -119,7 +116,7 @@ export default function RootLayout() {
         // Nettoyage différé en arrière-plan
         setTimeout(() => {
           console.log('🧹 Nettoyage arrière-plan');
-          performPeriodicCleanup();
+          performBillsMaintenance();
         }, BACKGROUND_CLEANUP_DELAY);
       }
     };

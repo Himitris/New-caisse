@@ -91,37 +91,6 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
     // Ne fait plus rien - gardé pour compatibilité (INCHANGÉ)
   }, []);
 
-  // ✅ AJOUT SEULEMENT : Nettoyage périodique intelligent
-  useEffect(() => {
-    const cleanupInterval = setInterval(() => {
-      if (mountedRef.current) {
-        setTables((prevTables) => {
-          // Garder seulement les tables avec du contenu
-          const activeTables = prevTables.filter(
-            (table) =>
-              table.status === 'occupied' ||
-              table.status === 'reserved' ||
-              (table.order && table.order.items.length > 0) ||
-              (table.guests && table.guests > 0)
-          );
-
-          const removed = prevTables.length - activeTables.length;
-          if (removed > 0) {
-            console.log(
-              `🧹 [TABLE_CONTEXT] ${removed} table(s) vide(s) nettoyée(s) de la mémoire`
-            );
-          }
-
-          return activeTables;
-        });
-      }
-    }, 60000); // Toutes les minutes
-
-    return () => {
-      clearInterval(cleanupInterval);
-    };
-  }, []);
-
   // ✅ Chargement initial (INCHANGÉ)
   useEffect(() => {
     loadTables();
