@@ -623,44 +623,40 @@ export default function TableScreen(): JSX.Element {
         {
           text: 'Supprimer',
           style: 'destructive',
-          onPress: () => {
-            safeExecute(() => {
-              setTable((prevTable) => {
-                if (!prevTable?.order) return prevTable;
-                return {
-                  ...prevTable,
-                  order: { ...prevTable.order, items: [], total: 0 },
-                };
-              });
-            });
+          onPress: async () => {
+            try {
+              // Créer directement la table mise à jour avec tous les champs requis
+              const clearedTable = {
+                ...table,
+                order: {
+                  id: table.order?.id ?? Date.now(),
+                  items: [],
+                  guests: table.order?.guests ?? 1,
+                  status: table.order?.status ?? 'active',
+                  timestamp: table.order?.timestamp ?? new Date().toISOString(),
+                  total: 0,
+                },
+              };
 
-            setSafeTimeout(async () => {
-              try {
-                const currentTable = getTableById(tableId);
-                if (currentTable) {
-                  await updateTableData(tableId, currentTable);
-                  toast.showToast('Commande supprimée', 'success');
-                }
-              } catch (error) {
-                console.error('Error clearing order:', error);
-                loadTable();
-                toast.showToast('Impossible de supprimer la commande', 'error');
-              }
-            }, 100);
+              // Mettre à jour l'état local
+              safeExecute(() => {
+                setTable(clearedTable);
+              });
+
+              // Sauvegarder immédiatement la nouvelle version
+              await updateTableData(tableId, clearedTable);
+              toast.showToast('Commande supprimée', 'success');
+            } catch (error) {
+              console.error('Error clearing order:', error);
+              // En cas d'erreur, recharger depuis le stockage
+              loadTable();
+              toast.showToast('Impossible de supprimer la commande', 'error');
+            }
           },
         },
       ]
     );
-  }, [
-    table?.order,
-    tableId,
-    updateTableData,
-    getTableById,
-    loadTable,
-    toast,
-    safeExecute,
-    setSafeTimeout,
-  ]);
+  }, [table, tableId, updateTableData, loadTable, toast, safeExecute]);
 
   const handleCloseTable = useCallback((): void => {
     if (!table) return;

@@ -577,7 +577,7 @@ export default function MenuScreen() {
         const isCustomItem = updatedItem.id > 10000;
 
         if (isCustomItem) {
-          // ✅ Mettre à jour l'item personnalisé dans le stockage
+          // Mettre à jour l'item personnalisé dans le stockage
           const customItem: CustomMenuItem = {
             id: updatedItem.id,
             name: updatedItem.name,
@@ -590,20 +590,7 @@ export default function MenuScreen() {
           await updateCustomMenuItem(customItem);
         }
 
-        // ✅ Mise à jour optimiste de la disponibilité
-        safeExecute(() => {
-          setUnavailableItems((prev) => {
-            const newSet = new Set(prev);
-            if (updatedItem.available) {
-              newSet.delete(updatedItem.id);
-            } else {
-              newSet.add(updatedItem.id);
-            }
-            return newSet;
-          });
-        });
-
-        // ✅ Sauvegarder la disponibilité
+        // Mettre à jour la disponibilité
         const availability = await getMenuAvailability();
         const updatedAvailability = availability.some(
           (item) => item.id === updatedItem.id
@@ -630,21 +617,12 @@ export default function MenuScreen() {
 
         await saveMenuAvailability(updatedAvailability);
 
-        // Forcer le rechargement du menu
-        menuManager.reset();
-        await menuManager.ensureLoaded();
-
-        toast.showToast('Article mis à jour avec succès.', 'success');
-      } catch (error) {
-        console.error('Error updating menu item:', error);
-        toast.showToast("Impossible de mettre à jour l'article.", 'error');
-
-        // ✅ Revenir à l'état précédent en cas d'erreur
+        // Mettre à jour l'état local de disponibilité
         if (isMounted()) {
           safeExecute(() => {
             setUnavailableItems((prev) => {
               const newSet = new Set(prev);
-              if (!updatedItem.available) {
+              if (updatedItem.available) {
                 newSet.delete(updatedItem.id);
               } else {
                 newSet.add(updatedItem.id);
@@ -653,6 +631,15 @@ export default function MenuScreen() {
             });
           });
         }
+
+        // Forcer le rechargement du menu APRÈS la mise à jour de l'état
+        menuManager.reset();
+        await menuManager.ensureLoaded();
+
+        toast.showToast('Article mis à jour avec succès.', 'success');
+      } catch (error) {
+        console.error('Error updating menu item:', error);
+        toast.showToast("Impossible de mettre à jour l'article.", 'error');
       }
     },
     [safeExecute, toast, isMounted]
