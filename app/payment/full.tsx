@@ -185,7 +185,7 @@ export default function FullPaymentScreen() {
             },
           });
         } else {
-          router.push(`/table/${tableIdNum}`);
+          router.replace(`/table/${tableIdNum}`);
         }
 
         toast.showToast(

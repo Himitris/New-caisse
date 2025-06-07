@@ -70,8 +70,7 @@ interface EditModalProps {
   onSave: (item: MenuItem) => void;
 }
 
-const EditItemModal = memo<EditModalProps>(
-  ({ visible, item, onClose, onSave }) => {
+const EditItemModal = ({ visible, item, onClose, onSave }: EditModalProps) => {
     const [name, setName] = useState('');
     const [price, setPrice] = useState('');
     const [available, setAvailable] = useState(true);
@@ -206,8 +205,7 @@ const EditItemModal = memo<EditModalProps>(
         </View>
       </Modal>
     );
-  }
-);
+  };
 
 // ✅ Composant MenuItemCard optimisé
 const MenuItemCard = memo(

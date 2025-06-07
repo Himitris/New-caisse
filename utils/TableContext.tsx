@@ -24,26 +24,11 @@ interface TableContextType {
 
 const TableContext = createContext<TableContextType | undefined>(undefined);
 
-const MAX_CACHE_SIZE = 15; // Réduit pour plus de réactivité
-const CACHE_TTL = 30 * 1000; // Réduit de 90s à 30s
-const CLEANUP_INTERVAL = 15 * 1000; // Réduit de 20s à 15s
-const BATCH_WRITE_DELAY = 50; // Réduit de 100ms à 50ms
-
-interface CacheEntry {
-  table: Table;
-  timestamp: number;
-  dirty: boolean; // ✅ Marqueur pour les données modifiées
-}
-
-let tableCache = new Map<number, CacheEntry>();
-let pendingWrites = new Map<number, Table>(); // ✅ Queue d'écriture groupée
-let writeTimeout: ReturnType<typeof setTimeout> | null = null;
-
-
 export const TableProvider = ({ children }: { children: ReactNode }) => {
   const [tables, setTables] = useState<Table[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const mountedRef = useRef(true);
+  
 
   // ✅ Chargement simple direct
   const loadTables = useCallback(async () => {

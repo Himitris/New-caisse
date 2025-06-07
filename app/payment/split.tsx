@@ -263,7 +263,7 @@ export default function SplitBillScreen() {
           { text: 'Continuer les Paiements', style: 'cancel' },
           {
             text: 'Retour à la Table',
-            onPress: () => router.push(`/table/${tableId}`),
+            onPress: () => router.replace(`/table/${tableId}`),
           },
         ]
       );

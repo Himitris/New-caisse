@@ -353,7 +353,7 @@ export default function CustomSplitScreen() {
 
           processingTimeoutRef.current = setTimeout(() => {
             if (mountedRef.current) {
-              router.push(`/table/${tableIdNum}`);
+              router.replace(`/table/${tableIdNum}`);
             }
           }, 150);
         }

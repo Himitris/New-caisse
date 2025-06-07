@@ -108,9 +108,6 @@ export default function TableScreen(): JSX.Element {
   const [splitModalVisible, setSplitModalVisible] = useState<boolean>(false);
   const [processing, setProcessing] = useState<boolean>(false);
 
-  // ✅ État différé pour optimisation
-  const deferredTable = useDeferredValue(table);
-
   // ✅ Fonction pour générer le HTML du ticket de prévisualisation
   const generatePreviewTicketHTML = useCallback(
     (
@@ -328,15 +325,15 @@ export default function TableScreen(): JSX.Element {
     const backHandler = BackHandler.addEventListener(
       'hardwareBackPress',
       () => {
-        router.replace('/');
+        router.back();
         return true;
       }
     );
 
-    addCleanup(() => {
+    return () => {
       backHandler.remove();
-    });
-  }, [router, addCleanup]);
+    };
+  }, [router]);
 
   // ✅ Handler pour ajouter un item (avec debounce)
   const addItemToOrder = useCallback(
@@ -453,11 +450,11 @@ export default function TableScreen(): JSX.Element {
 
   // ✅ Items de commande catégorisés
   const categorizedOrderItems = useMemo(() => {
-    if (!deferredTable?.order?.items) return { plats: [], boissons: [] };
+    if (!table?.order?.items) return { plats: [], boissons: [] };
 
     const result = { plats: [] as OrderItem[], boissons: [] as OrderItem[] };
 
-    deferredTable.order.items.forEach((item) => {
+    table.order.items.forEach((item) => {
       // ✅ Utiliser le type stocké dans l'item ou fallback sur menu
       const itemType =
         item.type || getMenuItem(item.menuId || item.id)?.type || 'resto';
@@ -465,7 +462,7 @@ export default function TableScreen(): JSX.Element {
     });
 
     return result;
-  }, [deferredTable?.order?.items, getMenuItem]);
+  }, [table?.order?.items, getMenuItem]);
 
   // ✅ Autres handlers (simplifiés mais fonctionnels)
   const updateItemQuantity = useCallback(
@@ -780,11 +777,11 @@ export default function TableScreen(): JSX.Element {
 
   // ✅ Calculs dérivés
   const offeredTotal = useMemo((): number => {
-    if (!deferredTable?.order?.items) return 0;
-    return deferredTable.order.items.reduce((sum, item) => {
+    if (!table?.order?.items) return 0;
+    return table.order.items.reduce((sum, item) => {
       return item.offered ? sum + item.price * item.quantity : sum;
     }, 0);
-  }, [deferredTable?.order?.items]);
+  }, [table?.order?.items]);
 
   // ✅ Affichage conditionnel pour le chargement
   if (loading) {

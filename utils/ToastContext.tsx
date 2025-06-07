@@ -51,16 +51,16 @@ export const ToastProvider: React.FC<{ children: ReactNode }> = ({
 
   useEffect(() => {
     return () => {
+      // Nettoyer TOUS les timers et animations
       Object.values(timeoutRefs.current).forEach(clearTimeout);
       Object.values(animationRefs.current).forEach((animation) => {
         animation.stop();
       });
       timeoutRefs.current = {};
       animationRefs.current = {};
-      setToasts([]); // ✅ Vider tous les toasts
+      setToasts([]);
     };
   }, []);
-
   const removeToast = useCallback((id: number) => {
     setToasts((prevToasts) => {
       const toastIndex = prevToasts.findIndex((t) => t.id === id);
