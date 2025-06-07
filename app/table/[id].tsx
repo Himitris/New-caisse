@@ -1,7 +1,7 @@
-// app/table/[id].tsx - AVEC NOTE DE PRÉVISUALISATION
+// app/table/[id].tsx - VERSION SIMPLIFIÉE (600 lignes au lieu de 1000+)
 
 import * as Print from 'expo-print';
-import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ArrowLeft,
   CreditCard,
@@ -15,21 +15,10 @@ import {
   X,
   FileText,
 } from 'lucide-react-native';
-import {
-  memo,
-  useCallback,
-  useEffect,
-  useMemo,
-  useState,
-  startTransition,
-  useDeferredValue,
-  JSX,
-  useRef,
-} from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  BackHandler,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -45,12 +34,10 @@ import {
 } from '../../utils/storage';
 import { useTableContext } from '../../utils/TableContext';
 import { useToast } from '../../utils/ToastContext';
-import { menuManager, useMenu } from '../../utils/MenuManager';
-import { useInstanceManager } from '../../utils/useInstanceManager';
+import { useMenu } from '../../utils/MenuManager';
 import { useSettings } from '@/utils/useSettings';
 import SplitSelectionModal from '../components/SplitSelectionModal';
 
-// ✅ Types
 interface MenuItem {
   id: number;
   name: string;
@@ -60,56 +47,210 @@ interface MenuItem {
   color: string;
 }
 
-// ✅ Composant MenuItem optimisé
-interface MenuItemProps {
-  item: MenuItem;
-  onPress: () => void;
-}
+const MenuItemComponent = memo<{ item: MenuItem; onPress: () => void }>(
+  ({ item, onPress }) => (
+    <Pressable
+      style={[styles.menuItem, { borderLeftColor: item.color }]}
+      onPress={onPress}
+    >
+      <Text style={styles.menuItemName}>{item.name}</Text>
+      <Text style={styles.menuItemPrice}>{item.price.toFixed(2)} €</Text>
+    </Pressable>
+  )
+);
 
-const MenuItemComponent = memo<MenuItemProps>(({ item, onPress }) => (
-  <Pressable
-    style={[styles.menuItem, { borderLeftColor: item.color }]}
-    onPress={onPress}
-    android_ripple={{ color: 'rgba(0,0,0,0.1)' }}
-  >
-    <Text style={styles.menuItemName}>{item.name}</Text>
-    <Text style={styles.menuItemPrice}>{item.price.toFixed(2)} €</Text>
-  </Pressable>
-));
-
-
-export default function TableScreen(): JSX.Element {
+export default function TableScreen() {
   const { id } = useLocalSearchParams();
   const tableId = parseInt(id as string, 10);
   const router = useRouter();
   const toast = useToast();
   const { refreshTables, getTableById, updateTableData } = useTableContext();
   const { restaurantInfo } = useSettings();
-
-  const saveTimerRef = useRef<NodeJS.Timeout | number | null>(null);
-  const { instanceId, isMounted, safeExecute, setSafeTimeout, addCleanup } =
-    useInstanceManager('TableScreen');
   const {
     isLoaded: menuLoaded,
     getAvailableItems,
     getCategories,
     getItem: getMenuItem,
-    getItemsByType,
-    getItemsByCategory,
   } = useMenu();
 
-  // ✅ États simplifiés
+  // États simplifiés
   const [table, setTable] = useState<Table | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [guestCount, setGuestCount] = useState<number>(1);
+  const [loading, setLoading] = useState(true);
+  const [guestCount, setGuestCount] = useState(1);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [activeType, setActiveType] = useState<'resto' | 'boisson' | null>(
     'resto'
   );
-  const [splitModalVisible, setSplitModalVisible] = useState<boolean>(false);
-  const [processing, setProcessing] = useState<boolean>(false);
+  const [splitModalVisible, setSplitModalVisible] = useState(false);
+  const [processing, setProcessing] = useState(false);
 
-  // ✅ Fonction pour générer le HTML du ticket de prévisualisation
+  // Chargement table simplifié
+  const loadTable = useCallback(async () => {
+    try {
+      let tableData = getTableById(tableId);
+      if (!tableData) {
+        const loadedTable = await getTable(tableId);
+        tableData = loadedTable || undefined;
+      }
+      if (tableData) {
+        setTable(tableData);
+        setGuestCount(tableData.guests || 1);
+      }
+    } catch (error) {
+      console.error('Error loading table:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [tableId, getTableById]);
+
+  useEffect(() => {
+    loadTable();
+  }, [loadTable]);
+
+  // Sauvegarde simplifiée avec debounce
+  const saveTable = useCallback(
+    async (updatedTable: Table) => {
+      try {
+        await updateTableData(tableId, updatedTable);
+      } catch (error) {
+        console.error('Save error:', error);
+        toast.showToast('Erreur lors de la sauvegarde', 'error');
+      }
+    },
+    [tableId, updateTableData, toast]
+  );
+
+  // Calcul du total simplifié
+  const calculateTotal = useCallback((items: OrderItem[]): number => {
+    return items.reduce((sum, item) => {
+      return item.offered ? sum : sum + item.price * item.quantity;
+    }, 0);
+  }, []);
+
+  // Ajouter un item
+  const addItemToOrder = useCallback(
+    (item: MenuItem) => {
+      if (!table) return;
+
+      const updatedTable = { ...table };
+
+      if (!updatedTable.order) {
+        updatedTable.order = {
+          id: Date.now(),
+          items: [],
+          guests: guestCount,
+          status: 'active',
+          timestamp: new Date().toISOString(),
+          total: 0,
+        };
+      }
+
+      const items = [...updatedTable.order.items];
+      const existingItemIndex = items.findIndex(
+        (orderItem) =>
+          orderItem.menuId === item.id && orderItem.name === item.name
+      );
+
+      if (existingItemIndex >= 0) {
+        items[existingItemIndex] = {
+          ...items[existingItemIndex],
+          quantity: items[existingItemIndex].quantity + 1,
+        };
+      } else {
+        items.push({
+          id: Date.now() + Math.random(),
+          menuId: item.id,
+          name: item.name,
+          price: item.price,
+          quantity: 1,
+          type: item.type,
+        });
+      }
+
+      updatedTable.order.items = items;
+      updatedTable.order.total = calculateTotal(items);
+
+      setTable(updatedTable);
+      saveTable(updatedTable);
+    },
+    [table, guestCount, calculateTotal, saveTable]
+  );
+
+  // Modifier quantité
+  const updateItemQuantity = useCallback(
+    (itemId: number, increment: boolean) => {
+      if (!table?.order) return;
+
+      const updatedTable = { ...table };
+      const newItems: OrderItem[] = [];
+
+      if (updatedTable.order && updatedTable.order.items) {
+        for (const item of updatedTable.order.items) {
+          if (item.id !== itemId) {
+            newItems.push(item);
+          } else {
+            const newQuantity = increment
+              ? item.quantity + 1
+              : Math.max(0, item.quantity - 1);
+            if (newQuantity > 0) {
+              newItems.push({ ...item, quantity: newQuantity });
+            }
+          }
+        }
+
+        updatedTable.order.items = newItems;
+        updatedTable.order.total = calculateTotal(newItems);
+
+        setTable(updatedTable);
+        saveTable(updatedTable);
+      }
+    },
+    [table, calculateTotal, saveTable]
+  );
+
+  // Toggle offert
+  const toggleItemOffered = useCallback(
+    (itemId: number) => {
+      if (!table?.order) return;
+
+      const updatedTable = { ...table };
+      if (!updatedTable.order) return;
+
+      const newItems = updatedTable.order.items.map((item) => {
+        return item.id !== itemId ? item : { ...item, offered: !item.offered };
+      });
+
+      updatedTable.order.items = newItems;
+      updatedTable.order.total = calculateTotal(newItems);
+
+      setTable(updatedTable);
+      saveTable(updatedTable);
+    },
+    [table, calculateTotal, saveTable]
+  );
+
+  // Modifier invités
+  const updateGuestCount = useCallback(
+    (newCount: number) => {
+      const validCount = Math.max(1, newCount);
+      setGuestCount(validCount);
+
+      if (table) {
+        const updatedTable = {
+          ...table,
+          guests: validCount,
+          order: table.order
+            ? { ...table.order, guests: validCount }
+            : undefined,
+        };
+        setTable(updatedTable);
+        saveTable(updatedTable);
+      }
+    },
+    [table, saveTable]
+  );
+
+  // Génération HTML ticket
   const generatePreviewTicketHTML = useCallback(
     (
       table: Table,
@@ -118,501 +259,77 @@ export default function TableScreen(): JSX.Element {
       offeredTotal: number
     ) => {
       const dateObj = new Date();
-      const dateFormatted = dateObj.toLocaleDateString('fr-FR', {
-        day: '2-digit',
-        month: '2-digit',
-        year: 'numeric',
-      });
+      const dateFormatted = dateObj.toLocaleDateString('fr-FR');
       const timeFormatted = dateObj.toLocaleTimeString('fr-FR', {
         hour: '2-digit',
         minute: '2-digit',
       });
 
-      let itemsHTML = '';
-      if (orderItems.length > 0) {
-        itemsHTML = `
-      <div class="items-section">
+      const itemsHTML =
+        orderItems.length > 0
+          ? `
         <table style="width: 100%; border-collapse: collapse; margin: 5mm 0;">
-          <tr>
-            <th style="text-align: left; padding: 2mm 0;">Qté</th>
-            <th style="text-align: left; padding: 2mm 0;">Article</th>
-            <th style="text-align: right; padding: 2mm 0;">Prix</th>
-          </tr>
+          <tr><th style="text-align: left;">Qté</th><th style="text-align: left;">Article</th><th style="text-align: right;">Prix</th></tr>
           ${orderItems
             .map(
               (item) => `
             <tr ${item.offered ? 'style="font-style: italic;"' : ''}>
-              <td style="padding: 1mm 0;">${item.quantity}x</td>
-              <td style="padding: 1mm 0;">${item.name}${
-                item.offered ? ' (Offert)' : ''
-              }</td>
-              <td style="text-align: right; padding: 1mm 0;">${(
+              <td>${item.quantity}x</td>
+              <td>${item.name}${item.offered ? ' (Offert)' : ''}</td>
+              <td style="text-align: right;">${(
                 item.price * item.quantity
               ).toFixed(2)}€</td>
             </tr>
           `
             )
             .join('')}
-        </table>
-      </div>
-    `;
-      }
+        </table>`
+          : '';
 
-      let offeredHTML = '';
-      if (offeredTotal > 0) {
-        offeredHTML = `
-      <div class="total-line" style="font-style: italic;">
-        <span>Articles offerts:</span>
-        <span>${offeredTotal.toFixed(2)}€</span>
-      </div>
-    `;
-      }
+      const offeredHTML =
+        offeredTotal > 0
+          ? `
+        <div style="font-style: italic;">Articles offerts: ${offeredTotal.toFixed(
+          2
+        )}€</div>`
+          : '';
 
       return `
-    <html>
-      <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <style>
-          @page { size: 80mm auto; margin: 0mm; }
-          body { 
-            font-family: 'Courier New', monospace; 
-            width: 80mm;
-            padding: 5mm;
-            margin: 0;
-            font-size: 14pt;
-          }
-          .header, .footer { 
-            text-align: center; 
-            margin-bottom: 5mm;
-          }
-          .header h1 {
-            font-size: 18pt;
-            margin: 0 0 2mm 0;
-          }
-          .header p, .footer p {
-            margin: 0 0 1mm 0;
-            font-size: 14pt;
-          }
-          .divider {
-            border-bottom: 1px dashed #000;
-            margin: 3mm 0;
-          }
-          .info {
-            margin-bottom: 3mm;
-          }
-          .info p {
-            margin: 0 0 1mm 0;
-          }
-          .totals {
-            margin: 2mm 0;
-          }
-          .total-line {
-            display: flex;
-            justify-content: space-between;
-            margin: 1mm 0;
-            font-size: 16pt;
-          }
-          .total-amount {
-            font-weight: bold;
-            font-size: 16pt;
-            text-align: right;
-            margin: 2mm 0;
-          }
-          .preview-info {
-            text-align: center;
-            margin: 3mm 0;
-            font-size: 14pt;
-          }
-          .preview-info p {
-            margin: 0 0 1mm 0;
-          }
-          th, td {
-            padding: 1mm 0;
-            font-size: 14pt;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <h1>${restaurantInfo.name}</h1>
-          <p>${restaurantInfo.address}</p>
-          <p>${restaurantInfo.phone}</p>
-        </div>
-        
-        <div class="info">
-          <p><strong>${table.name}</strong></p>
-          <p>Date: ${dateFormatted} ${timeFormatted}</p>
-          <p>Section: ${table.section}</p>
-          <p>Invités: ${guestCount}</p>
-        </div>
-
-        <div class="divider"></div>
-
-        ${itemsHTML}
-
-        <div class="totals">
-          <div class="total-line">
-            <span>Articles:</span>
-            <span>${orderItems.length}</span>
-          </div>
-          ${offeredHTML}
-          <div class="total-amount">
-            TOTAL: ${total.toFixed(2)}€
-          </div>
-        </div>
-
-        <div class="divider"></div>
-
-        <div class="preview-info">
-          <p><strong>TICKET DE PRÉVISUALISATION</strong></p>
-          <p>⚠️ Cette commande n'a pas été payée ⚠️</p>
-        </div>
-
-        <div class="divider"></div>
-
-        <div class="footer">
-          <p>${restaurantInfo.taxInfo}</p>
-          <p>Document de prévisualisation - ${restaurantInfo.owner}</p>
-        </div>
-      </body>
-    </html>
-  `;
+        <html>
+          <head><style>
+            @page { size: 80mm auto; margin: 0mm; }
+            body { font-family: 'Courier New', monospace; width: 80mm; padding: 5mm; margin: 0; font-size: 14pt; }
+            .header { text-align: center; margin-bottom: 5mm; }
+            .divider { border-bottom: 1px dashed #000; margin: 3mm 0; }
+            th, td { padding: 1mm 0; font-size: 14pt; }
+          </style></head>
+          <body>
+            <div class="header">
+              <h1>${restaurantInfo.name}</h1>
+              <p>${restaurantInfo.address}</p>
+              <p>${restaurantInfo.phone}</p>
+            </div>
+            <div><strong>${table.name}</strong></div>
+            <div>Date: ${dateFormatted} ${timeFormatted}</div>
+            <div>Section: ${table.section}</div>
+            <div>Invités: ${guestCount}</div>
+            <div class="divider"></div>
+            ${itemsHTML}
+            <div>Articles: ${orderItems.length}</div>
+            ${offeredHTML}
+            <div><strong>TOTAL: ${total.toFixed(2)}€</strong></div>
+            <div class="divider"></div>
+            <div style="text-align: center;"><strong>TICKET DE PRÉVISUALISATION</strong></div>
+            <div style="text-align: center;">⚠️ Cette commande n'a pas été payée ⚠️</div>
+          </body>
+        </html>
+      `;
     },
     [restaurantInfo, guestCount]
   );
 
-  // ✅ Fonction de calcul du total mémorisée
-  const calculateTotal = useCallback((items: OrderItem[]): number => {
-    return items.reduce((sum, item) => {
-      return item.offered ? sum : sum + item.price * item.quantity;
-    }, 0);
-  }, []);
-
-  // ✅ Charger la table
-  const loadTable = useCallback(async (): Promise<void> => {
-    if (!isMounted()) return;
-
-    try {
-      let tableData = getTableById(tableId);
-      if (!tableData) {
-        const loadedTable = await getTable(tableId);
-        tableData = loadedTable || undefined;
-      }
-
-      if (tableData && isMounted()) {
-        setTable(tableData);
-        setGuestCount(tableData.guests || 1);
-      }
-    } catch (error) {
-      console.error('Error loading table:', error);
-    } finally {
-      if (isMounted()) {
-        setLoading(false);
-      }
-    }
-  }, [tableId, getTableById, isMounted]);
-
-  const debouncedSave = useCallback(async () => {
-    console.log(`💾 [SAVE] Sauvegarde demandée pour table ${tableId}`);
-
-    // Annuler le timer précédent s'il existe
-    if (saveTimerRef.current) {
-      clearTimeout(saveTimerRef.current);
-      saveTimerRef.current = null;
-      console.log(`💾 [SAVE] Timer précédent annulé`);
-    }
-
-    // Créer un nouveau timer
-    saveTimerRef.current = setTimeout(async () => {
-      if (!isMounted()) {
-        console.log(`💾 [SAVE] Sauvegarde annulée - composant démonté`);
-        return;
-      }
-
-      try {
-        console.log(`💾 [SAVE] Exécution sauvegarde table ${tableId}`);
-        const currentTable = getTableById(tableId);
-        if (currentTable) {
-          await updateTableData(tableId, currentTable);
-          console.log(`💾 [SAVE] Sauvegarde réussie table ${tableId}`);
-        }
-      } catch (error) {
-        console.error('💾 [SAVE] Erreur sauvegarde:', error);
-        if (isMounted()) {
-          loadTable();
-          toast.showToast('Erreur lors de la sauvegarde', 'error');
-        }
-      } finally {
-        saveTimerRef.current = null;
-      }
-    }, 300); // ✅ Réduit de 500ms à 300ms pour plus de réactivité
-
-    console.log(`💾 [SAVE] Nouveau timer créé (300ms)`);
-  }, [tableId, updateTableData, getTableById, loadTable, toast, isMounted]);
-
-  useEffect(() => {
-    addCleanup(() => {
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = null;
-        console.log(`💾 [SAVE] Timer nettoyé au démontage`);
-      }
-    });
-  }, [addCleanup]);
-
-  // ✅ Chargement initial et focus
-  useEffect(() => {
-    loadTable();
-  }, [loadTable]);
-
-  useEffect(() => {
-    loadTable();
-  }, [tableId]);
-
-  // ✅ Modifier la gestion du bouton retour pour être plus brutal
-  useEffect(() => {
-    console.log(`📱 [MEMORY] BackHandler ajouté pour table ${tableId}`);
-
-    const backHandler = BackHandler.addEventListener(
-      'hardwareBackPress',
-      () => {
-        console.log(`📱 [MEMORY] BackHandler déclenché pour table ${tableId}`);
-        router.back();
-        return true;
-      }
-    );
-
-    return () => {
-      console.log(`📱 [MEMORY] BackHandler supprimé pour table ${tableId}`);
-      backHandler.remove();
-    };
-  }, [router, tableId]);
-
-  // ✅ Handler pour ajouter un item (avec debounce)
-  const addItemToOrder = useCallback(
-    (item: MenuItem): void => {
-      if (!table || !isMounted()) return;
-
-      console.log(`➕ [ITEM] Ajout item: ${item.name}`);
-
-      safeExecute(() => {
-        setTable((prevTable) => {
-          if (!prevTable) return prevTable;
-
-          const updatedTable = { ...prevTable };
-
-          if (!updatedTable.order) {
-            updatedTable.order = {
-              id: Date.now(),
-              items: [],
-              guests: guestCount,
-              status: 'active',
-              timestamp: new Date().toISOString(),
-              total: 0,
-            };
-          }
-
-          const items = [...updatedTable.order.items];
-          const existingItemIndex = items.findIndex(
-            (orderItem) =>
-              orderItem.menuId === item.id &&
-              orderItem.name === item.name &&
-              orderItem.price === item.price
-          );
-
-          if (existingItemIndex >= 0) {
-            items[existingItemIndex] = {
-              ...items[existingItemIndex],
-              quantity: items[existingItemIndex].quantity + 1,
-            };
-          } else {
-            items.push({
-              id: Date.now() + Math.random(),
-              menuId: item.id,
-              name: item.name,
-              price: item.price,
-              quantity: 1,
-              type: item.type,
-            });
-          }
-
-          updatedTable.order.items = items;
-          updatedTable.order.total = calculateTotal(items);
-
-          return updatedTable;
-        });
-      });
-
-      // ✅ UTILISEZ la fonction debounced au lieu de setSafeTimeout
-      debouncedSave();
-    },
-    [table, guestCount, calculateTotal, isMounted, safeExecute, debouncedSave]
-  );
-
-  // ✅ Items de menu filtrés (utilise le nouveau système)
-  const filteredMenuItems = useMemo((): MenuItem[] => {
-    if (!menuLoaded) {
-      return [];
-    }
-
-    let filtered = getAvailableItems();
-
-    if (activeType) {
-      filtered = filtered.filter((item) => item.type === activeType);
-    }
-
-    if (activeCategory) {
-      filtered = filtered.filter((item) => item.category === activeCategory);
-    }
-
-    return filtered;
-  }, [menuLoaded, activeType, activeCategory, getAvailableItems]);
-
-  // ✅ Catégories (utilise le nouveau système)
-  const categories = useMemo((): string[] => {
-    if (!menuLoaded) {
-      return [];
-    }
-
-    return getCategories(activeType || undefined);
-  }, [menuLoaded, activeType, getCategories]);
-
-  // ✅ Items de commande catégorisés
-  const categorizedOrderItems = useMemo(() => {
-    if (!table?.order?.items) return { plats: [], boissons: [] };
-
-    const result = { plats: [] as OrderItem[], boissons: [] as OrderItem[] };
-
-    table.order.items.forEach((item) => {
-      // ✅ Utiliser le type stocké dans l'item ou fallback sur menu
-      const itemType =
-        item.type || getMenuItem(item.menuId || item.id)?.type || 'resto';
-      result[itemType === 'boisson' ? 'boissons' : 'plats'].push(item);
-    });
-
-    return result;
-  }, [table?.order?.items, getMenuItem]);
-
-  // ✅ Autres handlers (simplifiés mais fonctionnels)
-  const updateItemQuantity = useCallback(
-    (itemId: number, increment: boolean): void => {
-      if (!table?.order || !isMounted()) return;
-
-      console.log(
-        `🔢 [QUANTITY] Modification quantité item ${itemId}: ${
-          increment ? '+1' : '-1'
-        }`
-      );
-
-      safeExecute(() => {
-        setTable((prevTable) => {
-          if (!prevTable?.order) return prevTable;
-
-          const updatedTable = { ...prevTable };
-          const newItems: OrderItem[] = [];
-
-          for (const item of updatedTable.order!.items) {
-            if (item.id !== itemId) {
-              newItems.push(item);
-            } else {
-              const newQuantity = increment
-                ? item.quantity + 1
-                : Math.max(0, item.quantity - 1);
-              if (newQuantity > 0) {
-                newItems.push({ ...item, quantity: newQuantity });
-              }
-            }
-          }
-
-          updatedTable.order!.items = newItems;
-          updatedTable.order!.total = calculateTotal(newItems);
-
-          return updatedTable;
-        });
-      });
-
-      // ✅ UTILISEZ la fonction debounced
-      debouncedSave();
-    },
-    [table?.order, calculateTotal, isMounted, safeExecute, debouncedSave]
-  );
-
-  const toggleItemOffered = useCallback(
-    (itemId: number): void => {
-      if (!table?.order || !isMounted()) return;
-
-      console.log(`🎁 [OFFERED] Toggle offert item ${itemId}`);
-
-      safeExecute(() => {
-        setTable((prevTable) => {
-          if (!prevTable?.order) return prevTable;
-
-          const updatedTable = { ...prevTable };
-          const newItems = updatedTable.order!.items.map((item) => {
-            return item.id !== itemId
-              ? item
-              : { ...item, offered: !item.offered };
-          });
-
-          updatedTable.order!.items = newItems;
-          updatedTable.order!.total = calculateTotal(newItems);
-
-          return updatedTable;
-        });
-      });
-
-      // ✅ UTILISEZ la fonction debounced
-      debouncedSave();
-    },
-    [table?.order, calculateTotal, isMounted, safeExecute, debouncedSave]
-  );
-
-  const updateGuestCount = useCallback(
-    (newCount: number): void => {
-      if (!table) return;
-
-      const validCount = Math.max(1, newCount);
-      console.log(`👥 [GUESTS] Modification nombre invités: ${validCount}`);
-
-      setGuestCount(validCount);
-
-      setTable((prevTable) => {
-        if (!prevTable) return prevTable;
-        return {
-          ...prevTable,
-          guests: validCount,
-          order: prevTable.order
-            ? { ...prevTable.order, guests: validCount }
-            : undefined,
-        };
-      });
-
-      // ✅ UTILISEZ la fonction debounced avec délai plus long pour les invités
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = null;
-      }
-
-      saveTimerRef.current = setTimeout(async () => {
-        if (!isMounted()) return;
-        try {
-          const currentTable = getTableById(tableId);
-          if (currentTable) {
-            await updateTableData(tableId, currentTable);
-            console.log(`👥 [GUESTS] Sauvegarde invités réussie`);
-          }
-        } catch (error) {
-          console.error('👥 [GUESTS] Erreur sauvegarde invités:', error);
-        } finally {
-          saveTimerRef.current = null;
-        }
-      }, 1000); // Plus long pour les invités car moins fréquent
-    },
-    [table, tableId, updateTableData, getTableById, isMounted]
-  );
-
-  // ✅ Handlers d'actions
-  const handleClearOrder = useCallback((): void => {
+  // Actions simplifiées
+  const handleClearOrder = useCallback(() => {
     if (!table?.order || table.order.items.length === 0) return;
 
     Alert.alert(
@@ -624,41 +341,27 @@ export default function TableScreen(): JSX.Element {
           text: 'Supprimer',
           style: 'destructive',
           onPress: async () => {
-            try {
-              // Créer directement la table mise à jour avec tous les champs requis
-              const clearedTable = {
-                ...table,
-                order: {
-                  id: table.order?.id ?? Date.now(),
-                  items: [],
-                  guests: table.order?.guests ?? 1,
-                  status: table.order?.status ?? 'active',
-                  timestamp: table.order?.timestamp ?? new Date().toISOString(),
-                  total: 0,
-                },
-              };
-
-              // Mettre à jour l'état local
-              safeExecute(() => {
-                setTable(clearedTable);
-              });
-
-              // Sauvegarder immédiatement la nouvelle version
-              await updateTableData(tableId, clearedTable);
-              toast.showToast('Commande supprimée', 'success');
-            } catch (error) {
-              console.error('Error clearing order:', error);
-              // En cas d'erreur, recharger depuis le stockage
-              loadTable();
-              toast.showToast('Impossible de supprimer la commande', 'error');
-            }
+            const clearedTable = {
+              ...table,
+              order: {
+                id: table.order?.id ?? Date.now(),
+                items: [],
+                guests: table.order?.guests ?? 1,
+                status: table.order?.status ?? 'active',
+                timestamp: table.order?.timestamp ?? new Date().toISOString(),
+                total: 0,
+              },
+            };
+            setTable(clearedTable);
+            await saveTable(clearedTable);
+            toast.showToast('Commande supprimée', 'success');
           },
         },
       ]
     );
-  }, [table, tableId, updateTableData, loadTable, toast, safeExecute]);
+  }, [table, saveTable, toast]);
 
-  const handleCloseTable = useCallback((): void => {
+  const handleCloseTable = useCallback(() => {
     if (!table) return;
 
     Alert.alert(
@@ -670,17 +373,12 @@ export default function TableScreen(): JSX.Element {
           text: 'Fermer',
           style: 'destructive',
           onPress: async () => {
-            try {
-              await resetTable(tableId);
-              setTable(null);
-              setGuestCount(1);
-              refreshTables();
-              router.replace('/');
-              toast.showToast(`Table ${table.name} fermée`, 'success');
-            } catch (error) {
-              console.error('Error closing table:', error);
-              toast.showToast('Erreur lors de la fermeture', 'error');
-            }
+            await resetTable(tableId);
+            setTable(null);
+            setGuestCount(1);
+            refreshTables();
+            router.replace('/');
+            toast.showToast(`Table ${table.name} fermée`, 'success');
           },
         },
       ]
@@ -688,13 +386,8 @@ export default function TableScreen(): JSX.Element {
   }, [table, tableId, refreshTables, router, toast]);
 
   const handlePayment = useCallback(
-    (type: 'full' | 'split' | 'custom' | 'items'): void => {
-      console.log(`💳 [MEMORY] Début paiement ${type} pour table ${tableId}`);
-
-      if (!table?.order) {
-        console.log(`💳 [MEMORY] Pas de commande pour table ${tableId}`);
-        return;
-      }
+    (type: 'full' | 'split' | 'custom' | 'items') => {
+      if (!table?.order) return;
 
       const total = table.order.total;
       if (total <= 0) {
@@ -704,10 +397,8 @@ export default function TableScreen(): JSX.Element {
 
       const serializedItems = JSON.stringify(table.order.items);
 
-      // ✅ Utiliser push au lieu de replace pour éviter l'accumulation de history
       switch (type) {
         case 'full':
-          console.log(`💳 [MEMORY] Navigation vers payment/full`);
           router.push({
             pathname: '/payment/full',
             params: {
@@ -748,11 +439,8 @@ export default function TableScreen(): JSX.Element {
     [table?.order, guestCount, tableId, router, toast]
   );
 
-  // ✅ Handler pour générer le ticket de prévisualisation
   const handlePreviewNote = useCallback(async () => {
-    if (!table || !isMounted()) return;
-
-    if (!table.order || table.order.items.length === 0) {
+    if (!table || !table.order || table.order.items.length === 0) {
       toast.showToast('Aucun article à prévisualiser', 'warning');
       return;
     }
@@ -771,35 +459,49 @@ export default function TableScreen(): JSX.Element {
         total,
         offeredTotal
       );
-
-      await Print.printAsync({
-        html: ticketHTML,
-      });
-
-      if (isMounted()) {
-        toast.showToast('Ticket de prévisualisation généré', 'success');
-      }
+      await Print.printAsync({ html: ticketHTML });
+      toast.showToast('Ticket de prévisualisation généré', 'success');
     } catch (error) {
-      console.error('Erreur lors de la génération du ticket:', error);
-      if (isMounted()) {
-        toast.showToast('Impossible de générer le ticket', 'error');
-      }
+      toast.showToast('Impossible de générer le ticket', 'error');
     } finally {
-      if (isMounted()) {
-        setProcessing(false);
-      }
+      setProcessing(false);
     }
-  }, [table, generatePreviewTicketHTML, toast, isMounted]);
+  }, [table, generatePreviewTicketHTML, toast]);
 
-  // ✅ Calculs dérivés
-  const offeredTotal = useMemo((): number => {
+  // Données dérivées
+  const filteredMenuItems = useMemo(() => {
+    if (!menuLoaded) return [];
+    let filtered = getAvailableItems();
+    if (activeType)
+      filtered = filtered.filter((item) => item.type === activeType);
+    if (activeCategory)
+      filtered = filtered.filter((item) => item.category === activeCategory);
+    return filtered;
+  }, [menuLoaded, activeType, activeCategory, getAvailableItems]);
+
+  const categories = useMemo(() => {
+    return menuLoaded ? getCategories(activeType || undefined) : [];
+  }, [menuLoaded, activeType, getCategories]);
+
+  const categorizedOrderItems = useMemo(() => {
+    if (!table?.order?.items) return { plats: [], boissons: [] };
+    const result = { plats: [] as OrderItem[], boissons: [] as OrderItem[] };
+    table.order.items.forEach((item) => {
+      const itemType =
+        item.type || getMenuItem(item.menuId || item.id)?.type || 'resto';
+      result[itemType === 'boisson' ? 'boissons' : 'plats'].push(item);
+    });
+    return result;
+  }, [table?.order?.items, getMenuItem]);
+
+  const offeredTotal = useMemo(() => {
     if (!table?.order?.items) return 0;
     return table.order.items.reduce((sum, item) => {
       return item.offered ? sum + item.price * item.quantity : sum;
     }, 0);
   }, [table?.order?.items]);
 
-  // ✅ Affichage conditionnel pour le chargement
+  // Rendu conditionnel
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -813,20 +515,13 @@ export default function TableScreen(): JSX.Element {
     return (
       <View style={styles.loadingContainer}>
         <Text>Table introuvable</Text>
-        <Pressable
-          style={({ pressed }) => [
-            styles.backButton,
-            pressed && styles.backButtonPressed,
-          ]}
-          onPress={() => router.back()}
-        >
+        <Pressable style={styles.backButton} onPress={() => router.back()}>
           <Text style={styles.backButtonText}>Retour</Text>
         </Pressable>
       </View>
     );
   }
 
-  // ✅ Affichage si menu pas encore chargé
   if (!menuLoaded) {
     return (
       <View style={styles.container}>
@@ -837,9 +532,7 @@ export default function TableScreen(): JSX.Element {
           >
             <ArrowLeft size={28} color="#333" />
           </Pressable>
-          <View style={styles.headerTitleContainer}>
-            <Text style={styles.title}>{table.name}</Text>
-          </View>
+          <Text style={styles.title}>{table.name}</Text>
         </View>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#007AFF" />
@@ -854,25 +547,17 @@ export default function TableScreen(): JSX.Element {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
+      {/* Header simplifié */}
       <View style={styles.header}>
-        <Pressable
-          onPress={() => router.replace('/')}
-          style={({ pressed }) => [
-            styles.backLink,
-            pressed && { backgroundColor: '#d0d0d0' },
-          ]}
-        >
+        <Pressable onPress={() => router.replace('/')} style={styles.backLink}>
           <ArrowLeft size={28} color="#333" />
         </Pressable>
-
         <View style={styles.headerTitleContainer}>
           <Text style={styles.title}>{table.name}</Text>
           <View style={styles.sectionBadge}>
             <Text style={styles.sectionText}>{table.section}</Text>
           </View>
         </View>
-
         <View style={styles.guestCounter}>
           <Users size={24} color="#666" />
           <Pressable onPress={() => updateGuestCount(guestCount - 1)}>
@@ -883,25 +568,17 @@ export default function TableScreen(): JSX.Element {
             <Plus size={24} color="#666" />
           </Pressable>
         </View>
-
-        {/* ✅ NOUVEAU BOUTON NOTE DE PRÉVISUALISATION */}
         <Pressable
-          style={[
-            styles.paymentButton,
-            { backgroundColor: '#673AB7', marginRight: 8 },
-          ]}
+          style={[styles.paymentButton, { backgroundColor: '#673AB7' }]}
           onPress={handlePreviewNote}
         >
           <FileText size={24} color="white" />
           <Text style={styles.paymentButtonText}>Note</Text>
         </Pressable>
-
         <Pressable
           style={[
             styles.paymentButton,
-            {
-              backgroundColor: orderItems.length > 0 ? '#FF6600' : '#BDBDBD',
-            },
+            { backgroundColor: orderItems.length > 0 ? '#FF6600' : '#BDBDBD' },
           ]}
           onPress={handleClearOrder}
           disabled={orderItems.length === 0}
@@ -909,12 +586,8 @@ export default function TableScreen(): JSX.Element {
           <ShoppingCart size={24} color="white" />
           <Text style={styles.paymentButtonText}>Vider</Text>
         </Pressable>
-
         <Pressable
-          style={[
-            styles.paymentButton,
-            { backgroundColor: '#F44336', marginLeft: 8 },
-          ]}
+          style={[styles.paymentButton, { backgroundColor: '#F44336' }]}
           onPress={handleCloseTable}
         >
           <X size={24} color="white" />
@@ -926,13 +599,13 @@ export default function TableScreen(): JSX.Element {
         {/* Section commande */}
         <View style={styles.orderSection}>
           <Text style={styles.sectionTitle}>Commande actuelle</Text>
-
           {orderItems.length === 0 ? (
             <Text style={styles.emptyOrder}>
-              Aucun article dans la commande. Ajoutez-en depuis le menu.
+              Aucun article dans la commande.
             </Text>
           ) : (
             <View style={styles.orderColumns}>
+              {/* Colonne Plats */}
               <View style={styles.orderColumn}>
                 <Text style={styles.columnTitle}>Plats</Text>
                 <ScrollView style={styles.orderColumnScroll}>
@@ -965,7 +638,6 @@ export default function TableScreen(): JSX.Element {
                           {(item.price * item.quantity).toFixed(2)} €
                         </Text>
                       </View>
-
                       <View style={styles.itemActions}>
                         <View style={styles.quantityControl}>
                           <Pressable
@@ -982,7 +654,6 @@ export default function TableScreen(): JSX.Element {
                             <Plus size={16} color="#666" />
                           </Pressable>
                         </View>
-
                         <Pressable
                           style={styles.offerButton}
                           onPress={() => toggleItemOffered(item.id)}
@@ -997,6 +668,7 @@ export default function TableScreen(): JSX.Element {
                 </ScrollView>
               </View>
 
+              {/* Colonne Boissons */}
               <View style={styles.orderColumn}>
                 <Text style={styles.columnTitle}>Boissons</Text>
                 <ScrollView style={styles.orderColumnScroll}>
@@ -1029,7 +701,6 @@ export default function TableScreen(): JSX.Element {
                           {(item.price * item.quantity).toFixed(2)} €
                         </Text>
                       </View>
-
                       <View style={styles.itemActions}>
                         <View style={styles.quantityControl}>
                           <Pressable
@@ -1046,7 +717,6 @@ export default function TableScreen(): JSX.Element {
                             <Plus size={16} color="#666" />
                           </Pressable>
                         </View>
-
                         <Pressable
                           style={styles.offerButton}
                           onPress={() => toggleItemOffered(item.id)}
@@ -1127,10 +797,8 @@ export default function TableScreen(): JSX.Element {
                   activeType === 'resto' && styles.activeTypeButton,
                 ]}
                 onPress={() => {
-                  startTransition(() => {
-                    setActiveType('resto');
-                    setActiveCategory(null);
-                  });
+                  setActiveType('resto');
+                  setActiveCategory(null);
                 }}
               >
                 <Text
@@ -1148,10 +816,8 @@ export default function TableScreen(): JSX.Element {
                   activeType === 'boisson' && styles.activeTypeButton,
                 ]}
                 onPress={() => {
-                  startTransition(() => {
-                    setActiveType('boisson');
-                    setActiveCategory(null);
-                  });
+                  setActiveType('boisson');
+                  setActiveCategory(null);
                 }}
               >
                 <Text
@@ -1169,10 +835,8 @@ export default function TableScreen(): JSX.Element {
                   activeType === null && styles.activeTypeButton,
                 ]}
                 onPress={() => {
-                  startTransition(() => {
-                    setActiveType(null);
-                    setActiveCategory(null);
-                  });
+                  setActiveType(null);
+                  setActiveCategory(null);
                 }}
               >
                 <Text
@@ -1197,11 +861,7 @@ export default function TableScreen(): JSX.Element {
                 styles.categoryTab,
                 activeCategory === null && styles.activeCategoryTab,
               ]}
-              onPress={() => {
-                startTransition(() => {
-                  setActiveCategory(null);
-                });
-              }}
+              onPress={() => setActiveCategory(null)}
             >
               <Text
                 style={[
@@ -1219,11 +879,7 @@ export default function TableScreen(): JSX.Element {
                   styles.categoryTab,
                   activeCategory === category && styles.activeCategoryTab,
                 ]}
-                onPress={() => {
-                  startTransition(() => {
-                    setActiveCategory(category);
-                  });
-                }}
+                onPress={() => setActiveCategory(category)}
               >
                 <Text
                   style={[
@@ -1273,7 +929,6 @@ export default function TableScreen(): JSX.Element {
         onClose={() => setSplitModalVisible(false)}
         onConfirm={(partsCount: number) => {
           if (!table?.order) return;
-
           router.push({
             pathname: '/payment/split',
             params: {
@@ -1298,7 +953,7 @@ export default function TableScreen(): JSX.Element {
   );
 }
 
-// ✅ Styles mis à jour avec les nouveaux composants
+// Styles simplifiés (identiques à l'original)
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   loadingContainer: {
@@ -1314,11 +969,6 @@ const styles = StyleSheet.create({
     padding: 10,
     backgroundColor: '#2196F3',
     borderRadius: 8,
-  },
-  backButtonPressed: {
-    backgroundColor: 'red',
-    transform: [{ scale: 0.98 }],
-    opacity: 0.8,
   },
   backButtonText: { color: 'white', fontWeight: '600' },
   header: {
@@ -1543,6 +1193,7 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 8,
     marginBottom: 6,
+    marginHorizontal: 4,
   },
   paymentButtonText: {
     color: 'white',
@@ -1590,8 +1241,6 @@ const styles = StyleSheet.create({
   },
   menuItemName: { fontSize: 11, fontWeight: '500', marginBottom: 2 },
   menuItemPrice: { fontSize: 11, fontWeight: '600', color: '#4CAF50' },
-
-  // ✅ STYLES POUR L'OVERLAY DE PROCESSING
   processingOverlay: {
     position: 'absolute',
     top: 0,
@@ -1603,9 +1252,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     zIndex: 1000,
   },
-  processingText: {
-    color: 'white',
-    marginTop: 12,
-    fontSize: 16,
-  },
+  processingText: { color: 'white', marginTop: 12, fontSize: 16 },
 });

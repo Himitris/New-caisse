@@ -1,4 +1,4 @@
-// app/(tabs)/bills.tsx - VERSION OPTIMISÉE
+// app/(tabs)/bills.tsx - VERSION SIMPLIFIÉE AVEC GUESTS
 
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Print from 'expo-print';
@@ -42,9 +42,7 @@ import {
 } from '../../utils/storage';
 import { useToast } from '../../utils/ToastContext';
 import { useSettings } from '@/utils/useSettings';
-import { useInstanceManager } from '../../utils/useInstanceManager'; // ✅ Import du gestionnaire
 
-// ✅ Constantes optimisées
 const STATUS_COLORS = {
   pending: '#FFC107',
   paid: '#4CAF50',
@@ -60,9 +58,8 @@ const PAYMENT_METHOD_LABELS = {
 } as const;
 
 const ITEM_HEIGHT = 80;
-const MAX_BILLS_DISPLAY = 200; // ✅ Augmenté pour plus de données
+const MAX_BILLS_DISPLAY = 200;
 
-// ✅ Fonction utilitaire simple
 const getBillStatusColor = (bill: Bill) => {
   if (bill.status === 'split' && bill.paymentType === 'custom') {
     return STATUS_COLORS.custom;
@@ -70,7 +67,7 @@ const getBillStatusColor = (bill: Bill) => {
   return STATUS_COLORS[bill.status] || STATUS_COLORS.default;
 };
 
-// ✅ Modal simplifié et mémoïzé
+// Modal de visualisation simplifiée
 interface ViewReceiptModalProps {
   visible: boolean;
   bill: Bill | null;
@@ -161,11 +158,14 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
                 <Text style={styles.billDate}>
                   {new Date(bill.timestamp).toLocaleString()}
                 </Text>
-                {bill.section && (
+                {bill.section ? (
                   <Text style={styles.billSection}>
                     Section: {bill.section}
                   </Text>
-                )}
+                ) : null}
+                {typeof bill.guests === 'number' && bill.guests > 0 ? (
+                  <Text style={styles.billGuests}>Couverts: {bill.guests}</Text>
+                ) : null}
               </View>
 
               <View style={styles.receiptDivider} />
@@ -202,85 +202,49 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
                 </View>
               )}
 
-              {(() => {
-                const originalAmount = calculateOriginalAmount(bill);
-                const isCustomSplit =
-                  bill.paymentType === 'custom' &&
-                  bill.status === 'split' &&
-                  originalAmount > bill.amount;
-                const totalAmount = isCustomSplit
-                  ? originalAmount
-                  : bill.amount;
-                const paidAmount = bill.amount;
+              <View style={styles.billSummary}>
+                <View style={styles.billRow}>
+                  <Text style={styles.billLabel}>Articles:</Text>
+                  <Text style={styles.billValue}>
+                    {hasDetailedItems
+                      ? bill.paidItems?.length ?? 0
+                      : bill.items}
+                  </Text>
+                </View>
 
-                return (
-                  <View style={styles.billSummary}>
-                    <View style={styles.billRow}>
-                      <Text style={styles.billLabel}>Articles:</Text>
-                      <Text style={styles.billValue}>
-                        {hasDetailedItems
-                          ? bill.paidItems?.length ?? 0
-                          : bill.items}
-                      </Text>
-                    </View>
-
-                    {bill.offeredAmount && bill.offeredAmount > 0 && (
-                      <View style={styles.billRow}>
-                        <Text style={styles.billOfferedLabel}>
-                          Articles offerts:
-                        </Text>
-                        <Text style={styles.billOfferedValue}>
-                          {bill.offeredAmount.toFixed(2)} €
-                        </Text>
-                      </View>
-                    )}
-
-                    {isCustomSplit ? (
-                      <>
-                        <View style={styles.billRow}>
-                          <Text style={styles.billLabel}>Total addition:</Text>
-                          <Text style={styles.billAmount}>
-                            {totalAmount.toFixed(2)} €
-                          </Text>
-                        </View>
-                        <View style={[styles.billRow, styles.paidAmountRow]}>
-                          <Text style={styles.billPaidLabel}>
-                            Montant payé:
-                          </Text>
-                          <Text style={styles.billPaidAmount}>
-                            {paidAmount.toFixed(2)} €
-                          </Text>
-                        </View>
-                        <View style={styles.splitNotice}>
-                          <Text style={styles.splitNoticeText}>
-                            (Paiement partiel - Addition partagée)
-                          </Text>
-                        </View>
-                      </>
-                    ) : (
-                      <View style={styles.billRow}>
-                        <Text style={styles.billLabel}>Montant:</Text>
-                        <Text style={styles.billAmount}>
-                          {totalAmount.toFixed(2)} €
-                        </Text>
-                      </View>
-                    )}
-
-                    <View style={styles.billRow}>
-                      <Text style={styles.billLabel}>Statut:</Text>
-                      <Text style={[styles.billStatus, { color: statusColor }]}>
-                        {bill.status}
-                      </Text>
-                    </View>
-                    {paymentLabel && (
-                      <View style={styles.billRow}>
-                        <Text style={styles.billLabel}>Paiement:</Text>
-                        <Text style={styles.billValue}>{paymentLabel}</Text>
-                      </View>
-                    )}
+                {typeof bill.offeredAmount === 'number' &&
+                bill.offeredAmount > 0 ? (
+                  <View style={styles.billRow}>
+                    <Text style={styles.billOfferedLabel}>
+                      Articles offerts:
+                    </Text>
+                    <Text style={styles.billOfferedValue}>
+                      {bill.offeredAmount.toFixed(2)} €
+                    </Text>
                   </View>
-                );
-              })()}
+                ) : null}
+
+                <View style={styles.billRow}>
+                  <Text style={styles.billLabel}>Montant:</Text>
+                  <Text style={styles.billAmount}>
+                    {(bill.amount || 0).toFixed(2)} €
+                  </Text>
+                </View>
+
+                <View style={styles.billRow}>
+                  <Text style={styles.billLabel}>Statut:</Text>
+                  <Text style={[styles.billStatus, { color: statusColor }]}>
+                    {bill.status}
+                  </Text>
+                </View>
+
+                {paymentLabel && (
+                  <View style={styles.billRow}>
+                    <Text style={styles.billLabel}>Paiement:</Text>
+                    <Text style={styles.billValue}>{paymentLabel}</Text>
+                  </View>
+                )}
+              </View>
 
               <View style={styles.receiptDivider} />
               <Text style={styles.receiptFooter}>Merci de votre visite!</Text>
@@ -313,20 +277,19 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
   }
 );
 
-// ✅ FilterBar simplifié
+// Barre de filtres simplifiée
 interface FilterBarProps {
   onSearch: (text: string) => void;
   onDateChange: (date: Date | null) => void;
   sortOrder: 'desc' | 'asc' | 'none';
   onSortChange: (order: 'desc' | 'asc' | 'none') => void;
   onDeleteAll: () => void;
-  onFilter: () => void;
+  onDeleteFiltered: () => void;
   searchText: string;
   selectedDate: Date | null;
   onPaymentMethodChange: (method: Bill['paymentMethod'] | null) => void;
   selectedPaymentMethod: Bill['paymentMethod'] | null;
   onResetFilters: () => void;
-  onDeleteFiltered: () => void;
 }
 
 const FilterBar = memo<FilterBarProps>(
@@ -348,13 +311,6 @@ const FilterBar = memo<FilterBarProps>(
     const [tempDate, setTempDate] = useState(selectedDate || new Date());
     const { paymentMethods } = useSettings();
 
-    const handleSearch = useCallback(
-      (text: string) => {
-        onSearch(text);
-      },
-      [onSearch]
-    );
-
     const getPaymentMethodLabel = useCallback(
       (methodId: string) => {
         const method = paymentMethods.find((m) => m.id === methodId);
@@ -373,10 +329,6 @@ const FilterBar = memo<FilterBarProps>(
       },
       [onDateChange]
     );
-
-    const handleClearDate = useCallback(() => {
-      onDateChange(null);
-    }, [onDateChange]);
 
     const handleSortToggle = useCallback(() => {
       let newSortOrder: 'none' | 'desc' | 'asc';
@@ -424,16 +376,20 @@ const FilterBar = memo<FilterBarProps>(
             style={styles.searchInput}
             placeholder="Rechercher par table ou montant..."
             value={searchText}
-            onChangeText={handleSearch}
+            onChangeText={onSearch}
           />
           {searchText ? (
-            <Pressable onPress={() => handleSearch('')}>
+            <Pressable onPress={() => onSearch('')}>
               <X size={20} color="#666" />
             </Pressable>
           ) : null}
         </View>
 
-        <View style={styles.filterActions}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.filterActions}
+        >
           <Pressable
             style={styles.filterButton}
             onPress={() => setShowDatePicker(true)}
@@ -441,7 +397,10 @@ const FilterBar = memo<FilterBarProps>(
             <Calendar size={20} color="#2196F3" />
             <Text style={styles.filterButtonText}>{dateLabel}</Text>
             {selectedDate && (
-              <Pressable onPress={handleClearDate} style={styles.clearButton}>
+              <Pressable
+                onPress={() => onDateChange(null)}
+                style={styles.clearButton}
+              >
                 <X size={16} color="#F44336" />
               </Pressable>
             )}
@@ -525,7 +484,7 @@ const FilterBar = memo<FilterBarProps>(
               Réinitialiser
             </Text>
           </Pressable>
-        </View>
+        </ScrollView>
 
         {showDatePicker && (
           <DateTimePicker
@@ -540,7 +499,7 @@ const FilterBar = memo<FilterBarProps>(
   }
 );
 
-// ✅ BillListItem ultra-optimisé
+// Item de facture simplifié
 interface BillListItemProps {
   bill: Bill;
   isSelected: boolean;
@@ -584,24 +543,11 @@ const BillListItem = memo<BillListItemProps>(
         <Text style={styles.billItemDate}>{formattedDate}</Text>
       </Pressable>
     );
-  },
-  (prevProps, nextProps) => {
-    return (
-      prevProps.bill.id === nextProps.bill.id &&
-      prevProps.isSelected === nextProps.isSelected &&
-      prevProps.bill.amount === nextProps.bill.amount &&
-      prevProps.bill.status === nextProps.bill.status
-    );
   }
 );
 
-// ✅ COMPOSANT PRINCIPAL OPTIMISÉ avec useInstanceManager
+// Composant principal simplifié
 export default function BillsScreen() {
-  // ✅ Hook de gestion d'instance
-  const { isMounted, setSafeTimeout, safeExecute, addCleanup } =
-    useInstanceManager('BillsScreen');
-
-  // ✅ États essentiels
   const [bills, setBills] = useState<Bill[]>([]);
   const [filteredBills, setFilteredBills] = useState<Bill[]>([]);
   const [loading, setLoading] = useState(true);
@@ -618,10 +564,8 @@ export default function BillsScreen() {
   const { restaurantInfo, paymentMethods } = useSettings();
   const toast = useToast();
 
-  // ✅ Charger les factures avec protection
+  // Chargement des factures
   const loadBills = useCallback(async () => {
-    if (!isMounted()) return;
-
     setLoading(true);
     try {
       if (searchText || dateFilter || paymentMethodFilter) {
@@ -637,37 +581,24 @@ export default function BillsScreen() {
         };
 
         const filtered = await getFilteredBills(filters);
-
-        if (isMounted()) {
-          setFilteredBills(filtered.slice(0, MAX_BILLS_DISPLAY));
-        }
+        setFilteredBills(filtered.slice(0, MAX_BILLS_DISPLAY));
       } else {
         const allBills = await getBills();
-
-        if (isMounted()) {
-          setFilteredBills(allBills.slice(0, MAX_BILLS_DISPLAY));
-        }
+        setFilteredBills(allBills.slice(0, MAX_BILLS_DISPLAY));
       }
     } catch (error) {
       console.error('Error loading bills:', error);
-      if (isMounted()) {
-        toast.showToast('Impossible de charger les factures.', 'error');
-      }
+      toast.showToast('Impossible de charger les factures.', 'error');
     } finally {
-      if (isMounted()) {
-        setLoading(false);
-      }
+      setLoading(false);
     }
-  }, [searchText, dateFilter, paymentMethodFilter, toast, isMounted]);
+  }, [searchText, dateFilter, paymentMethodFilter, toast]);
 
-  // ✅ Charger toutes les factures
   useEffect(() => {
     const loadAllBills = async () => {
       try {
         const allBills = await getBills();
-        if (isMounted()) {
-          setBills(allBills.slice(0, MAX_BILLS_DISPLAY));
-        }
+        setBills(allBills.slice(0, MAX_BILLS_DISPLAY));
       } catch (error) {
         console.error('Error loading all bills:', error);
       }
@@ -675,9 +606,9 @@ export default function BillsScreen() {
 
     loadAllBills();
     loadBills();
-  }, [loadBills, isMounted]);
+  }, [loadBills]);
 
-  // ✅ Tri optimisé avec mémorisation
+  // Tri des factures
   const sortBillsByDate = useCallback(
     (billsToSort: Bill[], order: 'desc' | 'asc' | 'none' = 'desc') => {
       if (order === 'none') return billsToSort;
@@ -699,7 +630,7 @@ export default function BillsScreen() {
     [paymentMethods]
   );
 
-  // ✅ Supprimer les factures filtrées avec protection
+  // Supprimer les factures filtrées
   const handleDeleteFiltered = useCallback(() => {
     if (filteredBills.length === 0) {
       toast.showToast('Aucune facture à supprimer.', 'info');
@@ -715,8 +646,6 @@ export default function BillsScreen() {
           text: 'Supprimer',
           style: 'destructive',
           onPress: async () => {
-            if (!isMounted()) return;
-
             try {
               setProcessing(true);
 
@@ -728,59 +657,40 @@ export default function BillsScreen() {
               );
 
               await saveBills(remainingBills);
+              setBills(remainingBills);
+              setFilteredBills([]);
 
-              if (isMounted()) {
-                setBills(remainingBills);
-                setFilteredBills([]);
-
-                if (
-                  remainingBills.length > 0 &&
-                  selectedBill &&
-                  billIdsToDelete.has(selectedBill.id)
-                ) {
-                  setSelectedBill(remainingBills[0]);
-                } else if (remainingBills.length === 0) {
-                  setSelectedBill(null);
-                }
-
-                toast.showToast(
-                  `${billIdsToDelete.size} facture(s) supprimée(s).`,
-                  'success'
-                );
+              if (
+                remainingBills.length > 0 &&
+                selectedBill &&
+                billIdsToDelete.has(selectedBill.id)
+              ) {
+                setSelectedBill(remainingBills[0]);
+              } else if (remainingBills.length === 0) {
+                setSelectedBill(null);
               }
 
-              // ✅ Rechargement sécurisé avec délai
-              setSafeTimeout(() => {
+              toast.showToast(
+                `${billIdsToDelete.size} facture(s) supprimée(s).`,
+                'success'
+              );
+
+              setTimeout(() => {
                 loadBills();
               }, 500);
             } catch (error) {
               console.error('Erreur lors de la suppression:', error);
-              if (isMounted()) {
-                toast.showToast(
-                  'Impossible de supprimer les factures.',
-                  'error'
-                );
-              }
+              toast.showToast('Impossible de supprimer les factures.', 'error');
             } finally {
-              if (isMounted()) {
-                setProcessing(false);
-              }
+              setProcessing(false);
             }
           },
         },
       ]
     );
-  }, [
-    filteredBills,
-    bills,
-    selectedBill,
-    loadBills,
-    toast,
-    isMounted,
-    setSafeTimeout,
-  ]);
+  }, [filteredBills, bills, selectedBill, loadBills, toast]);
 
-  // ✅ Filtrage et tri avec mémorisation
+  // Filtres appliqués
   const appliedFilters = useMemo(() => {
     let filtered = [...filteredBills];
 
@@ -801,7 +711,7 @@ export default function BillsScreen() {
     return sortBillsByDate(filtered, sortOrder);
   }, [filteredBills, searchText, sortOrder, sortBillsByDate]);
 
-  // ✅ Handlers optimisés avec protection
+  // Handlers
   const handleSearch = useCallback((text: string) => {
     setSearchText(text);
   }, []);
@@ -825,13 +735,11 @@ export default function BillsScreen() {
   );
 
   const handleResetFilters = useCallback(() => {
-    safeExecute(() => {
-      setSearchText('');
-      setDateFilter(null);
-      setPaymentMethodFilter(null);
-      setSortOrder('desc');
-    });
-  }, [safeExecute]);
+    setSearchText('');
+    setDateFilter(null);
+    setPaymentMethodFilter(null);
+    setSortOrder('desc');
+  }, []);
 
   const handleSelectBill = useCallback(
     (bill: Bill) => {
@@ -863,86 +771,56 @@ export default function BillsScreen() {
           text: 'Supprimer',
           style: 'destructive',
           onPress: async () => {
-            if (!isMounted()) return;
-
             try {
               setProcessing(true);
               await BillManager.clearAllBills();
-
-              if (isMounted()) {
-                safeExecute(() => {
-                  setBills([]);
-                  setFilteredBills([]);
-                  setSelectedBill(null);
-                });
-                toast.showToast(
-                  'Toutes les factures ont été supprimées.',
-                  'success'
-                );
-              }
+              setBills([]);
+              setFilteredBills([]);
+              setSelectedBill(null);
+              toast.showToast(
+                'Toutes les factures ont été supprimées.',
+                'success'
+              );
             } catch (error) {
               console.error('Erreur lors de la suppression:', error);
-              if (isMounted()) {
-                toast.showToast(
-                  'Impossible de supprimer les factures.',
-                  'error'
-                );
-              }
+              toast.showToast('Impossible de supprimer les factures.', 'error');
             } finally {
-              if (isMounted()) {
-                setProcessing(false);
-              }
+              setProcessing(false);
             }
           },
         },
       ]
     );
-  }, [toast, isMounted, safeExecute]);
+  }, [toast]);
 
   const handleDeleteBill = useCallback(async () => {
-    if (!selectedBill || !isMounted()) return;
+    if (!selectedBill) return;
 
     try {
       setProcessing(true);
       const updatedBills = bills.filter((bill) => bill.id !== selectedBill.id);
       await saveBills(updatedBills);
 
-      if (isMounted()) {
-        safeExecute(() => {
-          setBills(updatedBills);
-          setFilteredBills(sortBillsByDate(updatedBills, sortOrder));
+      setBills(updatedBills);
+      setFilteredBills(sortBillsByDate(updatedBills, sortOrder));
 
-          if (updatedBills.length > 0) {
-            setSelectedBill(updatedBills[0]);
-          } else {
-            setSelectedBill(null);
-          }
-
-          setViewModalVisible(false);
-        });
-        toast.showToast('Facture supprimée avec succès.', 'success');
+      if (updatedBills.length > 0) {
+        setSelectedBill(updatedBills[0]);
+      } else {
+        setSelectedBill(null);
       }
+
+      setViewModalVisible(false);
+      toast.showToast('Facture supprimée avec succès.', 'success');
     } catch (error) {
       console.error('Erreur lors de la suppression:', error);
-      if (isMounted()) {
-        toast.showToast('Impossible de supprimer la facture.', 'error');
-      }
+      toast.showToast('Impossible de supprimer la facture.', 'error');
     } finally {
-      if (isMounted()) {
-        setProcessing(false);
-      }
+      setProcessing(false);
     }
-  }, [
-    selectedBill,
-    bills,
-    sortOrder,
-    sortBillsByDate,
-    toast,
-    isMounted,
-    safeExecute,
-  ]);
+  }, [selectedBill, bills, sortOrder, sortBillsByDate, toast]);
 
-  // ✅ Générer HTML pour impression
+  // Génération HTML
   const generateHTML = useCallback(
     (bill: Bill) => {
       const paymentLabel = bill.paymentMethod
@@ -963,214 +841,165 @@ export default function BillsScreen() {
 
       const hasDetailedItems = bill.paidItems && bill.paidItems.length > 0;
 
-      const calculateTotalAmount = () => {
-        if (bill.paymentType === 'custom' && hasDetailedItems) {
-          return (
-            bill.paidItems?.reduce((sum, item) => {
-              if (item.offered) return sum;
-              return sum + item.price * item.quantity;
-            }, 0) || bill.amount
-          );
-        }
-        return bill.amount;
-      };
-
-      const isCustomSplit =
-        bill.paymentType === 'custom' && bill.status === 'split';
-      const totalAmount = calculateTotalAmount();
-      const paidAmount = bill.amount;
-
       let itemsHTML = '';
       if (hasDetailedItems) {
         const itemsToShow = (bill.paidItems ?? []).slice(0, 20);
         itemsHTML = `
-      <div class="items-section">
-        <table style="width: 100%; border-collapse: collapse; margin: 5mm 0;">
-          <tr>
-            <th style="text-align: left;">Qté</th>
-            <th style="text-align: left;">Article</th>
-            <th style="text-align: right;">Prix</th>
-          </tr>
-          ${itemsToShow
-            .map(
-              (item) => `
-            <tr ${
-              item.offered ? 'style="font-style: italic; color: #FF9800;"' : ''
-            }>
-              <td>${item.quantity}x</td>
-              <td>${item.name}${item.offered ? ' (Offert)' : ''}</td>
-              <td style="text-align: right;">${(
-                item.price * item.quantity
-              ).toFixed(2)}€</td>
-            </tr>
-          `
-            )
-            .join('')}
-        </table>
-      </div>
-    `;
+          <div class="items-section">
+            <table style="width: 100%; border-collapse: collapse; margin: 5mm 0;">
+              <tr>
+                <th style="text-align: left;">Qté</th>
+                <th style="text-align: left;">Article</th>
+                <th style="text-align: right;">Prix</th>
+              </tr>
+              ${itemsToShow
+                .map(
+                  (item) => `
+                <tr ${
+                  item.offered
+                    ? 'style="font-style: italic; color: #FF9800;"'
+                    : ''
+                }>
+                  <td>${item.quantity}x</td>
+                  <td>${item.name}${item.offered ? ' (Offert)' : ''}</td>
+                  <td style="text-align: right;">${(
+                    item.price * item.quantity
+                  ).toFixed(2)}€</td>
+                </tr>
+              `
+                )
+                .join('')}
+            </table>
+          </div>
+        `;
       }
 
       let offeredHTML = '';
       if (bill.offeredAmount && bill.offeredAmount > 0) {
         offeredHTML = `
-      <div class="total-line" style="color: #FF9800; font-style: italic;">
-        <span>Articles offerts:</span>
-        <span>${bill.offeredAmount.toFixed(2)}€</span>
-      </div>
-    `;
-      }
-
-      let totalsSection = '';
-      if (isCustomSplit && totalAmount > paidAmount) {
-        totalsSection = `
-      <div class="totals">
-        <div class="total-line">
-          <span>Articles:</span>
-          <span>${
-            hasDetailedItems ? bill.paidItems?.length ?? 0 : bill.items
-          }</span>
-        </div>
-        ${offeredHTML}
-        <div class="total-line">
-          <span>TOTAL ADDITION:</span>
-          <span>${totalAmount.toFixed(2)}€</span>
-        </div>
-        <div class="total-amount" style="border-top: 1px dashed #000; padding-top: 2mm; margin-top: 2mm;">
-          MONTANT PAYÉ: ${paidAmount.toFixed(2)}€
-        </div>
-        <div style="text-align: center; font-size: 12pt; color: #666; margin-top: 2mm;">
-          (Paiement partiel - Addition partagée)
-        </div>
-      </div>
-    `;
-      } else {
-        totalsSection = `
-      <div class="totals">
-        <div class="total-line">
-          <span>Articles:</span>
-          <span>${
-            hasDetailedItems ? bill.paidItems?.length ?? 0 : bill.items
-          }</span>
-        </div>
-        ${offeredHTML}
-        <div class="total-amount">
-          TOTAL: ${(isCustomSplit ? paidAmount : totalAmount).toFixed(2)}€
-        </div>
-      </div>
-    `;
+          <div class="total-line" style="color: #FF9800; font-style: italic;">
+            <span>Articles offerts:</span>
+            <span>${bill.offeredAmount.toFixed(2)}€</span>
+          </div>
+        `;
       }
 
       return `
-    <html>
-      <head>
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <style>
-          @page { size: 80mm auto; margin: 0mm; }
-          body { 
-            font-family: 'Courier New', monospace; 
-            width: 80mm;
-            padding: 5mm;
-            margin: 0;
-            font-size: 14pt;
-          }
-          .header, .footer { 
-            text-align: center; 
-            margin-bottom: 5mm;
-          }
-          .header h1 {
-            font-size: 18pt;
-            margin: 0 0 2mm 0;
-          }
-          .header p, .footer p {
-            margin: 0 0 1mm 0;
-            font-size: 14pt;
-          }
-          .divider {
-            border-bottom: 1px dashed #000;
-            margin: 3mm 0;
-          }
-          .info {
-            margin-bottom: 3mm;
-          }
-          .info p {
-            margin: 0 0 1mm 0;
-          }
-          .totals {
-            margin: 2mm 0;
-          }
-          .total-line {
-            display: flex;
-            justify-content: space-between;
-            margin: 1mm 0;
-            font-size: 16pt;
-          }
-          .total-amount {
-            font-weight: bold;
-            font-size: 16pt;
-            text-align: right;
-            margin: 2mm 0;
-          }
-          .payment-info {
-            text-align: center;
-            margin: 3mm 0;
-            font-size: 14pt;
-          }
-          .payment-info p {
-            margin: 0 0 1mm 0;
-          }
-          th, td {
-            padding: 1mm 0;
-            font-size: 14pt;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <h1>${restaurantInfo.name}</h1>
-          <p>${restaurantInfo.address}</p>
-          <p>${restaurantInfo.phone}</p>
-        </div>
+        <html>
+          <head>
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <style>
+              @page { size: 80mm auto; margin: 0mm; }
+              body { 
+                font-family: 'Courier New', monospace; 
+                width: 80mm;
+                padding: 5mm;
+                margin: 0;
+                font-size: 14pt;
+              }
+              .header, .footer { 
+                text-align: center; 
+                margin-bottom: 5mm;
+              }
+              .header h1 {
+                font-size: 18pt;
+                margin: 0 0 2mm 0;
+              }
+              .header p, .footer p {
+                margin: 0 0 1mm 0;
+                font-size: 14pt;
+              }
+              .divider {
+                border-bottom: 1px dashed #000;
+                margin: 3mm 0;
+              }
+              .info {
+                margin-bottom: 3mm;
+              }
+              .info p {
+                margin: 0 0 1mm 0;
+              }
+              .totals {
+                margin: 2mm 0;
+              }
+              .total-line {
+                display: flex;
+                justify-content: space-between;
+                margin: 1mm 0;
+                font-size: 16pt;
+              }
+              .total-amount {
+                font-weight: bold;
+                font-size: 16pt;
+                text-align: right;
+                margin: 2mm 0;
+              }
+              .payment-info {
+                text-align: center;
+                margin: 3mm 0;
+                font-size: 14pt;
+              }
+              .payment-info p {
+                margin: 0 0 1mm 0;
+              }
+              th, td {
+                padding: 1mm 0;
+                font-size: 14pt;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="header">
+              <h1>${restaurantInfo.name}</h1>
+              <p>${restaurantInfo.address}</p>
+              <p>${restaurantInfo.phone}</p>
+            </div>
 
-        <div class="divider"></div>
-        
-        <div class="info">
-          <p><strong>${
-            bill.tableName || `Table ${bill.tableNumber}`
-          }</strong></p>
-          <p>Date: ${dateFormatted} ${timeFormatted}</p>
-          ${bill.section ? `<p>Section: ${bill.section}</p>` : ''}
-        </div>
+            <div class="divider"></div>
+            
+            <div class="info">
+              <p><strong>${
+                bill.tableName || `Table ${bill.tableNumber}`
+              }</strong></p>
+              <p>Date: ${dateFormatted} ${timeFormatted}</p>
+              ${bill.section ? `<p>Section: ${bill.section}</p>` : ''}
+              ${bill.guests ? `<p>Couverts: ${bill.guests}</p>` : ''}
+            </div>
 
-        <div class="divider"></div>
+            <div class="divider"></div>
 
-        ${itemsHTML}
+            ${itemsHTML}
 
-        ${totalsSection}
+            <div class="totals">
+              <div class="total-line">
+                <span>Articles:</span>
+                <span>${
+                  hasDetailedItems ? bill.paidItems?.length ?? 0 : bill.items
+                }</span>
+              </div>
+              ${offeredHTML}
+              <div class="total-amount">
+                TOTAL: ${bill.amount.toFixed(2)}€
+              </div>
+            </div>
 
-        <div class="divider"></div>
+            <div class="divider"></div>
 
-        <div class="payment-info">
-          <p>Paiement: ${
-            bill.paymentMethod ? getPaymentMethodLabel(bill.paymentMethod) : ''
-          }</p>
-          <p>Statut: ${
-            bill.status === 'split' && bill.paymentType === 'custom'
-              ? 'Custom'
-              : bill.status
-          }</p>
-        </div>
+            <div class="payment-info">
+              <p>Paiement: ${paymentLabel}</p>
+              <p>Statut: ${bill.status}</p>
+            </div>
 
-        <div class="divider"></div>
+            <div class="divider"></div>
 
-        <div class="footer">
-          <p>${taxInfo}</p>
-          <p>Merci de votre visite!</p>
-          <p>À bientôt, ${restaurantInfo.owner}</p>
-        </div>
-      </body>
-    </html>
-  `;
+            <div class="footer">
+              <p>${taxInfo}</p>
+              <p>Merci de votre visite!</p>
+              <p>À bientôt, ${restaurantInfo.owner}</p>
+            </div>
+          </body>
+        </html>
+      `;
     },
     [getPaymentMethodLabel, restaurantInfo]
   );
@@ -1181,35 +1010,25 @@ export default function BillsScreen() {
       return;
     }
 
-    if (!isMounted()) return;
-
     setProcessing(true);
     try {
       await Print.printAsync({
         html: generateHTML(selectedBill),
       });
-      if (isMounted()) {
-        toast.showToast("Reçu envoyé à l'imprimante.", 'success');
-      }
+      toast.showToast("Reçu envoyé à l'imprimante.", 'success');
     } catch (error) {
       console.error("Erreur d'impression:", error);
-      if (isMounted()) {
-        toast.showToast("Impossible d'imprimer le reçu.", 'error');
-      }
+      toast.showToast("Impossible d'imprimer le reçu.", 'error');
     } finally {
-      if (isMounted()) {
-        setProcessing(false);
-      }
+      setProcessing(false);
     }
-  }, [selectedBill, generateHTML, toast, isMounted]);
+  }, [selectedBill, generateHTML, toast]);
 
   const handleShare = useCallback(async () => {
     if (!selectedBill) {
       toast.showToast('Veuillez sélectionner une facture à partager.', 'info');
       return;
     }
-
-    if (!isMounted()) return;
 
     setProcessing(true);
     try {
@@ -1222,28 +1041,20 @@ export default function BillsScreen() {
         mimeType: 'application/pdf',
       });
 
-      if (isMounted()) {
-        toast.showToast('Reçu partagé avec succès.', 'success');
-      }
+      toast.showToast('Reçu partagé avec succès.', 'success');
     } catch (error) {
       console.error('Erreur de partage:', error);
-      if (isMounted()) {
-        toast.showToast('Impossible de partager le reçu.', 'error');
-      }
+      toast.showToast('Impossible de partager le reçu.', 'error');
     } finally {
-      if (isMounted()) {
-        setProcessing(false);
-      }
+      setProcessing(false);
     }
-  }, [selectedBill, generateHTML, toast, isMounted]);
+  }, [selectedBill, generateHTML, toast]);
 
   const handleExport = useCallback(async () => {
     if (!selectedBill) {
       toast.showToast('Veuillez sélectionner une facture à exporter.', 'info');
       return;
     }
-
-    if (!isMounted()) return;
 
     setProcessing(true);
     try {
@@ -1257,20 +1068,14 @@ export default function BillsScreen() {
         dialogTitle: 'Exporter le reçu en PDF',
       });
 
-      if (isMounted()) {
-        toast.showToast('Reçu exporté avec succès.', 'success');
-      }
+      toast.showToast('Reçu exporté avec succès.', 'success');
     } catch (error) {
       console.error("Erreur d'export:", error);
-      if (isMounted()) {
-        toast.showToast("Impossible d'exporter le reçu.", 'error');
-      }
+      toast.showToast("Impossible d'exporter le reçu.", 'error');
     } finally {
-      if (isMounted()) {
-        setProcessing(false);
-      }
+      setProcessing(false);
     }
-  }, [selectedBill, generateHTML, toast, isMounted]);
+  }, [selectedBill, generateHTML, toast]);
 
   const keyExtractor = useCallback((item: Bill, index: number) => {
     return item.id ? `bill-${item.id}` : `bill-index-${index}`;
@@ -1315,7 +1120,6 @@ export default function BillsScreen() {
           <FilterBar
             onSearch={handleSearch}
             onDateChange={handleDateFilter}
-            onFilter={() => {}}
             sortOrder={sortOrder}
             onSortChange={handleSortChange}
             onDeleteAll={handleDeleteAll}
@@ -1403,6 +1207,15 @@ export default function BillsScreen() {
                         {selectedBill.amount.toFixed(2)} €
                       </Text>
                     </View>
+                    {/* ✅ NOUVEAU: Affichage du nombre de couverts */}
+                    {selectedBill.guests && (
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>Couverts:</Text>
+                        <Text style={styles.detailValue}>
+                          {selectedBill.guests}
+                        </Text>
+                      </View>
+                    )}
                     {selectedBill.paymentMethod && (
                       <View style={styles.detailRow}>
                         <Text style={styles.detailLabel}>
@@ -1495,7 +1308,7 @@ export default function BillsScreen() {
   );
 }
 
-// ✅ Styles conservés identiques
+// Styles corrigés (sans margin/marginHorizontal dans les objets JavaScript)
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
@@ -1539,12 +1352,7 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   searchInput: { flex: 1, height: 40, marginLeft: 8 },
-  filterActions: {
-    flexDirection: 'row',
-    justifyContent: 'flex-start',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
+  filterActions: { flexDirection: 'row', paddingVertical: 8 },
   filterButton: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1552,7 +1360,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 8,
-    minWidth: 120,
+    marginRight: 8,
   },
   filterButtonText: { marginLeft: 8, color: '#2196F3', fontWeight: '500' },
   billsList: {
@@ -1589,6 +1397,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     textTransform: 'uppercase',
   },
+  billItemGuests: { fontSize: 12, color: '#666', marginBottom: 4 }, // ✅ NOUVEAU
   billItemDate: { fontSize: 12, color: '#666' },
   billDetails: {
     flex: 1,
@@ -1692,6 +1501,7 @@ const styles = StyleSheet.create({
   billTable: { fontSize: 18, fontWeight: '600', marginBottom: 4 },
   billDate: { fontSize: 14, color: '#666', marginBottom: 4 },
   billSection: { fontSize: 14, color: '#0288D1' },
+  billGuests: { fontSize: 14, color: '#666', marginBottom: 4 }, // ✅ NOUVEAU
   billSummary: { marginBottom: 16 },
   billRow: {
     flexDirection: 'row',
@@ -1763,7 +1573,7 @@ const styles = StyleSheet.create({
     zIndex: 1000,
     minWidth: 200,
   },
-  paymentButtonContainer: { position: 'relative', marginRight: 8 },
+  paymentButtonContainer: { position: 'relative' },
   paymentOption: {
     padding: 12,
     borderBottomWidth: 1,
@@ -1794,24 +1604,4 @@ const styles = StyleSheet.create({
   offeredItemPrice: { textDecorationLine: 'line-through', color: '#FF9800' },
   billOfferedLabel: { fontSize: 14, color: '#FF9800', fontWeight: '500' },
   billOfferedValue: { fontSize: 14, fontWeight: '600', color: '#FF9800' },
-  paidAmountRow: {
-    borderTopWidth: 1,
-    borderTopColor: '#e0e0e0',
-    paddingTop: 12,
-    marginTop: 8,
-  },
-  billPaidLabel: { fontSize: 16, color: '#2196F3', fontWeight: '600' },
-  billPaidAmount: { fontSize: 18, fontWeight: '600', color: '#2196F3' },
-  splitNotice: {
-    marginTop: 8,
-    padding: 8,
-    backgroundColor: '#E3F2FD',
-    borderRadius: 4,
-  },
-  splitNoticeText: {
-    fontSize: 12,
-    color: '#1976D2',
-    textAlign: 'center',
-    fontStyle: 'italic',
-  },
 });

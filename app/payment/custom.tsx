@@ -277,6 +277,7 @@ export default function CustomSplitScreen() {
             customAmount: payment.amount,
           })),
           offeredAmount: (payment.amount / totalAmount) * totalOffered,
+          guests: table.guests,
         };
 
         if (payment.methodId) {

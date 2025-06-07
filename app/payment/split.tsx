@@ -199,8 +199,8 @@ export default function SplitBillScreen() {
           splitPart: payment.id,
           totalParts: guestCount,
         })),
-        // Ajouter le montant des articles offerts proportionnel à ce paiement
         offeredAmount: (payment.amount / totalAmount) * totalOffered,
+        guests: guestCount,
       };
 
       // Ajouter à l'historique des factures

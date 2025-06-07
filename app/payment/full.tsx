@@ -118,6 +118,7 @@ export default function FullPaymentScreen() {
         paymentType: 'full' as 'full',
         paidItems: orderItems,
         offeredAmount: totalOffered,
+        guests: table.guests,
       };
 
       // Add to bills history

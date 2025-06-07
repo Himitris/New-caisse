@@ -613,6 +613,7 @@ export default function ItemsPaymentScreen() {
           paymentType: 'items' as any,
           paidItems: paidItems,
           offeredAmount: offeredAmount,
+          guests: table.guests,
         };
 
         await addBill(bill);
