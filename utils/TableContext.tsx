@@ -43,33 +43,53 @@ let writeTimeout: ReturnType<typeof setTimeout> | null = null;
 export const TableProvider = ({ children }: { children: ReactNode }) => {
   const [tables, setTables] = useState<Table[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // ✅ Cache local au provider avec nettoyage automatique
+  const tableCacheRef = useRef(new Map<number, CacheEntry>());
+  const pendingWritesRef = useRef(new Map<number, Table>());
+  const writeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cleanupIntervalRef = useRef<ReturnType<typeof setInterval> | null>(
     null
   );
   const mountedRef = useRef(true);
 
+  // ✅ Nettoyage drastique et immédiat
+  const aggressiveCleanup = useCallback(() => {
+    if (writeTimeoutRef.current) {
+      clearTimeout(writeTimeoutRef.current);
+      writeTimeoutRef.current = null;
+    }
+
+    // Vider immédiatement tous les caches
+    tableCacheRef.current.clear();
+    pendingWritesRef.current.clear();
+
+    // Force garbage collection si disponible
+    if (typeof global !== 'undefined' && global.gc) {
+      global.gc();
+    }
+
+    console.log('🧹 Nettoyage agressif - tous les caches vidés');
+  }, []);
+
   // ✅ Fonction d'écriture groupée ultra-optimisée
   const flushPendingWrites = useCallback(async () => {
-    if (pendingWrites.size === 0) return;
+    if (pendingWritesRef.current.size === 0) return;
 
-    const writesToProcess = new Map(pendingWrites);
-    pendingWrites.clear();
+    const writesToProcess = new Map(pendingWritesRef.current);
+    pendingWritesRef.current.clear();
 
     try {
-      // ✅ Traitement en parallèle des écritures
       const writePromises = Array.from(writesToProcess.entries()).map(
         async ([tableId, table]) => {
           try {
             await updateTable(table);
-
-            // Mettre à jour le cache avec les nouvelles données
             const now = Date.now();
-            tableCache.set(tableId, {
+            tableCacheRef.current.set(tableId, {
               table,
               timestamp: now,
               dirty: false,
             });
-
             return { tableId, success: true };
           } catch (error) {
             console.error(`Error updating table ${tableId}:`, error);
@@ -78,29 +98,7 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
         }
       );
 
-      const results = await Promise.allSettled(writePromises);
-
-      // ✅ Mettre à jour l'état local seulement avec les succès
-      if (mountedRef.current) {
-        setTables((prevTables) => {
-          const newTables = [...prevTables];
-
-          results.forEach((result, index) => {
-            if (result.status === 'fulfilled' && result.value.success) {
-              const tableId = Array.from(writesToProcess.keys())[index];
-              const updatedTable = writesToProcess.get(tableId);
-              if (updatedTable) {
-                const tableIndex = newTables.findIndex((t) => t.id === tableId);
-                if (tableIndex >= 0) {
-                  newTables[tableIndex] = updatedTable;
-                }
-              }
-            }
-          });
-
-          return newTables;
-        });
-      }
+      await Promise.allSettled(writePromises);
     } catch (error) {
       console.error('Error in batch write:', error);
     }
@@ -111,54 +109,52 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
     if (!mountedRef.current) return;
 
     const now = Date.now();
-    const keysToDelete: number[] = [];
+    const cache = tableCacheRef.current;
 
-    tableCache.forEach((entry, key) => {
-      if (now - entry.timestamp > CACHE_TTL && !entry.dirty) {
+    // ✅ Nettoyage plus agressif - garder max 5 entrées
+    if (cache.size > 5) {
+      const entries = Array.from(cache.entries())
+        .sort((a, b) => b[1].timestamp - a[1].timestamp)
+        .slice(0, 3); // Garder seulement les 3 plus récentes
+
+      cache.clear();
+      entries.forEach(([key, value]) => cache.set(key, value));
+    }
+
+    // Supprimer les anciennes entrées (> 5 secondes au lieu de 30)
+    const keysToDelete: number[] = [];
+    cache.forEach((entry, key) => {
+      if (now - entry.timestamp > 5000 && !entry.dirty) {
         keysToDelete.push(key);
       }
     });
 
-    keysToDelete.forEach((key) => tableCache.delete(key));
-
-    // ✅ Nettoyage forcé si trop de données
-    if (tableCache.size > MAX_CACHE_SIZE) {
-      const sortedEntries = Array.from(tableCache.entries())
-        .filter(([, entry]) => !entry.dirty)
-        .sort((a, b) => a[1].timestamp - b[1].timestamp);
-
-      const toDelete = Math.ceil(sortedEntries.length / 2); // Plus agressif
-      for (let i = 0; i < toDelete; i++) {
-        tableCache.delete(sortedEntries[i][0]);
-      }
-    }
+    keysToDelete.forEach((key) => cache.delete(key));
 
     console.log(
-      `🧹 Table cache nettoyé: ${keysToDelete.length} entrées, taille: ${tableCache.size}`
+      `🧹 Table cache nettoyé: ${keysToDelete.length} entrées, taille: ${cache.size}`
     );
   }, []);
 
   // ✅ Setup du nettoyage automatique
   useEffect(() => {
     cleanupCache();
-    cleanupIntervalRef.current = setInterval(cleanupCache, CLEANUP_INTERVAL);
+    cleanupIntervalRef.current = setInterval(() => {
+      cleanupCache();
+      // Nettoyage agressif toutes les 30 secondes
+      if (tableCacheRef.current.size > 3) {
+        aggressiveCleanup();
+      }
+    }, 5000); // 5 secondes au lieu de 15
 
     return () => {
       mountedRef.current = false;
       if (cleanupIntervalRef.current) {
         clearInterval(cleanupIntervalRef.current);
       }
-      if (writeTimeout) {
-        clearTimeout(writeTimeout);
-      }
-      // Flush final des écritures en attente
-      if (pendingWrites.size > 0) {
-        flushPendingWrites();
-      }
-      tableCache.clear();
-      pendingWrites.clear();
+      aggressiveCleanup();
     };
-  }, [cleanupCache, flushPendingWrites]);
+  }, [cleanupCache, aggressiveCleanup]);
 
   // ✅ Chargement ultra-optimisé
   const loadTables = useCallback(async () => {
@@ -212,13 +208,16 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
       if (!mountedRef.current) return;
 
       try {
-        // ✅ Récupération optimisée depuis le cache
-        const cachedEntry = tableCache.get(tableId);
+        const cache = tableCacheRef.current;
+        const pendingWrites = pendingWritesRef.current;
+
+        const cachedEntry = cache.get(tableId);
         const now = Date.now();
 
         let currentTable: Table | null = null;
 
-        if (cachedEntry && now - cachedEntry.timestamp < CACHE_TTL) {
+        if (cachedEntry && now - cachedEntry.timestamp < 5000) {
+          // 5s au lieu de 30s
           currentTable = cachedEntry.table;
         } else {
           currentTable = await getTable(tableId);
@@ -227,14 +226,12 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
 
         const updatedTable = { ...currentTable, ...updatedData };
 
-        // ✅ Mise à jour immédiate du cache avec marqueur dirty
-        tableCache.set(tableId, {
+        cache.set(tableId, {
           table: updatedTable,
           timestamp: now,
           dirty: true,
         });
 
-        // ✅ Mise à jour immédiate de l'état local pour la réactivité
         if (mountedRef.current) {
           setTables((prevTables) =>
             prevTables.map((table) =>
@@ -243,16 +240,15 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
           );
         }
 
-        // ✅ Programmer l'écriture groupée
         pendingWrites.set(tableId, updatedTable);
 
-        if (writeTimeout) {
-          clearTimeout(writeTimeout);
+        if (writeTimeoutRef.current) {
+          clearTimeout(writeTimeoutRef.current);
         }
 
-        writeTimeout = setTimeout(() => {
+        writeTimeoutRef.current = setTimeout(() => {
           flushPendingWrites();
-        }, BATCH_WRITE_DELAY);
+        }, 50); // Plus rapide
       } catch (error) {
         console.error(`Error updating table ${tableId}:`, error);
         throw error;
@@ -264,37 +260,23 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
   // ✅ Getter ultra-optimisé
   const getTableById = useCallback(
     (id: number) => {
-      // ✅ Cache en priorité absolue
-      const cachedEntry = tableCache.get(id);
+      const cache = tableCacheRef.current;
+      const cachedEntry = cache.get(id);
       const now = Date.now();
 
-      if (cachedEntry && now - cachedEntry.timestamp < CACHE_TTL) {
+      if (cachedEntry && now - cachedEntry.timestamp < 5000) {
         return cachedEntry.table;
       }
 
-      // ✅ Fallback sur l'état local
       return tables.find((table) => table.id === id);
     },
     [tables]
   );
 
-  // ✅ Nettoyage optimisé
+  // ✅ clearCache modifié
   const clearCache = useCallback(() => {
-    console.log('🧹 Nettoyage manuel du cache et flush des écritures');
-
-    // ✅ Flush synchrone des écritures en attente
-    if (pendingWrites.size > 0) {
-      flushPendingWrites();
-    }
-
-    tableCache.clear();
-    pendingWrites.clear();
-
-    if (writeTimeout) {
-      clearTimeout(writeTimeout);
-      writeTimeout = null;
-    }
-  }, [flushPendingWrites]);
+    aggressiveCleanup();
+  }, [aggressiveCleanup]);
 
   // Charger les données au démarrage
   useEffect(() => {

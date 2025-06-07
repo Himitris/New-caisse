@@ -55,6 +55,9 @@ export const ToastProvider: React.FC<{ children: ReactNode }> = ({
       Object.values(animationRefs.current).forEach((animation) => {
         animation.stop();
       });
+      timeoutRefs.current = {};
+      animationRefs.current = {};
+      setToasts([]); // ✅ Vider tous les toasts
     };
   }, []);
 
@@ -100,10 +103,33 @@ export const ToastProvider: React.FC<{ children: ReactNode }> = ({
       const id = Date.now();
       const opacity = new Animated.Value(0);
 
-      setToasts((prevToasts) => [
-        ...prevToasts,
-        { id, message, type, opacity, isRemoving: false },
-      ]);
+      setToasts((prevToasts) => {
+        let newToasts = [...prevToasts];
+
+        // Supprimer les plus anciens si > 2
+        if (newToasts.length >= 2) {
+          const toRemove = newToasts.slice(0, newToasts.length - 1);
+          toRemove.forEach((toast) => {
+            if (timeoutRefs.current[toast.id]) {
+              clearTimeout(timeoutRefs.current[toast.id]);
+              delete timeoutRefs.current[toast.id];
+            }
+            if (animationRefs.current[toast.id]) {
+              animationRefs.current[toast.id].stop();
+              delete animationRefs.current[toast.id];
+            }
+          });
+          newToasts = newToasts.slice(-1); // Garder seulement le dernier
+        }
+
+        const id = Date.now();
+        const opacity = new Animated.Value(0);
+
+        return [
+          ...newToasts,
+          { id, message, type, opacity, isRemoving: false },
+        ];
+      });
 
       requestAnimationFrame(() => {
         const animation = Animated.timing(opacity, {

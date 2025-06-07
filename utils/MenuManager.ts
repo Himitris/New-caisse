@@ -79,6 +79,16 @@ class MenuManager {
   private loadPromise: Promise<void> | null = null;
   listeners: Set<() => void> = new Set();
 
+  private cleanupListeners() {
+    // ✅ Nettoyer automatiquement si trop de listeners
+    if (this.listeners.size > 5) {
+      console.warn(
+        `⚠️ Trop de listeners MenuManager: ${this.listeners.size}, nettoyage forcé`
+      );
+      this.listeners.clear();
+    }
+  }
+
   static getInstance(): MenuManager {
     if (!MenuManager.instance) {
       MenuManager.instance = new MenuManager();
@@ -199,14 +209,22 @@ class MenuManager {
 
   // ✅ Abonnements simples
   subscribe(listener: () => void): () => void {
+    // ✅ Nettoyage préventif
+    this.cleanupListeners();
+
     this.listeners.add(listener);
 
-    // Si déjà chargé, notifier immédiatement
     if (this.isLoaded) {
       setTimeout(listener, 0);
     }
 
-    return () => this.listeners.delete(listener);
+    return () => {
+      this.listeners.delete(listener);
+      // ✅ Nettoyage automatique si set devient vide
+      if (this.listeners.size === 0) {
+        this.reset();
+      }
+    };
   }
 
   // ✅ Reset si nécessaire
@@ -215,7 +233,9 @@ class MenuManager {
     this.menuItems = [];
     this.menuMap.clear();
     this.unavailableIds.clear();
-    console.log('🔄 Menu reset');
+    this.listeners.clear(); // ✅ Ajouter cette ligne
+    this.loadPromise = null; // ✅ Ajouter cette ligne
+    console.log('🔄 Menu reset complet');
   }
 }
 

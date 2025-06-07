@@ -334,18 +334,40 @@ export default function TableScreen(): JSX.Element {
       };
     }, [loading, loadTable])
   );
+  
+  useEffect(() => {
+    // ✅ Cleanup automatique toutes les 10 secondes
+    const cleanupInterval = setInterval(() => {
+      if (typeof global !== 'undefined' && global.gc) {
+        global.gc();
+      }
+    }, 10000);
+
+    addCleanup(() => clearInterval(cleanupInterval));
+  }, [addCleanup]);
 
   // ✅ Gestion bouton retour
   useEffect(() => {
     const backHandler = BackHandler.addEventListener(
       'hardwareBackPress',
       () => {
+        // ✅ Nettoyage immédiat avant navigation
+        if (typeof global !== 'undefined' && global.gc) {
+          global.gc();
+        }
         router.replace('/');
         return true;
       }
     );
 
-    addCleanup(() => backHandler.remove());
+    // ✅ Nettoyage plus strict
+    addCleanup(() => {
+      backHandler.remove();
+      // Force cleanup
+      setTable(null);
+      setActiveCategory(null);
+      setActiveType(null);
+    });
   }, [router, addCleanup]);
 
   // ✅ Handler pour ajouter un item (avec debounce)

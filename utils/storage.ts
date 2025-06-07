@@ -86,37 +86,34 @@ const FORCE_CLEANUP_THRESHOLD = 5000; // AUGMENTÉ de 600 à 5000
 const AUTO_CLEANUP_ENABLED = false; // ✅ DÉSACTIVÉ par défaut
 
 // ✅ Cache en mémoire avec limite raisonnable
-const memoryCache = new Map<string, { data: any; timestamp: number; expires: number }>();
-const CACHE_TTL = 10 * 1000; // 30 secondes
-const MAX_CACHE_ENTRIES = 8; // Augmenté pour plus de performance
+const memoryCache = new Map<
+  string,
+  { data: any; timestamp: number; expires: number }
+>();
+const CACHE_TTL = 3 * 1000; // ✅ Réduit à 3 secondes
+const MAX_CACHE_ENTRIES = 3; // Augmenté pour plus de performance
 
 // ✅ Fonction de cache intelligente
 const getCachedData = <T>(key: string): T | null => {
   const cached = memoryCache.get(key);
   if (!cached) return null;
-  
+
   const now = Date.now();
   if (now > cached.expires) {
     memoryCache.delete(key);
     return null;
   }
-  
+
   return cached.data as T;
 };
 
 const setCachedData = <T>(key: string, data: T): void => {
   const now = Date.now();
 
-  // ✅ Nettoyage plus agressif - supprimer 50% quand limite atteinte
+  // ✅ Nettoyage BEAUCOUP plus agressif - supprimer TOUT quand limite atteinte
   if (memoryCache.size >= MAX_CACHE_ENTRIES) {
-    const sortedEntries = Array.from(memoryCache.entries()).sort(
-      (a, b) => a[1].timestamp - b[1].timestamp
-    );
-
-    const toDelete = Math.ceil(sortedEntries.length / 2); // Supprimer 50%
-    for (let i = 0; i < toDelete; i++) {
-      memoryCache.delete(sortedEntries[i][0]);
-    }
+    memoryCache.clear(); // ✅ Vider complètement au lieu de trier
+    console.log('🧹 Cache mémoire vidé complètement');
   }
 
   memoryCache.set(key, {
@@ -141,16 +138,11 @@ if (!cacheCleanupInterval) {
 
     keysToDelete.forEach((key) => memoryCache.delete(key));
 
-    // ✅ Forcer un nettoyage si trop d'entrées même valides
-    if (memoryCache.size > MAX_CACHE_ENTRIES) {
-      const sortedEntries = Array.from(memoryCache.entries()).sort(
-        (a, b) => a[1].timestamp - b[1].timestamp
-      );
-
-      const excess = memoryCache.size - MAX_CACHE_ENTRIES;
-      for (let i = 0; i < excess; i++) {
-        memoryCache.delete(sortedEntries[i][0]);
-      }
+    // ✅ Nettoyage automatique plus agressif
+    if (memoryCache.size > 1) {
+      // Au lieu de MAX_CACHE_ENTRIES
+      memoryCache.clear();
+      console.log('🧹 Nettoyage forcé - cache vidé');
     }
 
     if (keysToDelete.length > 0) {
@@ -158,7 +150,7 @@ if (!cacheCleanupInterval) {
         `🧹 Cache nettoyé: ${keysToDelete.length} entrées, taille: ${memoryCache.size}`
       );
     }
-  }, 15000); // Toutes les 15 secondes au lieu de 60
+  }, 3000); // ✅ Toutes les 3 secondes au lieu de 15
 }
 
 const clearCache = () => {
