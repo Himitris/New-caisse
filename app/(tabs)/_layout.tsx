@@ -2,15 +2,14 @@
 
 import { Tabs } from 'expo-router';
 import {
+  DollarSign,
+  FileText,
   LayoutGrid,
-  UtensilsCrossed,
   Receipt,
   Settings,
-  BarChart3,
-  FileText,
-  DollarSign,
+  UtensilsCrossed
 } from 'lucide-react-native';
-import { View, StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 
 export default function TabLayout() {
   return (

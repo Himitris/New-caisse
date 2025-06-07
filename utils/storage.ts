@@ -1,4 +1,4 @@
-// utils/storage.ts - Version sécurisée sans suppression automatique
+// utils/storage.ts - Version sans cache
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -15,7 +15,7 @@ export interface Table {
 
 export interface OrderItem {
   id: number;
-  menuId?: number; 
+  menuId?: number;
   name: string;
   price: number;
   quantity: number;
@@ -75,103 +75,34 @@ const STORAGE_KEYS = {
   BILLS: 'manjo_carn_bills',
   MENU_AVAILABILITY: 'manjo_carn_menu_availability',
   CUSTOM_MENU_ITEMS: 'manjo_carn_custom_menu_items',
-  CLEANUP_METADATA: 'manjo_carn_cleanup_metadata'
+  CLEANUP_METADATA: 'manjo_carn_cleanup_metadata',
 } as const;
 
 // ✅ LIMITES SÉCURISÉES pour préserver toutes les données
-const MAX_BILLS_IN_STORAGE = 10000; // AUGMENTÉ de 500 à 10000
-const MAX_BILLS_PER_SESSION = 1000; // AUGMENTÉ de 200 à 1000  
-const BILLS_RETENTION_DAYS = 365; // AUGMENTÉ de 15 à 365 jours (1 an)
-const FORCE_CLEANUP_THRESHOLD = 5000; // AUGMENTÉ de 600 à 5000
-const AUTO_CLEANUP_ENABLED = false; // ✅ DÉSACTIVÉ par défaut
+const MAX_BILLS_IN_STORAGE = 10000;
+const MAX_BILLS_PER_SESSION = 1000;
+const BILLS_RETENTION_DAYS = 365;
+const FORCE_CLEANUP_THRESHOLD = 5000;
+const AUTO_CLEANUP_ENABLED = false;
 
-// ✅ Cache en mémoire avec limite raisonnable
-const memoryCache = new Map<
-  string,
-  { data: any; timestamp: number; expires: number }
->();
-const CACHE_TTL = 3 * 1000; // ✅ Réduit à 3 secondes
-const MAX_CACHE_ENTRIES = 3; // Augmenté pour plus de performance
-
-// ✅ Fonction de cache intelligente
-const getCachedData = <T>(key: string): T | null => {
-  const cached = memoryCache.get(key);
-  if (!cached) return null;
-
-  const now = Date.now();
-  if (now > cached.expires) {
-    memoryCache.delete(key);
-    return null;
-  }
-
-  return cached.data as T;
-};
-
-const setCachedData = <T>(key: string, data: T): void => {
-  const now = Date.now();
-
-  // ✅ Nettoyage BEAUCOUP plus agressif - supprimer TOUT quand limite atteinte
-  if (memoryCache.size >= MAX_CACHE_ENTRIES) {
-    memoryCache.clear(); // ✅ Vider complètement au lieu de trier
-    console.log('🧹 Cache mémoire vidé complètement');
-  }
-
-  memoryCache.set(key, {
-    data,
-    timestamp: now,
-    expires: now + CACHE_TTL,
-  });
-};
-
-let cacheCleanupInterval: ReturnType<typeof setInterval> | null = null;
-
-if (!cacheCleanupInterval) {
-  cacheCleanupInterval = setInterval(() => {
-    const now = Date.now();
-    const keysToDelete: string[] = [];
-
-    memoryCache.forEach((entry, key) => {
-      if (now > entry.expires) {
-        keysToDelete.push(key);
-      }
-    });
-
-    keysToDelete.forEach((key) => memoryCache.delete(key));
-
-    // ✅ Nettoyage automatique plus agressif
-    if (memoryCache.size > 1) {
-      // Au lieu de MAX_CACHE_ENTRIES
-      memoryCache.clear();
-      console.log('🧹 Nettoyage forcé - cache vidé');
-    }
-
-    if (keysToDelete.length > 0) {
-      console.log(
-        `🧹 Cache nettoyé: ${keysToDelete.length} entrées, taille: ${memoryCache.size}`
-      );
-    }
-  }, 3000); // ✅ Toutes les 3 secondes au lieu de 15
-}
-
-const clearCache = () => {
-  memoryCache.clear();
-  console.log('🧹 Cache mémoire vidé');
-};
-
-// ✅ Fonctions utilitaires ultra-optimisées
+// ✅ Fonctions utilitaires simplifiées
 const save = async (key: string, data: any): Promise<void> => {
   try {
     const serialized = JSON.stringify(data);
-    
+
     // Alerter si les données deviennent volumineuses
-    if (serialized.length > 2 * 1024 * 1024) { // 2MB - seuil augmenté
-      console.warn(`⚠️ Données volumineuses pour ${key}: ${(serialized.length / 1024 / 1024).toFixed(1)}MB`);
+    if (serialized.length > 2 * 1024 * 1024) {
+      // 2MB
+      console.warn(
+        `⚠️ Données volumineuses pour ${key}: ${(
+          serialized.length /
+          1024 /
+          1024
+        ).toFixed(1)}MB`
+      );
     }
-    
+
     await AsyncStorage.setItem(key, serialized);
-    
-    // Mettre à jour le cache
-    setCachedData(key, data);
   } catch (error) {
     console.error(`Error saving ${key}:`, error);
     throw error;
@@ -180,19 +111,8 @@ const save = async (key: string, data: any): Promise<void> => {
 
 const load = async <T>(key: string, defaultValue: T): Promise<T> => {
   try {
-    // Vérifier le cache d'abord
-    const cached = getCachedData<T>(key);
-    if (cached !== null) {
-      return cached;
-    }
-    
     const data = await AsyncStorage.getItem(key);
-    const result = data ? JSON.parse(data) : defaultValue;
-    
-    // Mettre en cache
-    setCachedData(key, result);
-    
-    return result;
+    return data ? JSON.parse(data) : defaultValue;
   } catch (error) {
     console.error(`Error loading ${key}:`, error);
     return defaultValue;
@@ -214,56 +134,280 @@ const getCleanupMetadata = async (): Promise<CleanupMetadata> => {
     lastBillsCount: 0,
     cleanupCount: 0,
     lastForceCleanup: new Date().toISOString(),
-    autoCleanupEnabled: AUTO_CLEANUP_ENABLED
+    autoCleanupEnabled: AUTO_CLEANUP_ENABLED,
   });
 };
 
-const saveCleanupMetadata = async (metadata: CleanupMetadata): Promise<void> => {
+const saveCleanupMetadata = async (
+  metadata: CleanupMetadata
+): Promise<void> => {
   await save(STORAGE_KEYS.CLEANUP_METADATA, metadata);
 };
 
-// ✅ TABLES - Inchangées
+// ✅ TABLES
 export const defaultTables: Table[] = [
   // Tables EAU
-  { id: 1, name: 'Doc 1', section: TABLE_SECTIONS.EAU, status: 'available', seats: 4 },
-  { id: 2, name: 'Doc 2', section: TABLE_SECTIONS.EAU, status: 'available', seats: 4 },
-  { id: 3, name: 'Doc 3', section: TABLE_SECTIONS.EAU, status: 'available', seats: 4 },
-  { id: 4, name: 'Vue 1', section: TABLE_SECTIONS.EAU, status: 'available', seats: 4 },
-  { id: 5, name: 'Vue 2', section: TABLE_SECTIONS.EAU, status: 'available', seats: 4 },
-  { id: 6, name: 'R1', section: TABLE_SECTIONS.EAU, status: 'available', seats: 2 },
-  { id: 7, name: 'R2', section: TABLE_SECTIONS.EAU, status: 'available', seats: 2 },
-  { id: 8, name: 'R3', section: TABLE_SECTIONS.EAU, status: 'available', seats: 2 },
-  { id: 9, name: 'R4', section: TABLE_SECTIONS.EAU, status: 'available', seats: 2 },
-  { id: 10, name: 'Poteau', section: TABLE_SECTIONS.EAU, status: 'available', seats: 4 },
-  { id: 11, name: 'Ext 1', section: TABLE_SECTIONS.EAU, status: 'available', seats: 4 },
-  { id: 12, name: 'Ext 2', section: TABLE_SECTIONS.EAU, status: 'available', seats: 4 },
-  { id: 13, name: 'Ext Rge', section: TABLE_SECTIONS.EAU, status: 'available', seats: 6 },
-  
+  {
+    id: 1,
+    name: 'Doc 1',
+    section: TABLE_SECTIONS.EAU,
+    status: 'available',
+    seats: 4,
+  },
+  {
+    id: 2,
+    name: 'Doc 2',
+    section: TABLE_SECTIONS.EAU,
+    status: 'available',
+    seats: 4,
+  },
+  {
+    id: 3,
+    name: 'Doc 3',
+    section: TABLE_SECTIONS.EAU,
+    status: 'available',
+    seats: 4,
+  },
+  {
+    id: 4,
+    name: 'Vue 1',
+    section: TABLE_SECTIONS.EAU,
+    status: 'available',
+    seats: 4,
+  },
+  {
+    id: 5,
+    name: 'Vue 2',
+    section: TABLE_SECTIONS.EAU,
+    status: 'available',
+    seats: 4,
+  },
+  {
+    id: 6,
+    name: 'R1',
+    section: TABLE_SECTIONS.EAU,
+    status: 'available',
+    seats: 2,
+  },
+  {
+    id: 7,
+    name: 'R2',
+    section: TABLE_SECTIONS.EAU,
+    status: 'available',
+    seats: 2,
+  },
+  {
+    id: 8,
+    name: 'R3',
+    section: TABLE_SECTIONS.EAU,
+    status: 'available',
+    seats: 2,
+  },
+  {
+    id: 9,
+    name: 'R4',
+    section: TABLE_SECTIONS.EAU,
+    status: 'available',
+    seats: 2,
+  },
+  {
+    id: 10,
+    name: 'Poteau',
+    section: TABLE_SECTIONS.EAU,
+    status: 'available',
+    seats: 4,
+  },
+  {
+    id: 11,
+    name: 'Ext 1',
+    section: TABLE_SECTIONS.EAU,
+    status: 'available',
+    seats: 4,
+  },
+  {
+    id: 12,
+    name: 'Ext 2',
+    section: TABLE_SECTIONS.EAU,
+    status: 'available',
+    seats: 4,
+  },
+  {
+    id: 13,
+    name: 'Ext Rge',
+    section: TABLE_SECTIONS.EAU,
+    status: 'available',
+    seats: 6,
+  },
+
   // Tables BUIS
-  { id: 14, name: 'Bas 0', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 15, name: 'Bas 1', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 16, name: 'Arbre 1', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 17, name: 'Arbre 2', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 18, name: 'Tronc', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 2 },
-  { id: 19, name: 'Caillou', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 2 },
-  { id: 20, name: 'Escalier 1', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 21, name: 'Escalier 2', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 22, name: 'Transfo', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 6 },
-  { id: 23, name: 'Bache 1', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 24, name: 'Bache 2', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 25, name: 'Bache 3', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 26, name: 'Che 1', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 27, name: 'Che 2', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 28, name: 'PDC 1', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 29, name: 'PDC 2', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 30, name: 'Eve Rgb', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 6 },
-  { id: 31, name: 'Eve Bois', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 6 },
-  { id: 32, name: 'HDB', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 33, name: 'Lukas 1', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 34, name: 'Lukas 2', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 35, name: 'Route 1', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 36, name: 'Route 2', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 37, name: 'Sous Cabane', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 6 },
+  {
+    id: 14,
+    name: 'Bas 0',
+    section: TABLE_SECTIONS.BUIS,
+    status: 'available',
+    seats: 4,
+  },
+  {
+    id: 15,
+    name: 'Bas 1',
+    section: TABLE_SECTIONS.BUIS,
+    status: 'available',
+    seats: 4,
+  },
+  {
+    id: 16,
+    name: 'Arbre 1',
+    section: TABLE_SECTIONS.BUIS,
+    status: 'available',
+    seats: 4,
+  },
+  {
+    id: 17,
+    name: 'Arbre 2',
+    section: TABLE_SECTIONS.BUIS,
+    status: 'available',
+    seats: 4,
+  },
+  {
+    id: 18,
+    name: 'Tronc',
+    section: TABLE_SECTIONS.BUIS,
+    status: 'available',
+    seats: 2,
+  },
+  {
+    id: 19,
+    name: 'Caillou',
+    section: TABLE_SECTIONS.BUIS,
+    status: 'available',
+    seats: 2,
+  },
+  {
+    id: 20,
+    name: 'Escalier 1',
+    section: TABLE_SECTIONS.BUIS,
+    status: 'available',
+    seats: 4,
+  },
+  {
+    id: 21,
+    name: 'Escalier 2',
+    section: TABLE_SECTIONS.BUIS,
+    status: 'available',
+    seats: 4,
+  },
+  {
+    id: 22,
+    name: 'Transfo',
+    section: TABLE_SECTIONS.BUIS,
+    status: 'available',
+    seats: 6,
+  },
+  {
+    id: 23,
+    name: 'Bache 1',
+    section: TABLE_SECTIONS.BUIS,
+    status: 'available',
+    seats: 4,
+  },
+  {
+    id: 24,
+    name: 'Bache 2',
+    section: TABLE_SECTIONS.BUIS,
+    status: 'available',
+    seats: 4,
+  },
+  {
+    id: 25,
+    name: 'Bache 3',
+    section: TABLE_SECTIONS.BUIS,
+    status: 'available',
+    seats: 4,
+  },
+  {
+    id: 26,
+    name: 'Che 1',
+    section: TABLE_SECTIONS.BUIS,
+    status: 'available',
+    seats: 4,
+  },
+  {
+    id: 27,
+    name: 'Che 2',
+    section: TABLE_SECTIONS.BUIS,
+    status: 'available',
+    seats: 4,
+  },
+  {
+    id: 28,
+    name: 'PDC 1',
+    section: TABLE_SECTIONS.BUIS,
+    status: 'available',
+    seats: 4,
+  },
+  {
+    id: 29,
+    name: 'PDC 2',
+    section: TABLE_SECTIONS.BUIS,
+    status: 'available',
+    seats: 4,
+  },
+  {
+    id: 30,
+    name: 'Eve Rgb',
+    section: TABLE_SECTIONS.BUIS,
+    status: 'available',
+    seats: 6,
+  },
+  {
+    id: 31,
+    name: 'Eve Bois',
+    section: TABLE_SECTIONS.BUIS,
+    status: 'available',
+    seats: 6,
+  },
+  {
+    id: 32,
+    name: 'HDB',
+    section: TABLE_SECTIONS.BUIS,
+    status: 'available',
+    seats: 4,
+  },
+  {
+    id: 33,
+    name: 'Lukas 1',
+    section: TABLE_SECTIONS.BUIS,
+    status: 'available',
+    seats: 4,
+  },
+  {
+    id: 34,
+    name: 'Lukas 2',
+    section: TABLE_SECTIONS.BUIS,
+    status: 'available',
+    seats: 4,
+  },
+  {
+    id: 35,
+    name: 'Route 1',
+    section: TABLE_SECTIONS.BUIS,
+    status: 'available',
+    seats: 4,
+  },
+  {
+    id: 36,
+    name: 'Route 2',
+    section: TABLE_SECTIONS.BUIS,
+    status: 'available',
+    seats: 4,
+  },
+  {
+    id: 37,
+    name: 'Sous Cabane',
+    section: TABLE_SECTIONS.BUIS,
+    status: 'available',
+    seats: 6,
+  },
 ];
 
 export const initializeTables = async (): Promise<void> => {
@@ -333,34 +477,41 @@ export const getBills = async (): Promise<Bill[]> => {
 // ✅ Fonction intelligentBillsCleanup - SEULEMENT pour simulation
 const intelligentBillsCleanup = async (bills: Bill[]): Promise<Bill[]> => {
   const now = new Date();
-  const retentionDate = new Date(now.getTime() - (BILLS_RETENTION_DAYS * 24 * 60 * 60 * 1000));
-  
+  const retentionDate = new Date(
+    now.getTime() - BILLS_RETENTION_DAYS * 24 * 60 * 60 * 1000
+  );
+
   // Trier par date (plus récents d'abord)
-  const sortedBills = bills.sort((a, b) => 
-    new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  const sortedBills = bills.sort(
+    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
   );
-  
+
   let cleanedBills = sortedBills;
-  
+
   // 1. Supprimer les factures anciennes
-  cleanedBills = cleanedBills.filter(bill => 
-    new Date(bill.timestamp) > retentionDate
+  cleanedBills = cleanedBills.filter(
+    (bill) => new Date(bill.timestamp) > retentionDate
   );
-  
+
   // 2. Si encore trop de factures, garder seulement les plus récentes
   if (cleanedBills.length > MAX_BILLS_IN_STORAGE) {
     cleanedBills = cleanedBills.slice(0, MAX_BILLS_IN_STORAGE);
   }
-  
+
   // 3. Supprimer les doublons potentiels
   const uniqueBills = new Map<string, Bill>();
-  cleanedBills.forEach(bill => {
-    const key = `${bill.tableNumber}-${bill.amount}-${new Date(bill.timestamp).toDateString()}`;
-    if (!uniqueBills.has(key) || uniqueBills.get(key)!.timestamp < bill.timestamp) {
+  cleanedBills.forEach((bill) => {
+    const key = `${bill.tableNumber}-${bill.amount}-${new Date(
+      bill.timestamp
+    ).toDateString()}`;
+    if (
+      !uniqueBills.has(key) ||
+      uniqueBills.get(key)!.timestamp < bill.timestamp
+    ) {
       uniqueBills.set(key, bill);
     }
   });
-  
+
   return Array.from(uniqueBills.values());
 };
 
@@ -369,30 +520,34 @@ export const addBill = async (bill: Bill): Promise<void> => {
   try {
     const bills = await getBills();
     bills.push(bill);
-    
+
     // ✅ SURVEILLANCE SEULEMENT - pas de suppression
     if (!AUTO_CLEANUP_ENABLED) {
       // Juste des alertes pour information
       if (bills.length > MAX_BILLS_PER_SESSION) {
-        console.info(`ℹ️ Info: ${bills.length} factures en mémoire (seuil: ${MAX_BILLS_PER_SESSION})`);
+        console.info(
+          `ℹ️ Info: ${bills.length} factures en mémoire (seuil: ${MAX_BILLS_PER_SESSION})`
+        );
       }
-      
+
       if (bills.length > FORCE_CLEANUP_THRESHOLD) {
-        console.warn(`⚠️ Attention: ${bills.length} factures en mémoire (seuil critique: ${FORCE_CLEANUP_THRESHOLD})`);
-        console.warn(`💡 Conseil: Envisagez un nettoyage manuel via les paramètres`);
-        
+        console.warn(
+          `⚠️ Attention: ${bills.length} factures en mémoire (seuil critique: ${FORCE_CLEANUP_THRESHOLD})`
+        );
+        console.warn(
+          `💡 Conseil: Envisagez un nettoyage manuel via les paramètres`
+        );
+
         // Simulation de nettoyage pour information
         const simulatedCleaned = await intelligentBillsCleanup(bills);
-        console.info(`🔍 Simulation nettoyage: ${bills.length} → ${simulatedCleaned.length} (non appliqué)`);
+        console.info(
+          `🔍 Simulation nettoyage: ${bills.length} → ${simulatedCleaned.length} (non appliqué)`
+        );
       }
     }
-    
+
     // Sauvegarder TOUTES les factures
     await save(STORAGE_KEYS.BILLS, bills);
-    
-    // Vider le cache pour forcer le rechargement
-    memoryCache.delete(STORAGE_KEYS.BILLS);
-    
   } catch (error) {
     console.error('Error adding bill:', error);
     throw error;
@@ -403,13 +558,10 @@ export const addBill = async (bill: Bill): Promise<void> => {
 export const performPeriodicCleanup = async (): Promise<void> => {
   try {
     console.log('🧹 Maintenance périodique demandée...');
-    
+
     if (!AUTO_CLEANUP_ENABLED) {
       console.log('ℹ️ Nettoyage automatique désactivé - données protégées');
-      
-      // Juste nettoyer le cache mémoire
-      clearCache();
-      
+
       // Mettre à jour les métadonnées sans supprimer de factures
       const bills = await getBills();
       const metadata = await getCleanupMetadata();
@@ -417,15 +569,13 @@ export const performPeriodicCleanup = async (): Promise<void> => {
       metadata.lastBillsCount = bills.length;
       metadata.autoCleanupEnabled = false;
       await saveCleanupMetadata(metadata);
-      
+
       console.log(`📊 Stats: ${bills.length} factures conservées`);
       return;
     }
-    
+
     // Code de nettoyage automatique (inactif par défaut)
     console.log('⚠️ Nettoyage automatique activé');
-    // ... reste du code de nettoyage original si AUTO_CLEANUP_ENABLED = true
-    
   } catch (error) {
     console.error('Erreur lors de la maintenance périodique:', error);
   }
@@ -443,49 +593,52 @@ export const manualCleanupBills = async (options: {
 }): Promise<{ removed: number; kept: number }> => {
   try {
     const bills = await getBills();
-    
+
     // Demander confirmation si callback fourni
     if (options.confirmCallback && !options.confirmCallback()) {
       return { removed: 0, kept: bills.length };
     }
-    
+
     let cleanedBills = [...bills];
-    
+
     // Supprimer les factures anciennes si spécifié
     if (options.olderThanDays) {
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - options.olderThanDays);
-      
-      cleanedBills = cleanedBills.filter(bill => 
-        new Date(bill.timestamp) > cutoffDate
+
+      cleanedBills = cleanedBills.filter(
+        (bill) => new Date(bill.timestamp) > cutoffDate
       );
     }
-    
+
     // Garder seulement un certain nombre si spécifié
     if (options.keepCount && cleanedBills.length > options.keepCount) {
       cleanedBills = cleanedBills
-        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+        .sort(
+          (a, b) =>
+            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+        )
         .slice(0, options.keepCount);
     }
-    
+
     const removed = bills.length - cleanedBills.length;
-    
+
     if (removed > 0) {
       await saveBills(cleanedBills);
-      console.log(`🧹 Nettoyage manuel: ${removed} factures supprimées, ${cleanedBills.length} conservées`);
+      console.log(
+        `🧹 Nettoyage manuel: ${removed} factures supprimées, ${cleanedBills.length} conservées`
+      );
     }
-    
+
     return { removed, kept: cleanedBills.length };
-    
   } catch (error) {
     console.error('Erreur lors du nettoyage manuel:', error);
     throw error;
   }
 };
 
-// ✅ Pagination optimisée avec cache
+// ✅ Pagination directe
 export const getBillsPage = async (page: number = 0, pageSize: number = 20) => {
-  // ✅ SANS cache - calcul direct
   const allBills = await getBills();
   const sorted = [...allBills].sort(
     (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
@@ -501,13 +654,12 @@ export const getBillsPage = async (page: number = 0, pageSize: number = 20) => {
   };
 };
 
-// ✅ Filtrage optimisé avec cache
+// ✅ Filtrage direct
 export const getFilteredBills = async (filters: {
   searchText?: string;
   dateRange?: { start: Date; end: Date };
   paymentMethod?: string;
 }) => {
-  // ✅ SANS cache - calcul direct
   const allBills = await getBills();
 
   return allBills.filter((bill) => {
@@ -539,11 +691,15 @@ export const getFilteredBills = async (filters: {
 };
 
 // ✅ MENU - Fonctions inchangées
-export const getMenuAvailability = async (): Promise<MenuItemAvailability[]> => {
+export const getMenuAvailability = async (): Promise<
+  MenuItemAvailability[]
+> => {
   return load<MenuItemAvailability[]>(STORAGE_KEYS.MENU_AVAILABILITY, []);
 };
 
-export const saveMenuAvailability = async (items: MenuItemAvailability[]): Promise<void> => {
+export const saveMenuAvailability = async (
+  items: MenuItemAvailability[]
+): Promise<void> => {
   await save(STORAGE_KEYS.MENU_AVAILABILITY, items);
 };
 
@@ -551,17 +707,23 @@ export const getCustomMenuItems = async (): Promise<CustomMenuItem[]> => {
   return load<CustomMenuItem[]>(STORAGE_KEYS.CUSTOM_MENU_ITEMS, []);
 };
 
-export const saveCustomMenuItems = async (items: CustomMenuItem[]): Promise<void> => {
+export const saveCustomMenuItems = async (
+  items: CustomMenuItem[]
+): Promise<void> => {
   await save(STORAGE_KEYS.CUSTOM_MENU_ITEMS, items);
 };
 
-export const addCustomMenuItem = async (item: CustomMenuItem): Promise<void> => {
+export const addCustomMenuItem = async (
+  item: CustomMenuItem
+): Promise<void> => {
   const items = await getCustomMenuItems();
   items.push(item);
   await saveCustomMenuItems(items);
 };
 
-export const updateCustomMenuItem = async (updatedItem: CustomMenuItem): Promise<void> => {
+export const updateCustomMenuItem = async (
+  updatedItem: CustomMenuItem
+): Promise<void> => {
   const items = await getCustomMenuItems();
   const index = items.findIndex((item) => item.id === updatedItem.id);
   if (index >= 0) {
@@ -582,65 +744,66 @@ export class StorageManager {
     const value = await AsyncStorage.getItem('manjo_carn_first_launch');
     return value === null;
   }
-  
+
   static async markAppLaunched(): Promise<void> {
     await AsyncStorage.setItem('manjo_carn_first_launch', 'false');
   }
-  
+
   static async performMaintenance(): Promise<void> {
     console.log('🔧 Maintenance sécurisée du storage...');
     await performPeriodicCleanup();
   }
-  
-  static async resetApplicationData(): Promise<void>  {
+
+  static async resetApplicationData(): Promise<void> {
     try {
       await saveBills([]);
       await saveMenuAvailability([]);
       await resetAllTables();
-      clearCache();
-      console.log('🔄 Données de l\'application réinitialisées');
+      console.log("🔄 Données de l'application réinitialisées");
     } catch (error) {
       console.error('Error resetting application data:', error);
     }
   }
-  
+
   // ✅ Stats de storage SÉCURISÉES
   static async getStorageStats(): Promise<{
     billsCount: number;
-    cacheSize: number;
     lastCleanup: string;
     storageHealth: 'good' | 'warning' | 'critical';
     autoCleanupEnabled: boolean;
   }> {
     const bills = await getBills();
     const metadata = await getCleanupMetadata();
-    
+
     let health: 'good' | 'warning' | 'critical' = 'good';
-    if (bills.length > 1000) health = 'warning';  // Seuils sécurisés
+    if (bills.length > 1000) health = 'warning';
     if (bills.length > 5000) health = 'critical';
-    
+
     return {
       billsCount: bills.length,
-      cacheSize: memoryCache.size,
       lastCleanup: metadata.lastCleanup,
       storageHealth: health,
       autoCleanupEnabled: AUTO_CLEANUP_ENABLED,
     };
   }
-  
+
   // ✅ Nettoyage manuel depuis l'interface
-  static async requestManualCleanup(olderThanDays: number = 30): Promise<{ removed: number; kept: number }> {
+  static async requestManualCleanup(
+    olderThanDays: number = 30
+  ): Promise<{ removed: number; kept: number }> {
     return manualCleanupBills({
       olderThanDays,
       confirmCallback: () => {
-        console.log(`🗑️ Nettoyage manuel demandé: factures > ${olderThanDays} jours`);
+        console.log(
+          `🗑️ Nettoyage manuel demandé: factures > ${olderThanDays} jours`
+        );
         return true;
-      }
+      },
     });
   }
-  
+
   // ✅ Activer/désactiver le nettoyage automatique
-  static async setAutoCleanup(enabled: boolean): Promise<void>  {
+  static async setAutoCleanup(enabled: boolean): Promise<void> {
     const metadata = await getCleanupMetadata();
     metadata.autoCleanupEnabled = enabled;
     await saveCleanupMetadata(metadata);
@@ -665,7 +828,6 @@ export class TableManager {
 export class BillManager {
   static async clearAllBills(): Promise<void> {
     await saveBills([]);
-    clearCache();
     console.log('🗑️ Toutes les factures supprimées manuellement');
   }
 
@@ -673,38 +835,42 @@ export class BillManager {
   static async smartCleanup(): Promise<void> {
     console.log('🧹 smartCleanup appelé - mode sécurisé');
     if (!AUTO_CLEANUP_ENABLED) {
-      console.log('ℹ️ Nettoyage automatique désactivé - aucune facture supprimée');
-      // Juste nettoyer le cache mémoire
-      clearCache();
+      console.log(
+        'ℹ️ Nettoyage automatique désactivé - aucune facture supprimée'
+      );
       return;
     }
-    
+
     // Si le nettoyage automatique était activé, appeler la nouvelle méthode
     await BillManager.requestSmartCleanup();
   }
 
   // ✅ Nettoyage intelligent MANUEL
-  static async requestSmartCleanup(maxAge: number = 90): Promise<{ removed: number; kept: number }> {
+  static async requestSmartCleanup(
+    maxAge: number = 90
+  ): Promise<{ removed: number; kept: number }> {
     console.log(`🧹 Nettoyage intelligent demandé: factures > ${maxAge} jours`);
     return manualCleanupBills({
       olderThanDays: maxAge,
-      confirmCallback: () => true
+      confirmCallback: () => true,
     });
   }
-  
+
   // ✅ Simulation de nettoyage pour prévisualiser
-  static async simulateCleanup(olderThanDays: number = 30): Promise<{ wouldRemove: number; wouldKeep: number }> {
+  static async simulateCleanup(
+    olderThanDays: number = 30
+  ): Promise<{ wouldRemove: number; wouldKeep: number }> {
     const bills = await getBills();
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
-    
-    const wouldKeep = bills.filter(bill => 
-      new Date(bill.timestamp) > cutoffDate
+
+    const wouldKeep = bills.filter(
+      (bill) => new Date(bill.timestamp) > cutoffDate
     ).length;
-    
+
     return {
       wouldRemove: bills.length - wouldKeep,
-      wouldKeep
+      wouldKeep,
     };
   }
 }

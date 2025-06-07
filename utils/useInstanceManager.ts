@@ -60,6 +60,16 @@ export const useInstanceManager = (componentName?: string) => {
           }
         }
         timersRef.current.delete(timer);
+
+        // ✅ NOUVEAU : Nettoyage automatique si trop de timers
+        if (timersRef.current.size > 3) {
+          console.warn('⚠️ Trop de timers actifs, nettoyage forcé');
+          timersRef.current.forEach((t) => {
+            clearTimeout(t);
+            clearInterval(t);
+          });
+          timersRef.current.clear();
+        }
       }, delay);
 
       timersRef.current.add(timer);

@@ -44,7 +44,7 @@ import {
 } from '../../utils/storage';
 import { useTableContext } from '../../utils/TableContext';
 import { useToast } from '../../utils/ToastContext';
-import { useMenu } from '../../utils/MenuManager';
+import { menuManager, useMenu } from '../../utils/MenuManager';
 import { useInstanceManager } from '../../utils/useInstanceManager';
 import { useSettings } from '@/utils/useSettings';
 import SplitSelectionModal from '../components/SplitSelectionModal';
@@ -319,54 +319,22 @@ export default function TableScreen(): JSX.Element {
     loadTable();
   }, [loadTable]);
 
-  useFocusEffect(
-    useCallback(() => {
-      if (!loading) {
-        loadTable();
-      }
-
-      // ✅ Nettoyage forcé des caches lors du focus
-      return () => {
-        // Vider les caches quand on quitte la page
-        if (typeof global !== 'undefined' && global.gc) {
-          global.gc();
-        }
-      };
-    }, [loading, loadTable])
-  );
-  
   useEffect(() => {
-    // ✅ Cleanup automatique toutes les 10 secondes
-    const cleanupInterval = setInterval(() => {
-      if (typeof global !== 'undefined' && global.gc) {
-        global.gc();
-      }
-    }, 10000);
+    loadTable();
+  }, [tableId]);
 
-    addCleanup(() => clearInterval(cleanupInterval));
-  }, [addCleanup]);
-
-  // ✅ Gestion bouton retour
+  // ✅ Modifier la gestion du bouton retour pour être plus brutal
   useEffect(() => {
     const backHandler = BackHandler.addEventListener(
       'hardwareBackPress',
       () => {
-        // ✅ Nettoyage immédiat avant navigation
-        if (typeof global !== 'undefined' && global.gc) {
-          global.gc();
-        }
         router.replace('/');
         return true;
       }
     );
 
-    // ✅ Nettoyage plus strict
     addCleanup(() => {
       backHandler.remove();
-      // Force cleanup
-      setTable(null);
-      setActiveCategory(null);
-      setActiveType(null);
     });
   }, [router, addCleanup]);
 

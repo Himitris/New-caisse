@@ -1,26 +1,24 @@
 // app/_layout.tsx - INTÉGRATION SIMPLIFIÉE
 
-import { useEffect, useState } from 'react';
+import { TableProvider } from '@/utils/TableContext';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { menuManager } from '../utils/MenuManager'; // ✅ Import du MenuManager
+import { useEffect, useState } from 'react';
 import {
-  View,
-  Text,
   ActivityIndicator,
   AppState,
   AppStateStatus,
+  Text,
+  View,
 } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { menuManager } from '../utils/MenuManager';
+import { SettingsProvider } from '../utils/SettingsContext';
 import {
-  BillManager,
   initializeTables,
-  performPeriodicCleanup,
-  StorageManager,
+  performPeriodicCleanup
 } from '../utils/storage';
 import { ToastProvider } from '../utils/ToastContext';
-import { SettingsProvider } from '../utils/SettingsContext';
-import { TableProvider } from '@/utils/TableContext';
 
 // ✅ Constantes simplifiées
 const CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes au lieu de 3
