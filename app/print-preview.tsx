@@ -95,19 +95,98 @@ export default function PrintPreviewScreen() {
           offeredTotal += itemTotal;
         }
 
-        // Format simplifié en colonnes pour papier 80mm
         return `
     <tr class="${item.offered ? 'offered-item' : ''}">
-      <td>${item.quantity}x</td>
-      <td>${item.name}${item.offered ? ' (Offert)' : ''}</td>
-      <td>${itemTotal.toFixed(2)}€</td>
+      <td style="font-size: 14pt; padding: 2mm 0;">${item.quantity}x</td>
+      <td style="font-size: 14pt; padding: 2mm 0;">${item.name}${
+          item.offered ? ' (Offert)' : ''
+        }</td>
+      <td style="text-align: right; font-size: 14pt; padding: 2mm 0;">${itemTotal.toFixed(
+        2
+      )}€</td>
     </tr>
     `;
       })
       .join('');
 
-    // Information sur la TVA (maintenant toujours la même)
-    const taxInfo = 'TVA non applicable - art.293B du CGI';
+    // ✅ Information sur la TVA (maintenant cohérente avec bills.tsx)
+    const taxInfo =
+      restaurantInfo.taxInfo || 'TVA non applicable - art.293B du CGI';
+
+    // ✅ NOUVEAU : Détection du type de paiement et calculs unifiés
+    const originalTotal = order.total;
+    const paidAmount = order.isPartial
+      ? order.total - order.remaining
+      : order.total;
+    const isPartialPayment = order.isPartial && order.remaining > 0;
+
+    // ✅ Déterminer le type de paiement pour l'affichage
+    let paymentType = 'full';
+    if (isPreviewMode) {
+      paymentType = 'preview';
+    } else if (isPartialPayment) {
+      paymentType = 'partial';
+    }
+
+    // ✅ Section de paiement unifiée
+    let paymentSectionHTML = '';
+
+    if (isPreviewMode) {
+      paymentSectionHTML = `
+      <div style="border: 2px solid #9C27B0; padding: 4mm; margin: 3mm 0; text-align: center; background-color: #F3E5F5;">
+        <div style="font-weight: bold; font-size: 16pt; color: #9C27B0;">
+          PRÉVISUALISATION
+        </div>
+        <div style="margin: 2mm 0; font-size: 14pt;">⚠️ Cette commande n'a pas été payée ⚠️</div>
+        <div style="font-weight: bold; font-size: 14pt; margin-top: 2mm;">
+          TOTAL: ${order.total.toFixed(2)}€
+        </div>
+      </div>
+    `;
+    } else if (isPartialPayment) {
+      paymentSectionHTML = `
+      <div style="border: 2px solid #000; padding: 4mm; margin: 3mm 0; text-align: center;">
+        <div style="font-weight: bold; font-size: 12pt; margin-bottom: 2mm;">
+          PAIEMENT PARTIEL
+        </div>
+        <div style="margin: 2mm 0;">Montant partiel payé par le client</div>
+        
+        <div style="margin: 3mm 0; padding: 2mm; background-color: #f5f5f5;">
+          <div style="font-size: 14pt; margin-bottom: 1mm;">TOTAL FACTURE: ${originalTotal.toFixed(
+            2
+          )}€</div>
+          <div style="font-weight: bold; font-size: 16pt; color: #2196F3;">MONTANT PAYÉ: ${paidAmount.toFixed(
+            2
+          )}€</div>
+          <div style="font-size: 14pt; margin-top: 1mm; color: #F44336;">RESTE À PAYER: ${order.remaining.toFixed(
+            2
+          )}€</div>
+        </div>
+        
+        <div style="border-top: 1px solid #000; padding-top: 2mm; margin-top: 2mm;">
+          Méthode: ${getPaymentMethodLabel(
+            Array.isArray(order.paymentMethod)
+              ? order.paymentMethod[0]
+              : order.paymentMethod
+          )}
+        </div>
+      </div>
+    `;
+    } else {
+      // Paiement complet - design simple et clair
+      paymentSectionHTML = `
+      <div style="border: 1px solid #000; padding: 3mm; margin: 3mm 0; text-align: center;">
+        <div style="font-weight: bold; font-size: 16pt; margin-bottom: 2mm;">
+          TOTAL PAYÉ: ${order.total.toFixed(2)}€
+        </div>
+        <div style="font-size: 14pt;">Méthode: ${getPaymentMethodLabel(
+          Array.isArray(order.paymentMethod)
+            ? order.paymentMethod[0]
+            : order.paymentMethod
+        )}</div>
+      </div>
+    `;
+    }
 
     return `
   <html>
@@ -120,28 +199,28 @@ export default function PrintPreviewScreen() {
           width: 80mm;
           padding: 5mm;
           margin: 0;
-          font-size: 14pt; /* Augmentation de la taille de base du texte */
+          font-size: 14pt;
         }
         .header, .footer { 
           text-align: center; 
           margin-bottom: 5mm;
         }
         .header h1 {
-          font-size: 18pt; /* Titre principal plus grand */
+          font-size: 18pt;
           margin: 0 0 2mm 0;
           font-weight: bold;
         }
         .header p, .footer p {
           margin: 0 0 1mm 0;
-          font-size: 15pt; /* Informations d'entête plus lisibles */
+          font-size: 15pt;
         }
         .footer .tax{
-          font-size: 12pt; /* Information de TVA plus petite */
+          font-size: 12pt;
           margin-bottom: 4mm;
         }
         .divider {
           border-bottom: 1px dashed #000;
-          margin: 4mm 0; /* Plus d'espace autour des séparateurs */
+          margin: 4mm 0;
         }
         table {
           width: 100%;
@@ -149,8 +228,8 @@ export default function PrintPreviewScreen() {
         }
         th, td {
           text-align: left;
-          padding: 2mm 0; /* Plus d'espace entre les lignes */
-          font-size: 14pt; /* Articles plus lisibles */
+          padding: 2mm 0;
+          font-size: 14pt;
         }
         th:last-child, td:last-child {
           text-align: right;
@@ -164,39 +243,11 @@ export default function PrintPreviewScreen() {
         td:last-child {
           width: 25%;
         }
-        .totals {
-          margin: 3mm 0;
-          text-align: right;
-        }
-        .total-line {
-          display: flex;
-          justify-content: space-between;
-          margin: 2mm 0;
-          font-size: 12pt; /* Totaux intermédiaires plus lisibles */
-        }
-        .total-final {
-          font-weight: bold;
-          font-size: 16pt; /* Total final encore plus visible */
-          margin: 3mm 0;
-        }
-        .payment-info {
-          text-align: center;
-          margin: 4mm 0;
-          font-size: 14pt; /* Information de paiement plus lisible */
-        }
         .offered-item { 
           font-style: italic; 
         }
-        .preview-notice {
-          text-align: center;
-          font-weight: bold;
-          border: 1px solid #000;
-          padding: 3mm;
-          margin: 3mm 0;
-          font-size: 15pt; /* Notice de prévisualisation plus visible */
-        }
         .table-info {
-          font-size: 15pt; /* Information de table plus visible */
+          font-size: 15pt;
           font-weight: bold;
         }
         .timestamp {
@@ -209,22 +260,13 @@ export default function PrintPreviewScreen() {
         <h1>${restaurantInfo.name}</h1>
         <p>${restaurantInfo.address}</p>
         <p>${restaurantInfo.phone}</p>
+        ${restaurantInfo.siret ? `<p>${restaurantInfo.siret}</p>` : ''}
       </div>
 
       <div class="divider"></div>
       
-      <p class="table-info"><strong>${order.tableName}</strong> - ${
-      order.date
-    } </p>
-      <p class="timestamp">${order.time}</p>
-      
-      ${
-        isPreviewMode
-          ? '<div class="preview-notice">PRÉVISUALISATION</div>'
-          : order.isPartial
-          ? '<div class="preview-notice">PAIEMENT PARTIEL</div>'
-          : ''
-      }
+      <p class="table-info"><strong>${order.tableName}</strong></p>
+      <p class="timestamp">${order.date} à ${order.time}</p>
 
       <div class="divider"></div>
 
@@ -237,56 +279,29 @@ export default function PrintPreviewScreen() {
         ${itemsHTML}
       </table>
 
-      <div class="divider"></div>
-
-      <div class="totals">
+      <div style="margin: 3mm 0;">
+        <div>Articles: ${order.items.length}</div>
         ${
           offeredTotal > 0
-            ? `<div class="total-line">
-                 <span>Offerts:</span>
-                 <span>${offeredTotal.toFixed(2)}€</span>
-               </div>`
-            : ''
-        }
-        <div class="total-line total-final">
-          <span>TOTAL:</span>
-          <span>${order.total.toFixed(2)}€</span>
-        </div>
-        ${
-          order.isPartial && !isPreviewMode
-            ? `<div class="total-line">
-                 <span>Reste à payer:</span>
-                 <span>${order.remaining.toFixed(2)}€</span>
-               </div>`
+            ? `<div style="font-style: italic;">Articles offerts: ${offeredTotal.toFixed(
+                2
+              )}€</div>`
             : ''
         }
       </div>
+
+      ${paymentSectionHTML}
 
       <div class="divider"></div>
-
-      <div class="payment-info">
-        ${
-          isPreviewMode
-            ? `<p><strong>NOTE NON PAYÉE</strong></p>`
-            : `<p>Paiement: ${getPaymentMethodLabel(
-                Array.isArray(order.paymentMethod)
-                  ? order.paymentMethod[0]
-                  : order.paymentMethod
-              )}</p>
-              ${
-                order.isPartial
-                  ? `<p>Payé: ${(order.total - order.remaining).toFixed(
-                      2
-                    )}€</p>`
-                  : ''
-              }`
-        }
-      </div>
 
       <div class="footer">
         <p class="tax">${taxInfo}</p>
         <p>Merci de votre visite!</p>
-        <p>À bientôt, ${restaurantInfo.owner}</p>
+        ${
+          restaurantInfo.owner
+            ? `<p>À bientôt, ${restaurantInfo.owner}</p>`
+            : ''
+        }
       </div>
     </body>
   </html>

@@ -184,7 +184,6 @@ const getPaymentInfo = (bill: Bill) => {
   };
 };
 
-
 // Modal de visualisation complète
 interface ViewReceiptModalProps {
   visible: boolean;
@@ -621,13 +620,18 @@ interface BillListItemProps {
   isSelected: boolean;
   onSelect: (bill: Bill) => void;
 }
+
 const BillListItem = memo<BillListItemProps>(
   ({ bill, isSelected, onSelect }) => {
+    const { paymentMethods } = useSettings(); // ✅ Accès aux méthodes de paiement
+    
     const handlePress = useCallback(() => {
       onSelect(bill);
     }, [bill, onSelect]);
+
     const statusColor = getBillStatusColor(bill);
     const context = getPaymentContext(bill);
+
     const formattedDate = useMemo(() => {
       const date = new Date(bill.timestamp);
       return `${date.toLocaleDateString()} ${date.toLocaleTimeString([], {
@@ -635,7 +639,16 @@ const BillListItem = memo<BillListItemProps>(
         minute: '2-digit',
       })}`;
     }, [bill.timestamp]);
-    // ✅ AFFICHAGE CORRIGÉ : Total global vs Montant payé
+
+    // ✅ CORRIGÉ : Fonction locale pour obtenir le label de la méthode de paiement
+    const paymentMethodLabel = useMemo(() => {
+      if (!bill.paymentMethod) return 'Non spécifié';
+      
+      const method = paymentMethods.find((m) => m.id === bill.paymentMethod);
+      return method ? method.name : bill.paymentMethod;
+    }, [bill.paymentMethod, paymentMethods]);
+
+    // ✅ Affichage du total avec indication si c'est partiel
     const totalDisplay = useMemo(() => {
       if (context.originalTotal !== bill.amount) {
         return `${context.originalTotal.toFixed(
@@ -644,6 +657,7 @@ const BillListItem = memo<BillListItemProps>(
       }
       return `${bill.amount.toFixed(2)}€`;
     }, [context.originalTotal, bill.amount]);
+
     return (
       <Pressable
         style={[styles.billListItem, isSelected && styles.selectedBillItem]}
@@ -660,8 +674,9 @@ const BillListItem = memo<BillListItemProps>(
             <Text style={styles.billItemAmount} numberOfLines={1}>
               {totalDisplay}
             </Text>
-            <Text style={styles.billItemPaymentType} numberOfLines={1}>
-              {context.type}
+            {/* ✅ MODIFIÉ : Afficher la méthode de paiement au lieu du type */}
+            <Text style={styles.billItemPaymentMethod} numberOfLines={1}>
+              {paymentMethodLabel}
             </Text>
           </View>
           <View style={styles.billItemStatus}>
@@ -681,6 +696,7 @@ const BillListItem = memo<BillListItemProps>(
     );
   }
 );
+
 // Composant principal
 export default function BillsScreen() {
   const [bills, setBills] = useState<Bill[]>([]);
@@ -937,9 +953,41 @@ export default function BillsScreen() {
       setProcessing(false);
     }
   }, [selectedBill, bills, loadBills, toast]);
+
+  const getPaymentTypeDisplayName = (paymentType?: string): string => {
+    switch (paymentType) {
+      case 'split':
+        return 'PAIEMENT PARTAGÉ';
+      case 'custom':
+        return 'PAIEMENT PARTIEL';
+      case 'items':
+        return 'PAIEMENT PAR ARTICLES';
+      case 'full':
+      default:
+        return 'PAIEMENT COMPLET';
+    }
+  };
+
+  const getPaymentDescription = (
+    paymentType?: string,
+    guests?: number
+  ): string => {
+    switch (paymentType) {
+      case 'split':
+        return `<div style="margin: 2mm 0;">Addition divisée en ${
+          guests || 2
+        } parts</div>`;
+      case 'custom':
+        return `<div style="margin: 2mm 0;">Montant partiel payé par le client</div>`;
+      case 'items':
+        return `<div style="margin: 2mm 0;">Articles sélectionnés uniquement</div>`;
+      default:
+        return '';
+    }
+  };
   // Génération HTML
   const generateHTML = useCallback(
-    (bill: Bill) => {
+    (bill: Bill, currentZNumber?: number, isZReport: boolean = false) => {
       const paymentLabel = bill.paymentMethod
         ? getPaymentMethodLabel(bill.paymentMethod)
         : 'Non spécifié';
@@ -950,138 +998,206 @@ export default function BillsScreen() {
         hour: '2-digit',
         minute: '2-digit',
       });
+
       const hasDetailedItems = bill.paidItems && bill.paidItems.length > 0;
       const itemsToDisplay = hasDetailedItems ? getItemsDisplay(bill) : [];
+
+      // ✅ NOUVEAU : Calculer le total original et le total payé
+      const originalTotal = calculateOriginalTotal(bill);
+      const paidAmount = bill.amount;
+      const isPartialPayment = Math.abs(originalTotal - paidAmount) > 0.01;
+
+      // ✅ Génération HTML des articles avec affichage amélioré
       let itemsHTML = '';
-      if (hasDetailedItems) {
+      if (hasDetailedItems && itemsToDisplay.length > 0) {
         itemsHTML = `
-          <table style="width: 100%; border-collapse: collapse; margin: 3mm 0;">
-            <tr><th style="text-align: left;">Qté</th><th style="text-align: left;">Article</th><th style="text-align: right;">Prix</th></tr>
-            ${itemsToDisplay
-              .slice(0, 20)
-              .map(
-                (item) => `
-              <tr>
-                <td>${item.quantity}x</td>
-                <td>${item.name}${item.offered ? ' (Offert)' : ''}</td>
-                <td style="text-align: right;">${(
-                  item.price * item.quantity
-                ).toFixed(2)}€</td>
-              </tr>
-            `
-              )
-              .join('')}
-          </table>
-        `;
+        <table style="width: 100%; border-collapse: collapse; margin: 5mm 0;">
+          <tr>
+            <th style="text-align: left; font-size: 12pt;">Qté</th>
+            <th style="text-align: left; font-size: 12pt;">Article</th>
+            <th style="text-align: right; font-size: 12pt;">Prix</th>
+          </tr>
+          ${itemsToDisplay
+            .slice(0, 20)
+            .map(
+              (item) => `
+            <tr ${item.offered ? 'style="font-style: italic;"' : ''}>
+              <td style="font-size: 14pt; padding: 2mm 0;">${
+                item.quantity
+              }x</td>
+              <td style="font-size: 14pt; padding: 2mm 0;">${item.name}${
+                item.offered ? ' (Offert)' : ''
+              }</td>
+              <td style="text-align: right; font-size: 14pt; padding: 2mm 0;">${(
+                item.price * item.quantity
+              ).toFixed(2)}€</td>
+            </tr>
+          `
+            )
+            .join('')}
+        </table>
+      `;
       }
+
+      // ✅ Articles offerts si applicable
       let offeredHTML = '';
       if ((bill.offeredAmount ?? 0) > 0) {
-        offeredHTML = `<div>Articles offerts: ${(
-          bill.offeredAmount ?? 0
-        ).toFixed(2)}€</div>`;
+        offeredHTML = `
+        <div style="font-style: italic; margin: 3mm 0; font-size: 14pt;">
+          Articles offerts: ${(bill.offeredAmount ?? 0).toFixed(2)}€
+        </div>
+      `;
       }
-      let totalHTML = '';
-      let paymentContextHTML = '';
-      if (context.originalTotal !== bill.amount) {
-        totalHTML = `
-          <div style="font-weight: bold; margin: 2mm 0;">TOTAL FACTURE: ${context.originalTotal.toFixed(
-            2
-          )}€</div>
-        `;
+
+      // ✅ NOUVEAU : Section de paiement unifiée avec design cohérent
+      let paymentSectionHTML = '';
+
+      if (isPartialPayment) {
+        // Pour les paiements partiels (custom/split), afficher le détail
+        paymentSectionHTML = `
+        <div style="border: 2px solid #000; padding: 4mm; margin: 3mm 0; text-align: center;">
+          <div style="font-weight: bold; font-size: 12pt; margin-bottom: 2mm;">
+            ${getPaymentTypeDisplayName(bill.paymentType)}
+          </div>
+          ${getPaymentDescription(bill.paymentType, bill.guests)}
+          
+          <div style="margin: 3mm 0; padding: 2mm; background-color: #f5f5f5;">
+            <div style="font-size: 14pt; margin-bottom: 1mm;">TOTAL FACTURE: ${originalTotal.toFixed(
+              2
+            )}€</div>
+            <div style="font-weight: bold; font-size: 16pt;">MONTANT PAYÉ: ${paidAmount.toFixed(
+              2
+            )}€</div>
+          </div>
+          
+          <div style="border-top: 1px solid #000; padding-top: 2mm; margin-top: 2mm;">
+            Méthode: ${paymentLabel}
+          </div>
+        </div>
+      `;
       } else {
-        totalHTML = `<div style="font-weight: bold; margin: 2mm 0;">TOTAL: ${bill.amount.toFixed(
-          2
-        )}€</div>`;
+        // Pour les paiements complets, design simplifié
+        paymentSectionHTML = `
+        <div style="border: 1px solid #000; padding: 3mm; margin: 3mm 0; text-align: center;">
+          <div style="font-weight: bold; font-size: 16pt; margin-bottom: 2mm;">
+            TOTAL PAYÉ: ${paidAmount.toFixed(2)}€
+          </div>
+          <div style="font-size: 14pt;">Méthode: ${paymentLabel}</div>
+          ${
+            bill.paymentType !== 'full'
+              ? `<div style="font-size: 12pt; margin-top: 1mm;">(${getPaymentTypeDisplayName(
+                  bill.paymentType
+                )})</div>`
+              : ''
+          }
+        </div>
+      `;
       }
-      if (bill.paymentType === 'split') {
-        paymentContextHTML = `
-          <div style="border: 2px solid #000; padding: 4mm; margin: 3mm 0; text-align: center;">
-            <div style="font-weight: bold; font-size: 12pt;">PAIEMENT PARTAGÉ</div>
-            <div style="margin: 2mm 0;">Addition divisée en ${
-              bill.guests || 2
-            } parts</div>
-            <div style="font-weight: bold; font-size: 14pt; margin: 2mm 0;">PAYÉ: ${bill.amount.toFixed(
-              2
-            )}€</div>
-            <div style="border-top: 1px solid #000; padding-top: 2mm; margin-top: 2mm;">Méthode: ${paymentLabel}</div>
-          </div>
-        `;
-      } else if (bill.paymentType === 'custom') {
-        paymentContextHTML = `
-          <div style="border: 2px solid #000; padding: 4mm; margin: 3mm 0; text-align: center;">
-            <div style="font-weight: bold; font-size: 12pt;">PAIEMENT PARTIEL</div>
-            <div style="font-weight: bold; font-size: 14pt; margin: 2mm 0;">PAYÉ: ${bill.amount.toFixed(
-              2
-            )}€</div>
-            <div style="border-top: 1px solid #000; padding-top: 2mm; margin-top: 2mm;">Méthode: ${paymentLabel}</div>
-          </div>
-        `;
-      } else if (bill.paymentType === 'items') {
-        paymentContextHTML = `
-          <div style="border: 2px solid #000; padding: 4mm; margin: 3mm 0; text-align: center;">
-            <div style="font-weight: bold; font-size: 12pt;">PAIEMENT PAR ARTICLES</div>
-            <div style="margin: 2mm 0;">Articles sélectionnés uniquement</div>
-            <div style="font-weight: bold; font-size: 14pt; margin: 2mm 0;">PAYÉ: ${bill.amount.toFixed(
-              2
-            )}€</div>
-            <div style="border-top: 1px solid #000; padding-top: 2mm; margin-top: 2mm;">Méthode: ${paymentLabel}</div>
-          </div>
-        `;
-      } else {
-        paymentContextHTML = `
-          <div style="border: 1px solid #000; padding: 3mm; margin: 3mm 0; text-align: center;">
-            <div style="font-weight: bold; font-size: 14pt;">PAYÉ: ${bill.amount.toFixed(
-              2
-            )}€</div>
-            <div style="margin-top: 2mm;">Méthode: ${paymentLabel}</div>
-          </div>
-        `;
+
+      // ✅ En-tête spécial pour rapport Z
+      let headerExtension = '';
+      if (isZReport && currentZNumber) {
+        headerExtension = `
+        <div style="text-align: center; font-weight: bold; margin: 3mm 0;">
+          RAPPORT Z N° ${currentZNumber}
+        </div>
+      `;
       }
+
       return `
-        <html>
-          <head>
-            <style>
-              @page { size: 80mm auto; margin: 0mm; }
-              body { font-family: 'Courier New', monospace; width: 80mm; padding: 5mm; margin: 0; font-size: 10pt; }
-              .header { text-align: center; margin-bottom: 3mm; }
-              .divider { border-bottom: 1px dashed #000; margin: 3mm 0; }
-              table { width: 100%; border-collapse: collapse; }
-              th, td { padding: 1mm 0; font-size: 9pt; }
-            </style>
-          </head>
-          <body>
-            <div class="header">
-              <h1 style="font-size: 12pt; margin: 0;">${
-                restaurantInfo.name
-              }</h1>
-              <p style="margin: 0; font-size: 9pt;">${
-                restaurantInfo.address
-              }</p>
-              <p style="margin: 0; font-size: 9pt;">${restaurantInfo.phone}</p>
-            </div>
-            <div class="divider"></div>
-            <div><strong>${
-              bill.tableName || `Table ${bill.tableNumber}`
-            }</strong></div>
-            <div>Date: ${dateFormatted} ${timeFormatted}</div>
-            ${bill.section ? `<div>Section: ${bill.section}</div>` : ''}
-            ${bill.guests ? `<div>Couverts: ${bill.guests}</div>` : ''}
-            <div class="divider"></div>
-            ${itemsHTML}
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <style>
+            @page { size: 80mm auto; margin: 0mm; }
+            body {
+              font-family: 'Courier New', monospace;
+              width: 80mm;
+              padding: 5mm;
+              margin: 0;
+              font-size: 14pt;
+            }
+            .header {
+              text-align: center;
+              margin-bottom: 5mm;
+            }
+            .header h1 {
+              font-size: 18pt;
+              margin: 0 0 2mm 0;
+            }
+            .header p {
+              margin: 0 0 1mm 0;
+              font-size: 15pt;
+            }
+            .divider {
+              border-bottom: 1px dashed #000;
+              margin: 4mm 0;
+            }
+            table {
+              width: 100%;
+              border-collapse: collapse;
+            }
+            th, td {
+              padding: 1mm 0;
+              font-size: 14pt;
+            }
+            .timestamp {
+              font-size: 13pt;
+            }
+            .table-info {
+              font-size: 15pt;
+              font-weight: bold;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h1>${restaurantInfo.name}</h1>
+            <p>${restaurantInfo.address}</p>
+            <p>${restaurantInfo.phone}</p>
+            ${restaurantInfo.siret ? `<p>${restaurantInfo.siret}</p>` : ''}
+          </div>
+
+          ${headerExtension}
+
+          <div class="divider"></div>
+          
+          <p class="table-info">${
+            bill.tableName || `Table ${bill.tableNumber}`
+          }</p>
+          <p class="timestamp">${dateFormatted} à ${timeFormatted}</p>
+          ${bill.section ? `<p>Section: ${bill.section}</p>` : ''}
+          ${bill.guests ? `<p>Couverts: ${bill.guests}</p>` : ''}
+
+          <div class="divider"></div>
+
+          ${itemsHTML}
+
+          <div style="margin: 3mm 0;">
             <div>Articles: ${
               hasDetailedItems ? itemsToDisplay.length : bill.items
             }</div>
             ${offeredHTML}
-            ${totalHTML}
-            ${paymentContextHTML}
-            <div class="divider"></div>
-            <div style="text-align: center;">
-              <p>TVA non applicable - art.293B du CGI</p>
-              <p>Merci de votre visite!</p>
-            </div>
-          </body>
-        </html>
-      `;
+          </div>
+
+          ${paymentSectionHTML}
+
+          <div class="divider"></div>
+
+          <div style="text-align: center;">
+            <p>${
+              restaurantInfo.taxInfo || 'TVA non applicable - art.293B du CGI'
+            }</p>
+            <p>Merci de votre visite!</p>
+            ${
+              restaurantInfo.owner
+                ? `<p>À bientôt, ${restaurantInfo.owner}</p>`
+                : ''
+            }
+          </div>
+        </body>
+      </html>
+    `;
     },
     [getPaymentMethodLabel, restaurantInfo]
   );
@@ -1094,7 +1210,7 @@ export default function BillsScreen() {
     setProcessing(true);
     try {
       await Print.printAsync({
-        html: generateHTML(selectedBill),
+        html: generateHTML(selectedBill), // ✅ Utilise la fonction unifiée
       });
       toast.showToast("Reçu envoyé à l'imprimante.", 'success');
     } catch (error) {
@@ -1104,6 +1220,7 @@ export default function BillsScreen() {
       setProcessing(false);
     }
   }, [selectedBill, generateHTML, toast]);
+
   const handleShare = useCallback(async () => {
     if (!selectedBill) {
       toast.showToast('Veuillez sélectionner une facture à partager.', 'info');
@@ -1112,7 +1229,7 @@ export default function BillsScreen() {
     setProcessing(true);
     try {
       const { uri } = await Print.printToFileAsync({
-        html: generateHTML(selectedBill),
+        html: generateHTML(selectedBill), // ✅ Utilise la fonction unifiée
       });
       await Sharing.shareAsync(uri, {
         UTI: '.pdf',
@@ -1126,6 +1243,7 @@ export default function BillsScreen() {
       setProcessing(false);
     }
   }, [selectedBill, generateHTML, toast]);
+
   const handleExport = useCallback(async () => {
     if (!selectedBill) {
       toast.showToast('Veuillez sélectionner une facture à exporter.', 'info');
@@ -2006,6 +2124,12 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
+  },
+  billItemPaymentMethod: {
+    fontSize: 12,
+    color: '#2196F3', 
+    fontWeight: '500', 
+    marginTop: 2,
   },
   itemDetails: { flexDirection: 'row', flex: 1, alignItems: 'center' },
   itemQuantity: { fontSize: 14, marginRight: 8, width: 30 },
