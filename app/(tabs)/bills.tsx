@@ -1,4 +1,4 @@
-// app/(tabs)/bills.tsx - VERSION CORRIGÉE AVEC TOUTES LES INFOS
+// app/(tabs)/bills.tsx - VERSION CORRIGÉE AVEC GESTION AMÉLIORÉE
 import DateTimePicker from '@react-native-community/datetimepicker';
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
@@ -41,6 +41,7 @@ import {
 } from '../../utils/storage';
 import { useToast } from '../../utils/ToastContext';
 import { useSettings } from '@/utils/useSettings';
+
 const STATUS_COLORS = {
   pending: '#FFC107',
   paid: '#4CAF50',
@@ -48,31 +49,35 @@ const STATUS_COLORS = {
   custom: '#FF9800',
   default: '#E0E0E0',
 } as const;
+
 const PAYMENT_METHOD_LABELS = {
   card: 'Carte bancaire',
   cash: 'Espèces',
   check: 'Chèque',
 } as const;
+
 const ITEM_HEIGHT = 80;
 const MAX_BILLS_DISPLAY = 200;
+
 const getBillStatusColor = (bill: Bill) => {
   if (bill.status === 'split' && bill.paymentType === 'custom') {
     return STATUS_COLORS.custom;
   }
   return STATUS_COLORS[bill.status] || STATUS_COLORS.default;
 };
-// Fonctions utilitaires pour les calculs - VERSION CORRIGÉE
+
+// Fonctions utilitaires pour les calculs
 const calculateOriginalTotal = (bill: Bill) => {
   const hasDetailedItems = bill.paidItems && bill.paidItems.length > 0;
   if (bill.paymentType === 'custom' && hasDetailedItems) {
-    return calculateTotalFromItems(bill); // Utiliser calculateTotalFromItems pour les factures de type custom
+    return calculateTotalFromItems(bill);
   }
-  // Pour les paiements partagés, le total original est simplement la somme des montants payés
   if (bill.paymentType === 'split') {
-    return bill.amount * (bill.guests ?? 1); // Multiplier par le nombre de convives (défaut 1) pour obtenir le total réel
+    return bill.amount * (bill.guests ?? 1);
   }
   return bill.amount;
 };
+
 const getPaymentContext = (bill: Bill) => {
   const originalTotal = calculateOriginalTotal(bill);
   switch (bill.paymentType) {
@@ -113,16 +118,15 @@ const getPaymentContext = (bill: Bill) => {
 
 const calculateTotalFromItems = (bill: Bill) => {
   if (!bill.paidItems || bill.paidItems.length === 0) return bill.amount;
-  // ✅ POUR LES PAIEMENTS PARTAGÉS : utiliser le montant × nombre de convives
   if (bill.paymentType === 'split' && bill.guests) {
     return bill.amount * bill.guests;
   }
-  // ✅ POUR LES AUTRES TYPES : calcul normal
   return bill.paidItems.reduce((total, item) => {
-    if (item.offered) return total; // Articles offerts ne comptent pas
+    if (item.offered) return total;
     return total + item.price * item.quantity;
   }, 0);
 };
+
 const getItemsDisplay = (bill: Bill) => {
   if (!bill.paidItems || bill.paidItems.length === 0) return [];
   if (bill.paymentType === 'split' && bill.guests) {
@@ -137,6 +141,7 @@ const getItemsDisplay = (bill: Bill) => {
     isOriginalQuantity: false,
   }));
 };
+
 const getPaymentInfo = (bill: Bill) => {
   const context = getPaymentContext(bill);
   const isTotalPaid = context.originalTotal === bill.amount;
@@ -193,9 +198,11 @@ interface ViewReceiptModalProps {
   onShare: () => void;
   onDelete: () => void;
 }
+
 const ViewReceiptModal = memo<ViewReceiptModalProps>(
   ({ visible, bill, onClose, onPrint, onShare, onDelete }) => {
     const { restaurantInfo, paymentMethods } = useSettings();
+
     const getPaymentMethodLabel = useCallback(
       (methodId: string) => {
         const method = paymentMethods.find((m) => m.id === methodId);
@@ -203,6 +210,7 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
       },
       [paymentMethods]
     );
+
     const handleDelete = useCallback(() => {
       Alert.alert(
         'Supprimer la facture',
@@ -213,17 +221,18 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
         ]
       );
     }, [onDelete]);
+
     if (!bill) return null;
+
     const hasDetailedItems = bill.paidItems && bill.paidItems.length > 0;
     const paymentInfo = getPaymentInfo(bill);
     const paymentLabel = bill.paymentMethod
       ? getPaymentMethodLabel(bill.paymentMethod)
       : 'Non spécifié';
-    // ✅ CALCUL CORRECT du total selon le type de paiement
     const totalFromItems = calculateTotalFromItems(bill);
     const context = getPaymentContext(bill);
-    // ✅ AFFICHAGE CORRECT des articles selon le type
     const itemsToDisplay = hasDetailedItems ? getItemsDisplay(bill) : [];
+
     return (
       <Modal
         visible={visible}
@@ -267,7 +276,7 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
                 )}
               </View>
               <View style={styles.receiptDivider} />
-              {/* ✅ AFFICHAGE CORRIGÉ DES ARTICLES */}
+
               {hasDetailedItems && (
                 <View style={styles.itemsContainer}>
                   <Text style={styles.itemsHeader}>Articles</Text>
@@ -307,6 +316,7 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
                   <View style={styles.receiptDivider} />
                 </View>
               )}
+
               <View style={styles.billSummary}>
                 <View style={styles.billRow}>
                   <Text style={styles.billLabel}>Articles:</Text>
@@ -337,7 +347,7 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
                   </Text>
                 </View>
               </View>
-              {/* ✅ SECTION PAIEMENT COMPLÈTE */}
+
               <View style={styles.paymentContextBox}>
                 <Text style={styles.paymentContextTitle}>{context.type}</Text>
                 <Text style={styles.paymentContextDetail}>
@@ -410,6 +420,7 @@ const ViewReceiptModal = memo<ViewReceiptModalProps>(
     );
   }
 );
+
 // Barre de filtres
 interface FilterBarProps {
   onSearch: (text: string) => void;
@@ -423,7 +434,11 @@ interface FilterBarProps {
   onPaymentMethodChange: (method: Bill['paymentMethod'] | null) => void;
   selectedPaymentMethod: Bill['paymentMethod'] | null;
   onResetFilters: () => void;
+  hasFiltersActive: boolean;
+  filteredBillsCount: number;
+  totalBillsCount: number;
 }
+
 const FilterBar = memo<FilterBarProps>(
   ({
     onSearch,
@@ -437,11 +452,15 @@ const FilterBar = memo<FilterBarProps>(
     onPaymentMethodChange,
     selectedPaymentMethod,
     onResetFilters,
+    hasFiltersActive,
+    filteredBillsCount,
+    totalBillsCount,
   }) => {
     const [showDatePicker, setShowDatePicker] = useState(false);
     const [showPaymentPicker, setShowPaymentPicker] = useState(false);
     const [tempDate, setTempDate] = useState(selectedDate || new Date());
     const { paymentMethods } = useSettings();
+
     const getPaymentMethodLabel = useCallback(
       (methodId: string) => {
         const method = paymentMethods.find((m) => m.id === methodId);
@@ -449,6 +468,7 @@ const FilterBar = memo<FilterBarProps>(
       },
       [paymentMethods]
     );
+
     const handleDateChange = useCallback(
       (event: any, date?: Date) => {
         setShowDatePicker(false);
@@ -459,6 +479,7 @@ const FilterBar = memo<FilterBarProps>(
       },
       [onDateChange]
     );
+
     const handleSortToggle = useCallback(() => {
       let newSortOrder: 'none' | 'desc' | 'asc';
       switch (sortOrder) {
@@ -473,25 +494,30 @@ const FilterBar = memo<FilterBarProps>(
       }
       onSortChange(newSortOrder);
     }, [sortOrder, onSortChange]);
+
     const sortIcon = useMemo(() => {
       if (sortOrder === 'desc')
         return <ArrowDownAZ size={20} color="#2196F3" />;
       if (sortOrder === 'asc') return <ArrowUpAZ size={20} color="#2196F3" />;
       return <ArrowUpDown size={20} color="#666" />;
     }, [sortOrder]);
+
     const sortLabel = useMemo(() => {
       if (sortOrder === 'none') return 'Trier';
       if (sortOrder === 'asc') return 'Ancien→Récent';
       return 'Récent→Ancien';
     }, [sortOrder]);
+
     const dateLabel = useMemo(() => {
       if (!selectedDate) return 'Par date';
       return new Date(selectedDate).toLocaleDateString();
     }, [selectedDate]);
+
     const paymentMethodLabel = useMemo(() => {
       if (!selectedPaymentMethod) return 'Mode de paiement';
       return getPaymentMethodLabel(selectedPaymentMethod);
     }, [selectedPaymentMethod, getPaymentMethodLabel]);
+
     return (
       <View style={styles.filterBar}>
         <View style={styles.searchContainer}>
@@ -508,6 +534,23 @@ const FilterBar = memo<FilterBarProps>(
             </Pressable>
           ) : null}
         </View>
+
+        {/* ✅ NOUVEAU: Indicateur de filtrage actif */}
+        {hasFiltersActive && (
+          <View style={styles.filterStatus}>
+            <Text style={styles.filterStatusText}>
+              Affichage: {filteredBillsCount} sur {totalBillsCount} factures
+            </Text>
+            <Pressable
+              onPress={onResetFilters}
+              style={styles.clearFiltersButton}
+            >
+              <X size={16} color="#F44336" />
+              <Text style={styles.clearFiltersText}>Tout afficher</Text>
+            </Pressable>
+          </View>
+        )}
+
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -528,6 +571,7 @@ const FilterBar = memo<FilterBarProps>(
               </Pressable>
             )}
           </Pressable>
+
           <View style={styles.paymentButtonContainer}>
             <Pressable
               style={styles.filterButton}
@@ -579,29 +623,27 @@ const FilterBar = memo<FilterBarProps>(
               </View>
             )}
           </View>
+
           <Pressable style={styles.filterButton} onPress={handleSortToggle}>
             {sortIcon}
             <Text style={styles.filterButtonText}>{sortLabel}</Text>
           </Pressable>
+
           <Pressable style={styles.filterButton} onPress={onDeleteAll}>
             <Filter size={20} color="#F44336" />
             <Text style={[styles.filterButtonText, { color: '#F44336' }]}>
               Supprimer toutes
             </Text>
           </Pressable>
+
           <Pressable style={styles.filterButton} onPress={onDeleteFiltered}>
             <Trash2 size={20} color="#FF9800" />
             <Text style={[styles.filterButtonText, { color: '#FF9800' }]}>
               Supprimer sélection
             </Text>
           </Pressable>
-          <Pressable style={styles.resetButton} onPress={onResetFilters}>
-            <RefreshCw size={20} color="#2196F3" />
-            <Text style={[styles.filterButtonText, { color: '#2196F3' }]}>
-              Réinitialiser
-            </Text>
-          </Pressable>
         </ScrollView>
+
         {showDatePicker && (
           <DateTimePicker
             value={tempDate}
@@ -614,7 +656,8 @@ const FilterBar = memo<FilterBarProps>(
     );
   }
 );
-// Item de facture - VERSION COMPRESSÉE
+
+// Item de facture
 interface BillListItemProps {
   bill: Bill;
   isSelected: boolean;
@@ -623,8 +666,8 @@ interface BillListItemProps {
 
 const BillListItem = memo<BillListItemProps>(
   ({ bill, isSelected, onSelect }) => {
-    const { paymentMethods } = useSettings(); // ✅ Accès aux méthodes de paiement
-    
+    const { paymentMethods } = useSettings();
+
     const handlePress = useCallback(() => {
       onSelect(bill);
     }, [bill, onSelect]);
@@ -640,15 +683,13 @@ const BillListItem = memo<BillListItemProps>(
       })}`;
     }, [bill.timestamp]);
 
-    // ✅ CORRIGÉ : Fonction locale pour obtenir le label de la méthode de paiement
     const paymentMethodLabel = useMemo(() => {
       if (!bill.paymentMethod) return 'Non spécifié';
-      
+
       const method = paymentMethods.find((m) => m.id === bill.paymentMethod);
       return method ? method.name : bill.paymentMethod;
     }, [bill.paymentMethod, paymentMethods]);
 
-    // ✅ Affichage du total avec indication si c'est partiel
     const totalDisplay = useMemo(() => {
       if (context.originalTotal !== bill.amount) {
         return `${context.originalTotal.toFixed(
@@ -674,7 +715,6 @@ const BillListItem = memo<BillListItemProps>(
             <Text style={styles.billItemAmount} numberOfLines={1}>
               {totalDisplay}
             </Text>
-            {/* ✅ MODIFIÉ : Afficher la méthode de paiement au lieu du type */}
             <Text style={styles.billItemPaymentMethod} numberOfLines={1}>
               {paymentMethodLabel}
             </Text>
@@ -711,13 +751,19 @@ export default function BillsScreen() {
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<
     Bill['paymentMethod'] | null
   >(null);
+
   const { restaurantInfo, paymentMethods } = useSettings();
   const toast = useToast();
-  // Chargement des factures
+
+  // ✅ NOUVEAU: Fonction pour charger les factures selon les filtres
   const loadBills = useCallback(async () => {
     setLoading(true);
     try {
-      if (searchText || dateFilter || paymentMethodFilter) {
+      const hasActiveFilters =
+        searchText.trim() || dateFilter || paymentMethodFilter;
+
+      if (hasActiveFilters) {
+        // ✅ Si il y a des filtres actifs, charger TOUTES les factures filtrées
         const filters = {
           searchText: searchText.trim() || undefined,
           dateRange: dateFilter
@@ -729,10 +775,17 @@ export default function BillsScreen() {
           paymentMethod: paymentMethodFilter || undefined,
         };
         const filtered = await getFilteredBills(filters);
-        setFilteredBills(filtered.slice(0, MAX_BILLS_DISPLAY));
+        setFilteredBills(filtered);
       } else {
+        // ✅ Si pas de filtres, charger seulement les 200 DERNIÈRES factures
         const allBills = await getBills();
-        setFilteredBills(allBills.slice(0, MAX_BILLS_DISPLAY));
+        // Trier par date décroissante et prendre les 200 premières (= les plus récentes)
+        const sortedBills = allBills.sort(
+          (a, b) =>
+            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+        );
+        const recentBills = sortedBills.slice(0, MAX_BILLS_DISPLAY);
+        setFilteredBills(recentBills);
       }
     } catch (error) {
       console.error('Error loading bills:', error);
@@ -741,18 +794,21 @@ export default function BillsScreen() {
       setLoading(false);
     }
   }, [searchText, dateFilter, paymentMethodFilter, toast]);
+
+  // ✅ Charger le nombre total de factures pour l'affichage
   useEffect(() => {
-    const loadAllBills = async () => {
+    const loadAllBillsCount = async () => {
       try {
         const allBills = await getBills();
-        setBills(allBills.slice(0, MAX_BILLS_DISPLAY));
+        setBills(allBills); // Garder toutes les factures pour les stats
       } catch (error) {
-        console.error('Error loading all bills:', error);
+        console.error('Error loading bills count:', error);
       }
     };
-    loadAllBills();
+    loadAllBillsCount();
     loadBills();
   }, [loadBills]);
+
   // Tri des factures
   const sortBillsByDate = useCallback(
     (billsToSort: Bill[], order: 'desc' | 'asc' | 'none' = 'desc') => {
@@ -765,6 +821,7 @@ export default function BillsScreen() {
     },
     []
   );
+
   const getPaymentMethodLabel = useCallback(
     (methodId: string) => {
       const method = paymentMethods.find((m) => m.id === methodId);
@@ -772,12 +829,25 @@ export default function BillsScreen() {
     },
     [paymentMethods]
   );
-  // ✅ CORRECTION: Supprimer les factures filtrées - version sécurisée
+
+  // ✅ CORRIGÉ: Supprimer les factures filtrées - version sécurisée
   const handleDeleteFiltered = useCallback(() => {
     if (filteredBills.length === 0) {
       toast.showToast('Aucune facture à supprimer.', 'info');
       return;
     }
+
+    const hasActiveFilters =
+      searchText.trim() || dateFilter || paymentMethodFilter;
+
+    if (!hasActiveFilters) {
+      toast.showToast(
+        "Veuillez d'abord appliquer des filtres pour supprimer une sélection spécifique.",
+        'warning'
+      );
+      return;
+    }
+
     Alert.alert(
       'Supprimer les factures filtrées',
       `Êtes-vous sûr de vouloir supprimer ${filteredBills.length} facture(s) filtrée(s) ?`,
@@ -789,27 +859,24 @@ export default function BillsScreen() {
           onPress: async () => {
             try {
               setProcessing(true);
-              // ✅ SÉCURITÉ: Créer un Set avec les IDs spécifiques des factures filtrées
               const billIdsToDelete = new Set(
                 filteredBills
                   .map((bill) => bill.id)
                   .filter((id) => id !== undefined)
               );
-              // ✅ SÉCURITÉ: Garder seulement les factures qui ne sont PAS dans la liste filtrée
+
               const remainingBills = bills.filter(
                 (bill) => !billIdsToDelete.has(bill.id)
               );
-              // ✅ SÉCURITÉ: Sauvegarder uniquement les factures restantes
+
               await saveBills(remainingBills);
               setBills(remainingBills);
-              // ✅ SÉCURITÉ: Recharger la liste filtrée
               await loadBills();
-              // ✅ SÉCURITÉ: Ajuster la sélection si nécessaire
+
               if (selectedBill && billIdsToDelete.has(selectedBill.id)) {
-                setSelectedBill(
-                  remainingBills.length > 0 ? remainingBills[0] : null
-                );
+                setSelectedBill(null);
               }
+
               toast.showToast(
                 `${billIdsToDelete.size} facture(s) supprimée(s).`,
                 'success'
@@ -824,10 +891,21 @@ export default function BillsScreen() {
         },
       ]
     );
-  }, [filteredBills, bills, selectedBill, loadBills, toast]);
-  // Filtres appliqués
+  }, [
+    filteredBills,
+    bills,
+    selectedBill,
+    loadBills,
+    toast,
+    searchText,
+    dateFilter,
+    paymentMethodFilter,
+  ]);
+
+  // ✅ Filtres appliqués avec vérification des factures vides
   const appliedFilters = useMemo(() => {
     let filtered = [...filteredBills];
+
     if (searchText.trim()) {
       const lowerCaseText = searchText.toLowerCase();
       filtered = filtered.filter((bill) => {
@@ -840,33 +918,45 @@ export default function BillsScreen() {
         );
       });
     }
+
     return sortBillsByDate(filtered, sortOrder);
   }, [filteredBills, searchText, sortOrder, sortBillsByDate]);
+
+  // ✅ NOUVEAU: Indicateur de filtres actifs
+  const hasActiveFilters = useMemo(() => {
+    return !!(searchText.trim() || dateFilter || paymentMethodFilter);
+  }, [searchText, dateFilter, paymentMethodFilter]);
+
   // Handlers
   const handleSearch = useCallback((text: string) => {
     setSearchText(text);
   }, []);
+
   const handleDateFilter = useCallback((date: Date | null) => {
     setDateFilter(date);
   }, []);
+
   const handlePaymentMethodFilter = useCallback(
     (method: Bill['paymentMethod'] | null) => {
       setPaymentMethodFilter(method);
     },
     []
   );
+
   const handleSortChange = useCallback(
     (newSortOrder: 'desc' | 'asc' | 'none') => {
       setSortOrder(newSortOrder);
     },
     []
   );
+
   const handleResetFilters = useCallback(() => {
     setSearchText('');
     setDateFilter(null);
     setPaymentMethodFilter(null);
     setSortOrder('desc');
   }, []);
+
   const handleSelectBill = useCallback(
     (bill: Bill) => {
       if (selectedBill?.id !== bill.id) {
@@ -875,6 +965,7 @@ export default function BillsScreen() {
     },
     [selectedBill?.id]
   );
+
   const handleView = useCallback(() => {
     if (selectedBill) {
       setViewModalVisible(true);
@@ -885,12 +976,14 @@ export default function BillsScreen() {
       );
     }
   }, [selectedBill, toast]);
-  // ✅ CORRECTION: Supprimer toutes les factures - version sécurisée
+
+  // ✅ CORRIGÉ: Supprimer toutes les factures - version sécurisée
   const handleDeleteAll = useCallback(() => {
     if (bills.length === 0) {
       toast.showToast('Aucune facture à supprimer.', 'info');
       return;
     }
+
     Alert.alert(
       'Supprimer toutes les factures',
       `Êtes-vous sûr de vouloir supprimer TOUTES les ${bills.length} facture(s) ?`,
@@ -902,9 +995,7 @@ export default function BillsScreen() {
           onPress: async () => {
             try {
               setProcessing(true);
-              // ✅ SÉCURITÉ: Utiliser BillManager pour vider complètement
               await BillManager.clearAllBills();
-              // ✅ SÉCURITÉ: Réinitialiser tous les états
               setBills([]);
               setFilteredBills([]);
               setSelectedBill(null);
@@ -923,27 +1014,22 @@ export default function BillsScreen() {
       ]
     );
   }, [bills.length, toast]);
-  // ✅ CORRECTION: Supprimer une facture spécifique - version sécurisée
+
+  // ✅ CORRIGÉ: Supprimer une facture spécifique - version sécurisée
   const handleDeleteBill = useCallback(async () => {
     if (!selectedBill || !selectedBill.id) {
       toast.showToast('Facture non valide.', 'error');
       return;
     }
+
     try {
       setProcessing(true);
-      // ✅ SÉCURITÉ: Filtrer uniquement la facture sélectionnée par son ID
       const updatedBills = bills.filter((bill) => bill.id !== selectedBill.id);
-      // ✅ SÉCURITÉ: Sauvegarder la liste mise à jour
       await saveBills(updatedBills);
       setBills(updatedBills);
-      // ✅ SÉCURITÉ: Recharger la liste filtrée
       await loadBills();
-      // ✅ SÉCURITÉ: Ajuster la sélection
-      if (updatedBills.length > 0) {
-        setSelectedBill(updatedBills[0]);
-      } else {
-        setSelectedBill(null);
-      }
+
+      setSelectedBill(null);
       setViewModalVisible(false);
       toast.showToast('Facture supprimée avec succès.', 'success');
     } catch (error) {
@@ -985,13 +1071,13 @@ export default function BillsScreen() {
         return '';
     }
   };
-  // Génération HTML
+
+  // ✅ Génération HTML SIMPLIFIÉE pour les tickets depuis Bills
   const generateHTML = useCallback(
     (bill: Bill, currentZNumber?: number, isZReport: boolean = false) => {
       const paymentLabel = bill.paymentMethod
         ? getPaymentMethodLabel(bill.paymentMethod)
         : 'Non spécifié';
-      const context = getPaymentContext(bill);
       const dateObj = new Date(bill.timestamp);
       const dateFormatted = dateObj.toLocaleDateString('fr-FR');
       const timeFormatted = dateObj.toLocaleTimeString('fr-FR', {
@@ -1002,12 +1088,7 @@ export default function BillsScreen() {
       const hasDetailedItems = bill.paidItems && bill.paidItems.length > 0;
       const itemsToDisplay = hasDetailedItems ? getItemsDisplay(bill) : [];
 
-      // ✅ NOUVEAU : Calculer le total original et le total payé
-      const originalTotal = calculateOriginalTotal(bill);
-      const paidAmount = bill.amount;
-      const isPartialPayment = Math.abs(originalTotal - paidAmount) > 0.01;
-
-      // ✅ Génération HTML des articles avec affichage amélioré
+      // ✅ NOUVEAU: Version simplifiée pour les tickets depuis Bills
       let itemsHTML = '';
       if (hasDetailedItems && itemsToDisplay.length > 0) {
         itemsHTML = `
@@ -1039,7 +1120,7 @@ export default function BillsScreen() {
       `;
       }
 
-      // ✅ Articles offerts si applicable
+      // ✅ Articles offerts si applicable (simplifié)
       let offeredHTML = '';
       if ((bill.offeredAmount ?? 0) > 0) {
         offeredHTML = `
@@ -1049,52 +1130,17 @@ export default function BillsScreen() {
       `;
       }
 
-      // ✅ NOUVEAU : Section de paiement unifiée avec design cohérent
-      let paymentSectionHTML = '';
-
-      if (isPartialPayment) {
-        // Pour les paiements partiels (custom/split), afficher le détail
-        paymentSectionHTML = `
-        <div style="border: 2px solid #000; padding: 4mm; margin: 3mm 0; text-align: center;">
-          <div style="font-weight: bold; font-size: 12pt; margin-bottom: 2mm;">
-            ${getPaymentTypeDisplayName(bill.paymentType)}
-          </div>
-          ${getPaymentDescription(bill.paymentType, bill.guests)}
-          
-          <div style="margin: 3mm 0; padding: 2mm; background-color: #f5f5f5;">
-            <div style="font-size: 14pt; margin-bottom: 1mm;">TOTAL FACTURE: ${originalTotal.toFixed(
-              2
-            )}€</div>
-            <div style="font-weight: bold; font-size: 16pt;">MONTANT PAYÉ: ${paidAmount.toFixed(
-              2
-            )}€</div>
-          </div>
-          
-          <div style="border-top: 1px solid #000; padding-top: 2mm; margin-top: 2mm;">
-            Méthode: ${paymentLabel}
-          </div>
+      // ✅ NOUVEAU: Section de paiement ULTRA-SIMPLIFIÉE comme dans full.tsx
+      const paymentSectionHTML = `
+      <div style="border: 1px solid #000; padding: 3mm; margin: 3mm 0; text-align: center;">
+        <div style="font-weight: bold; font-size: 16pt; margin-bottom: 2mm;">
+          TOTAL PAYÉ: ${bill.amount.toFixed(2)}€
         </div>
-      `;
-      } else {
-        // Pour les paiements complets, design simplifié
-        paymentSectionHTML = `
-        <div style="border: 1px solid #000; padding: 3mm; margin: 3mm 0; text-align: center;">
-          <div style="font-weight: bold; font-size: 16pt; margin-bottom: 2mm;">
-            TOTAL PAYÉ: ${paidAmount.toFixed(2)}€
-          </div>
-          <div style="font-size: 14pt;">Méthode: ${paymentLabel}</div>
-          ${
-            bill.paymentType !== 'full'
-              ? `<div style="font-size: 12pt; margin-top: 1mm;">(${getPaymentTypeDisplayName(
-                  bill.paymentType
-                )})</div>`
-              : ''
-          }
-        </div>
-      `;
-      }
+        <div style="font-size: 14pt;">Méthode: ${paymentLabel}</div>
+      </div>
+    `;
 
-      // ✅ En-tête spécial pour rapport Z
+      // ✅ En-tête spécial pour rapport Z seulement
       let headerExtension = '';
       if (isZReport && currentZNumber) {
         headerExtension = `
@@ -1166,8 +1212,6 @@ export default function BillsScreen() {
             bill.tableName || `Table ${bill.tableNumber}`
           }</p>
           <p class="timestamp">${dateFormatted} à ${timeFormatted}</p>
-          ${bill.section ? `<p>Section: ${bill.section}</p>` : ''}
-          ${bill.guests ? `<p>Couverts: ${bill.guests}</p>` : ''}
 
           <div class="divider"></div>
 
@@ -1210,7 +1254,7 @@ export default function BillsScreen() {
     setProcessing(true);
     try {
       await Print.printAsync({
-        html: generateHTML(selectedBill), // ✅ Utilise la fonction unifiée
+        html: generateHTML(selectedBill),
       });
       toast.showToast("Reçu envoyé à l'imprimante.", 'success');
     } catch (error) {
@@ -1229,7 +1273,7 @@ export default function BillsScreen() {
     setProcessing(true);
     try {
       const { uri } = await Print.printToFileAsync({
-        html: generateHTML(selectedBill), // ✅ Utilise la fonction unifiée
+        html: generateHTML(selectedBill),
       });
       await Sharing.shareAsync(uri, {
         UTI: '.pdf',
@@ -1267,9 +1311,11 @@ export default function BillsScreen() {
       setProcessing(false);
     }
   }, [selectedBill, generateHTML, toast]);
+
   const keyExtractor = useCallback((item: Bill, index: number) => {
     return item.id ? `bill-${item.id}` : `bill-index-${index}`;
   }, []);
+
   const renderBillItem = useCallback(
     ({ item }: { item: Bill }) => (
       <BillListItem
@@ -1280,6 +1326,7 @@ export default function BillsScreen() {
     ),
     [selectedBill?.id, handleSelectBill]
   );
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -1288,11 +1335,14 @@ export default function BillsScreen() {
       </View>
     );
   }
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Factures & Paiements</Text>
       </View>
+
+      {/* ✅ AMÉLIORÉ: Gestion du cas sans factures */}
       {bills.length === 0 ? (
         <View style={styles.emptyContainer}>
           <Receipt size={60} color="#cccccc" />
@@ -1315,36 +1365,75 @@ export default function BillsScreen() {
             onPaymentMethodChange={handlePaymentMethodFilter}
             selectedPaymentMethod={paymentMethodFilter}
             onResetFilters={handleResetFilters}
+            hasFiltersActive={hasActiveFilters}
+            filteredBillsCount={appliedFilters.length}
+            totalBillsCount={bills.length}
           />
+
           <View style={styles.content}>
             <View style={styles.billsList}>
               <Text style={styles.listTitle}>Historique des Factures</Text>
-              <Text style={styles.billCount}>
-                {appliedFilters.length} facture(s){' '}
-                {appliedFilters.length !== bills.length
-                  ? `(sur ${bills.length} total)`
-                  : ''}
-                {appliedFilters.length >= MAX_BILLS_DISPLAY && (
-                  <Text style={styles.limitText}> - Affichage limité</Text>
+
+              {/* ✅ NOUVEAU: Affichage amélioré du statut */}
+              <View style={styles.billCountContainer}>
+                <Text style={styles.billCount}>
+                  {appliedFilters.length} facture(s) affichée(s)
+                  {hasActiveFilters && (
+                    <Text style={styles.filterIndicator}> (filtrées)</Text>
+                  )}
+                </Text>
+                {!hasActiveFilters && bills.length > MAX_BILLS_DISPLAY && (
+                  <Text style={styles.limitText}>
+                    Les 200 plus récentes sur {bills.length} total
+                  </Text>
                 )}
-              </Text>
-              <FlatList
-                data={appliedFilters}
-                renderItem={renderBillItem}
-                keyExtractor={keyExtractor}
-                initialNumToRender={10}
-                maxToRenderPerBatch={8}
-                windowSize={15}
-                removeClippedSubviews={true}
-                updateCellsBatchingPeriod={50}
-                extraData={selectedBill?.id}
-                getItemLayout={(data, index) => ({
-                  length: ITEM_HEIGHT,
-                  offset: ITEM_HEIGHT * index,
-                  index,
-                })}
-              />
+                {hasActiveFilters && (
+                  <Text style={styles.totalBillsText}>
+                    Total: {bills.length} factures
+                  </Text>
+                )}
+              </View>
+
+              {/* ✅ AMÉLIORÉ: Gestion du cas sans factures filtrées */}
+              {appliedFilters.length === 0 ? (
+                <View style={styles.noResultsContainer}>
+                  <Receipt size={40} color="#cccccc" />
+                  <Text style={styles.noResultsText}>
+                    {hasActiveFilters
+                      ? 'Aucune facture ne correspond aux filtres'
+                      : 'Aucune facture récente'}
+                  </Text>
+                  {hasActiveFilters && (
+                    <Pressable
+                      style={styles.resetFiltersButton}
+                      onPress={handleResetFilters}
+                    >
+                      <Text style={styles.resetFiltersButtonText}>
+                        Effacer les filtres
+                      </Text>
+                    </Pressable>
+                  )}
+                </View>
+              ) : (
+                <FlatList
+                  data={appliedFilters}
+                  renderItem={renderBillItem}
+                  keyExtractor={keyExtractor}
+                  initialNumToRender={10}
+                  maxToRenderPerBatch={8}
+                  windowSize={15}
+                  removeClippedSubviews={true}
+                  updateCellsBatchingPeriod={50}
+                  extraData={selectedBill?.id}
+                  getItemLayout={(data, index) => ({
+                    length: ITEM_HEIGHT,
+                    offset: ITEM_HEIGHT * index,
+                    index,
+                  })}
+                />
+              )}
             </View>
+
             <View style={styles.billDetails}>
               {selectedBill ? (
                 <>
@@ -1371,7 +1460,7 @@ export default function BillsScreen() {
                       {getPaymentContext(selectedBill).type}
                     </Text>
                   </View>
-                  {/* ✅ ZONE SCROLLABLE POUR LES DÉTAILS */}
+
                   <ScrollView
                     style={styles.billDetailsScroll}
                     showsVerticalScrollIndicator={false}
@@ -1383,7 +1472,7 @@ export default function BillsScreen() {
                           {new Date(selectedBill.timestamp).toLocaleString()}
                         </Text>
                       </View>
-                      {/* ✅ AFFICHAGE CORRIGÉ : Total global vs Montant payé */}
+
                       {(() => {
                         const context = getPaymentContext(selectedBill);
                         if (context.originalTotal !== selectedBill.amount) {
@@ -1420,7 +1509,7 @@ export default function BillsScreen() {
                           );
                         }
                       })()}
-                      {/* ✅ AUTRES INFORMATIONS */}
+
                       {selectedBill.guests && (
                         <View style={styles.detailRow}>
                           <Text style={styles.detailLabel}>Couverts:</Text>
@@ -1429,6 +1518,7 @@ export default function BillsScreen() {
                           </Text>
                         </View>
                       )}
+
                       {selectedBill.paymentMethod && (
                         <View style={styles.detailRow}>
                           <Text style={styles.detailLabel}>
@@ -1439,6 +1529,7 @@ export default function BillsScreen() {
                           </Text>
                         </View>
                       )}
+
                       <View style={styles.detailRow}>
                         <Text style={styles.detailLabel}>
                           Type de paiement:
@@ -1447,6 +1538,7 @@ export default function BillsScreen() {
                           {getPaymentContext(selectedBill).type}
                         </Text>
                       </View>
+
                       <View style={styles.detailRow}>
                         <Text style={styles.detailLabel}>Statut:</Text>
                         <Text
@@ -1460,7 +1552,7 @@ export default function BillsScreen() {
                             : selectedBill.status}
                         </Text>
                       </View>
-                      {/* ✅ SECTION DÉTAILS DU PAIEMENT AVEC MONTANT INTÉGRÉ */}
+
                       <View style={styles.paymentDetailsSection}>
                         <Text style={styles.paymentDetailsSectionTitle}>
                           {getPaymentContext(selectedBill).type}
@@ -1470,7 +1562,7 @@ export default function BillsScreen() {
                             {getPaymentContext(selectedBill).detail}
                           </Text>
                         </View>
-                        {/* ✅ MONTANT PAYÉ MIS EN AVANT */}
+
                         <View style={styles.paymentAmountBox}>
                           <Text style={styles.paymentAmountLabel}>
                             Montant payé:
@@ -1479,7 +1571,7 @@ export default function BillsScreen() {
                             {selectedBill.amount.toFixed(2)} €
                           </Text>
                         </View>
-                        {/* ✅ MODE DE PAIEMENT */}
+
                         {selectedBill.paymentMethod && (
                           <View style={styles.paymentMethodBox}>
                             <Text style={styles.paymentMethodText}>
@@ -1490,7 +1582,7 @@ export default function BillsScreen() {
                           </View>
                         )}
                       </View>
-                      {/* ✅ ARTICLES SI DISPONIBLES */}
+
                       {selectedBill.paidItems &&
                         selectedBill.paidItems.length > 0 && (
                           <View style={styles.itemsSection}>
@@ -1523,7 +1615,7 @@ export default function BillsScreen() {
                         )}
                     </View>
                   </ScrollView>
-                  {/* ✅ BOUTONS TOUJOURS VISIBLES EN BAS */}
+
                   <View style={styles.actionsContainer}>
                     <Pressable style={styles.actionButton} onPress={handleView}>
                       <Eye size={18} color="#2196F3" />
@@ -1587,6 +1679,7 @@ export default function BillsScreen() {
           </View>
         </View>
       )}
+
       <ViewReceiptModal
         visible={viewModalVisible}
         bill={selectedBill}
@@ -1595,6 +1688,7 @@ export default function BillsScreen() {
         onShare={handleShare}
         onDelete={handleDeleteBill}
       />
+
       {processing && (
         <View style={styles.processingOverlay}>
           <ActivityIndicator size="large" color="white" />
@@ -1604,7 +1698,8 @@ export default function BillsScreen() {
     </View>
   );
 }
-// Styles corrigés et améliorés
+
+// ✅ STYLES AMÉLIORÉS
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f5f5f5' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
@@ -1648,6 +1743,37 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   searchInput: { flex: 1, height: 40, marginLeft: 8 },
+
+  // ✅ NOUVEAUX STYLES pour le statut de filtrage
+  filterStatus: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    backgroundColor: '#E3F2FD',
+    padding: 8,
+    borderRadius: 6,
+    marginBottom: 8,
+  },
+  filterStatusText: {
+    fontSize: 14,
+    color: '#1976D2',
+    fontWeight: '500',
+  },
+  clearFiltersButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'white',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  clearFiltersText: {
+    fontSize: 12,
+    color: '#F44336',
+    fontWeight: '500',
+  },
+
   filterActions: { flexDirection: 'row', paddingVertical: 8 },
   filterButton: {
     flexDirection: 'row',
@@ -1667,8 +1793,52 @@ const styles = StyleSheet.create({
     padding: 16,
   },
   listTitle: { fontSize: 18, fontWeight: '600', marginBottom: 8 },
-  billCount: { fontSize: 14, color: '#666', marginBottom: 16 },
-  limitText: { color: '#FF9800', fontWeight: '600' },
+
+  // ✅ NOUVEAUX STYLES pour le compteur amélioré
+  billCountContainer: {
+    marginBottom: 16,
+  },
+  billCount: { fontSize: 14, color: '#666', marginBottom: 4 },
+  filterIndicator: { color: '#2196F3', fontWeight: '600' },
+  limitText: {
+    color: '#FF9800',
+    fontWeight: '600',
+    fontSize: 12,
+    fontStyle: 'italic',
+  },
+  totalBillsText: {
+    color: '#666',
+    fontSize: 12,
+    fontStyle: 'italic',
+  },
+
+  // ✅ NOUVEAUX STYLES pour l'absence de résultats
+  noResultsContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  noResultsText: {
+    marginTop: 12,
+    fontSize: 16,
+    color: '#999',
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  resetFiltersButton: {
+    marginTop: 16,
+    backgroundColor: '#2196F3',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 6,
+  },
+  resetFiltersButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+
   billListItem: {
     padding: 10,
     borderBottomWidth: 1,
@@ -1713,10 +1883,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#2E7D32',
   },
-  billItemPaymentType: {
+  billItemPaymentMethod: {
     fontSize: 12,
-    color: '#666',
-    fontStyle: 'italic',
+    color: '#2196F3',
+    fontWeight: '500',
     marginTop: 2,
   },
   billItemStatus: {
@@ -2076,16 +2246,6 @@ const styles = StyleSheet.create({
   },
   processingText: { color: 'white', marginTop: 12, fontSize: 16 },
   clearButton: { marginLeft: 8, padding: 4 },
-  resetButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#E3F2FD',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#2196F3',
-  },
   paymentPickerContainer: {
     position: 'absolute',
     top: '100%',
@@ -2124,12 +2284,6 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderBottomWidth: 1,
     borderBottomColor: '#f0f0f0',
-  },
-  billItemPaymentMethod: {
-    fontSize: 12,
-    color: '#2196F3', 
-    fontWeight: '500', 
-    marginTop: 2,
   },
   itemDetails: { flexDirection: 'row', flex: 1, alignItems: 'center' },
   itemQuantity: { fontSize: 14, marginRight: 8, width: 30 },
