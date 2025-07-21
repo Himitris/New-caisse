@@ -372,8 +372,8 @@ export default function SettingsScreen() {
       </View>
 
       <VersionFooter
-        version="1.9.0"
-        buildNumber="120"
+        version="2.0"
+        buildNumber="150"
         style={{ borderTopWidth: 1, borderTopColor: '#e0e0e0' }}
       />
 

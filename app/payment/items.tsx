@@ -1,4 +1,4 @@
-// app/payment/items.tsx - Version sans événements
+// app/payment/items.tsx - Version améliorée
 import { useSettings } from '@/utils/useSettings';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTableContext } from '@/utils/TableContext';
@@ -74,31 +74,83 @@ function getMethodColor(methodId: string) {
   }
 }
 
-// Fonction pour catégoriser les items
+// Fonction améliorée pour catégoriser les items
 const getCategoryFromName = (name: string): 'plat' | 'boisson' => {
   const lowerName = name.toLowerCase();
 
-  if (lowerName.includes('glace')) return 'boisson';
-  if (lowerName.includes('thé') || lowerName.includes('café')) return 'boisson';
+  // Boissons alcoolisées - bières
+  if (lowerName.includes('pinte') || lowerName.includes('demi'))
+    return 'boisson';
   if (
     lowerName.includes('bière') ||
     lowerName.includes('blonde') ||
-    lowerName.includes('ambree')
+    lowerName.includes('ambree') ||
+    lowerName.includes('brune')
   )
     return 'boisson';
   if (
+    lowerName.includes('pression') ||
+    lowerName.includes('hoegaarden') ||
+    lowerName.includes('leffe') ||
+    lowerName.includes('stella')
+  )
+    return 'boisson';
+
+  // Boissons alcoolisées - vins et spiritueux
+  if (
     lowerName.includes('vin') ||
     lowerName.includes('pichet') ||
-    lowerName.includes('btl')
+    lowerName.includes('btl') ||
+    lowerName.includes('bouteille')
   )
     return 'boisson';
   if (
     lowerName.includes('apero') ||
     lowerName.includes('digestif') ||
     lowerName.includes('ricard') ||
+    lowerName.includes('pastis')
+  )
+    return 'boisson';
+  if (
     lowerName.includes('alcool') ||
     lowerName.includes('punch') ||
-    lowerName.includes('cocktail')
+    lowerName.includes('cocktail') ||
+    lowerName.includes('mojito')
+  )
+    return 'boisson';
+  if (
+    lowerName.includes('whisky') ||
+    lowerName.includes('vodka') ||
+    lowerName.includes('rhum') ||
+    lowerName.includes('gin')
+  )
+    return 'boisson';
+  if (
+    lowerName.includes('champagne') ||
+    lowerName.includes('prosecco') ||
+    lowerName.includes('kir')
+  )
+    return 'boisson';
+
+  // Boissons chaudes
+  if (
+    lowerName.includes('thé') ||
+    lowerName.includes('café') ||
+    lowerName.includes('cappuccino') ||
+    lowerName.includes('expresso')
+  )
+    return 'boisson';
+  if (
+    lowerName.includes('chocolat chaud') ||
+    lowerName.includes('infusion') ||
+    lowerName.includes('tisane')
+  )
+    return 'boisson';
+
+  // Boissons froides non alcoolisées
+  if (
+    lowerName.includes('glace') &&
+    (lowerName.includes('thé') || lowerName.includes('café'))
   )
     return 'boisson';
   if (
@@ -107,7 +159,33 @@ const getCategoryFromName = (name: string): 'plat' | 'boisson' => {
     lowerName.includes('soda')
   )
     return 'boisson';
+  if (
+    lowerName.includes('coca') ||
+    lowerName.includes('pepsi') ||
+    lowerName.includes('sprite') ||
+    lowerName.includes('fanta')
+  )
+    return 'boisson';
+  if (
+    lowerName.includes('jus') ||
+    lowerName.includes('smoothie') ||
+    lowerName.includes('milkshake')
+  )
+    return 'boisson';
+  if (
+    lowerName.includes('eau') ||
+    lowerName.includes('perrier') ||
+    lowerName.includes('san pellegrino')
+  )
+    return 'boisson';
+  if (
+    lowerName.includes('limonade') ||
+    lowerName.includes('citronnade') ||
+    lowerName.includes('orangeade')
+  )
+    return 'boisson';
 
+  // Tout le reste est considéré comme un plat
   return 'plat';
 };
 
@@ -155,7 +233,7 @@ const ItemCard = memo(
           <View style={styles.selectedItemRow}>
             <View style={styles.leftContent}>
               <View style={styles.itemNameRow}>
-                {isOffered && <Gift size={14} color="#FF9800" />}
+                {isOffered && <Gift size={16} color="#FF9800" />}
                 <Text
                   style={[styles.itemName, isOffered && styles.offeredItemText]}
                 >
@@ -167,7 +245,7 @@ const ItemCard = memo(
                   style={styles.quantityButton}
                   onPress={() => onQuantityChange?.(false)}
                 >
-                  <Minus size={14} color="#666" />
+                  <Minus size={16} color="#666" />
                 </Pressable>
                 <Text style={styles.quantityValue}>
                   {selectedItem.selectedQuantity}
@@ -176,7 +254,7 @@ const ItemCard = memo(
                   style={styles.quantityButton}
                   onPress={() => onQuantityChange?.(true)}
                 >
-                  <Plus size={14} color="#666" />
+                  <Plus size={16} color="#666" />
                 </Pressable>
               </View>
             </View>
@@ -227,7 +305,7 @@ const ItemCard = memo(
       <View style={styles.itemCard}>
         <View style={styles.itemHeader}>
           <View style={styles.itemNameRow}>
-            {isOffered && <Gift size={14} color="#FF9800" />}
+            {isOffered && <Gift size={16} color="#FF9800" />}
             <Text
               style={[styles.itemName, isOffered && styles.offeredItemText]}
             >
@@ -243,20 +321,19 @@ const ItemCard = memo(
           <Text style={styles.quantityText}>Quantité: {item.quantity}</Text>
 
           <View style={styles.actionButtons}>
-            <Pressable style={styles.addButton} onPress={() => onAdd?.(false)}>
-              <Plus size={16} color="white" />
-              <Text style={styles.addButtonText}>Ajouter</Text>
-            </Pressable>
-
             {item.quantity > 1 && (
               <Pressable
                 style={[styles.addButton, styles.addAllButton]}
                 onPress={() => onAdd?.(true)}
               >
-                <ShoppingCart size={16} color="white" />
+                <ShoppingCart size={18} color="white" />
                 <Text style={styles.addButtonText}>Tout</Text>
               </Pressable>
             )}
+            <Pressable style={styles.addButton} onPress={() => onAdd?.(false)}>
+              <Plus size={18} color="white" />
+              <Text style={styles.addButtonText}>Ajouter</Text>
+            </Pressable>
           </View>
         </View>
       </View>

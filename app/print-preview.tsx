@@ -96,31 +96,28 @@ export default function PrintPreviewScreen() {
         }
 
         return `
-    <tr class="${item.offered ? 'offered-item' : ''}">
-      <td style="font-size: 14pt; padding: 2mm 0;">${item.quantity}x</td>
-      <td style="font-size: 14pt; padding: 2mm 0;">${item.name}${
+  <tr class="${item.offered ? 'offered-item' : ''}">
+    <td style="font-size: 14pt; padding: 2mm 0;">${item.quantity}x</td>
+    <td style="font-size: 14pt; padding: 2mm 0;">${item.name}${
           item.offered ? ' (Offert)' : ''
         }</td>
-      <td style="text-align: right; font-size: 14pt; padding: 2mm 0;">${itemTotal.toFixed(
-        2
-      )}€</td>
-    </tr>
-    `;
+    <td style="text-align: right; font-size: 14pt; padding: 2mm 0;">${itemTotal.toFixed(
+      2
+    )}€</td>
+  </tr>
+  `;
       })
       .join('');
 
-    // ✅ Information sur la TVA (maintenant cohérente avec bills.tsx)
     const taxInfo =
       restaurantInfo.taxInfo || 'TVA non applicable - art.293B du CGI';
 
-    // ✅ NOUVEAU : Détection du type de paiement et calculs unifiés
     const originalTotal = order.total;
     const paidAmount = order.isPartial
       ? order.total - order.remaining
       : order.total;
     const isPartialPayment = order.isPartial && order.remaining > 0;
 
-    // ✅ Déterminer le type de paiement pour l'affichage
     let paymentType = 'full';
     if (isPreviewMode) {
       paymentType = 'preview';
@@ -128,183 +125,186 @@ export default function PrintPreviewScreen() {
       paymentType = 'partial';
     }
 
-    // ✅ Section de paiement unifiée
+    // ✅ Section de paiement SANS cadre pour tous les types
     let paymentSectionHTML = '';
 
     if (isPreviewMode) {
       paymentSectionHTML = `
-      <div style="border: 2px solid #9C27B0; padding: 4mm; margin: 3mm 0; text-align: center; background-color: #F3E5F5;">
-        <div style="font-weight: bold; font-size: 16pt; color: #9C27B0;">
-          PRÉVISUALISATION
-        </div>
-        <div style="margin: 2mm 0; font-size: 14pt;">⚠️ Cette commande n'a pas été payée ⚠️</div>
-        <div style="font-weight: bold; font-size: 14pt; margin-top: 2mm;">
-          TOTAL: ${order.total.toFixed(2)}€
-        </div>
+    <div style="border-top: 1px dashed #000; padding-top: 3mm; margin-top: 3mm; text-align: center;">
+      <div style="font-weight: bold; font-size: 16pt; color: #9C27B0;">
+        PRÉVISUALISATION
       </div>
-    `;
+      <div style="margin: 2mm 0; font-size: 14pt;">⚠️ Cette commande n'a pas été payée ⚠️</div>
+      <div style="font-weight: bold; font-size: 14pt; margin-top: 2mm;">
+        TOTAL: ${order.total.toFixed(2)}€
+      </div>
+    </div>
+  `;
     } else if (isPartialPayment) {
       paymentSectionHTML = `
-      <div style="border: 2px solid #000; padding: 4mm; margin: 3mm 0; text-align: center;">
-        <div style="font-weight: bold; font-size: 12pt; margin-bottom: 2mm;">
-          PAIEMENT PARTIEL
-        </div>
-        <div style="margin: 2mm 0;">Montant partiel payé par le client</div>
-        
-        <div style="margin: 3mm 0; padding: 2mm; background-color: #f5f5f5;">
-          <div style="font-size: 14pt; margin-bottom: 1mm;">TOTAL FACTURE: ${originalTotal.toFixed(
-            2
-          )}€</div>
-          <div style="font-weight: bold; font-size: 16pt; color: #2196F3;">MONTANT PAYÉ: ${paidAmount.toFixed(
-            2
-          )}€</div>
-          <div style="font-size: 14pt; margin-top: 1mm; color: #F44336;">RESTE À PAYER: ${order.remaining.toFixed(
-            2
-          )}€</div>
-        </div>
-        
-        <div style="border-top: 1px solid #000; padding-top: 2mm; margin-top: 2mm;">
-          Méthode: ${getPaymentMethodLabel(
-            Array.isArray(order.paymentMethod)
-              ? order.paymentMethod[0]
-              : order.paymentMethod
-          )}
-        </div>
+    <div style="border-top: 1px dashed #000; padding-top: 3mm; margin-top: 3mm; text-align: center;">
+      <div style="font-weight: bold; font-size: 12pt; margin-bottom: 2mm;">
+        PAIEMENT PARTIEL
       </div>
-    `;
-    } else {
-      // Paiement complet - design simple et clair
-      paymentSectionHTML = `
-      <div style="border: 1px solid #000; padding: 3mm; margin: 3mm 0; text-align: center;">
-        <div style="font-weight: bold; font-size: 16pt; margin-bottom: 2mm;">
-          TOTAL PAYÉ: ${order.total.toFixed(2)}€
-        </div>
-        <div style="font-size: 14pt;">Méthode: ${getPaymentMethodLabel(
+      <div style="margin: 2mm 0;">Montant partiel payé par le client</div>
+      
+      <div style="margin: 3mm 0;">
+        <div style="font-size: 14pt; margin-bottom: 1mm;">TOTAL FACTURE: ${originalTotal.toFixed(
+          2
+        )}€</div>
+        <div style="font-weight: bold; font-size: 16pt;">MONTANT PAYÉ: ${paidAmount.toFixed(
+          2
+        )}€</div>
+        <div style="font-size: 14pt; margin-top: 1mm;">RESTE À PAYER: ${order.remaining.toFixed(
+          2
+        )}€</div>
+      </div>
+      
+      <div style="margin-top: 2mm;">
+        Méthode: ${getPaymentMethodLabel(
           Array.isArray(order.paymentMethod)
             ? order.paymentMethod[0]
             : order.paymentMethod
-        )}</div>
+        )}
       </div>
-    `;
+    </div>
+  `;
+    } else {
+      // ✅ Paiement complet - SANS cadre
+      paymentSectionHTML = `
+    <div style="border-top: 1px dashed #000; padding-top: 3mm; margin-top: 3mm; text-align: center;">
+      <div style="font-weight: bold; font-size: 16pt; margin-bottom: 2mm;">
+        TOTAL PAYÉ: ${order.total.toFixed(2)}€
+      </div>
+      <div style="font-size: 14pt;">Méthode: ${getPaymentMethodLabel(
+        Array.isArray(order.paymentMethod)
+          ? order.paymentMethod[0]
+          : order.paymentMethod
+      )}</div>
+    </div>
+  `;
     }
 
     return `
-  <html>
-    <head>
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <style>
-        @page { size: 80mm auto; margin: 0mm; }
-        body { 
-          font-family: 'Courier New', monospace; 
-          width: 80mm;
-          padding: 5mm;
-          margin: 0;
-          font-size: 14pt;
-        }
-        .header, .footer { 
-          text-align: center; 
-          margin-bottom: 5mm;
-        }
-        .header h1 {
-          font-size: 18pt;
-          margin: 0 0 2mm 0;
-          font-weight: bold;
-        }
-        .header p, .footer p {
-          margin: 0 0 1mm 0;
-          font-size: 15pt;
-        }
-        .footer .tax{
-          font-size: 12pt;
-          margin-bottom: 4mm;
-        }
-        .divider {
-          border-bottom: 1px dashed #000;
-          margin: 4mm 0;
-        }
-        table {
-          width: 100%;
-          border-collapse: collapse;
-        }
-        th, td {
-          text-align: left;
-          padding: 2mm 0;
-          font-size: 14pt;
-        }
-        th:last-child, td:last-child {
-          text-align: right;
-        }
-        td:first-child {
-          width: 15%;
-        }
-        td:nth-child(2) {
-          width: 60%;
-        }
-        td:last-child {
-          width: 25%;
-        }
-        .offered-item { 
-          font-style: italic; 
-        }
-        .table-info {
-          font-size: 15pt;
-          font-weight: bold;
-        }
-        .timestamp {
-          font-size: 13pt;
-        }
-      </style>
-    </head>
-    <body>
-      <div class="header">
-        <h1>${restaurantInfo.name}</h1>
-        <p>${restaurantInfo.address}</p>
-        <p>${restaurantInfo.phone}</p>
-        ${restaurantInfo.siret ? `<p>${restaurantInfo.siret}</p>` : ''}
-      </div>
+<html>
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+      @page { size: 80mm auto; margin: 0mm; }
+      body { 
+        font-family: 'Courier New', monospace; 
+        width: 80mm;
+        padding: 5mm;
+        margin: 0;
+        font-size: 14pt;
+      }
+      .header, .footer { 
+        text-align: center; 
+        margin-bottom: 5mm;
+      }
+      .header h1 {
+        font-size: 18pt;
+        margin: 0 0 2mm 0;
+        font-weight: bold;
+      }
+      .header p, .footer p {
+        margin: 0 0 1mm 0;
+        font-size: 15pt;
+      }
+      .footer .tax{
+        font-size: 12pt;
+        margin-bottom: 4mm;
+      }
+      .divider {
+        border-bottom: 1px dashed #000;
+        margin: 4mm 0;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th, td {
+        text-align: left;
+        padding: 2mm 0;
+        font-size: 14pt;
+      }
+      th:last-child, td:last-child {
+        text-align: right;
+      }
+      td:first-child {
+        width: 15%;
+      }
+      td:nth-child(2) {
+        width: 60%;
+      }
+      td:last-child {
+        width: 25%;
+      }
+      .offered-item { 
+        font-style: italic; 
+      }
+      .table-info {
+        font-size: 15pt;
+        font-weight: bold;
+      }
+      .timestamp {
+        font-size: 13pt;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <h1>${restaurantInfo.name}</h1>
+      <p>${restaurantInfo.address}</p>
+      <p>${restaurantInfo.phone}</p>
+      ${restaurantInfo.siret ? `<p>${restaurantInfo.siret}</p>` : ''}
+    </div>
 
-      <div class="divider"></div>
-      
-      <p class="table-info"><strong>${order.tableName}</strong></p>
-      <p class="timestamp">${order.date} à ${order.time}</p>
+    <div class="divider"></div>
+    
+    <p class="table-info"><strong>${order.tableName}</strong></p>
+    <p class="timestamp">${order.date} à ${order.time}</p>
 
-      <div class="divider"></div>
+    <div class="divider"></div>
 
-      <table>
-        <tr>
-          <th>Qté</th>
-          <th>Article</th>
-          <th>Total</th>
-        </tr>
-        ${itemsHTML}
-      </table>
+    <table>
+      <tr>
+        <th>Qté</th>
+        <th>Article</th>
+        <th>Total</th>
+      </tr>
+      ${itemsHTML}
+    </table>
 
-      <div style="margin: 3mm 0;">
-        <div>Articles: ${order.items.length}</div>
-        ${
-          offeredTotal > 0
-            ? `<div style="font-style: italic;">Articles offerts: ${offeredTotal.toFixed(
-                2
-              )}€</div>`
-            : ''
-        }
-      </div>
+    <div style="margin: 3mm 0;">
+      <div>Articles: ${order.items.length}</div>
+      ${
+        offeredTotal > 0
+          ? `<div style="font-style: italic;">Articles offerts: ${offeredTotal.toFixed(
+              2
+            )}€</div>`
+          : ''
+      }
+      ${
+        totalPrice > 0 && Math.abs(totalPrice - paidAmount) > 0.01
+          ? `<div style="font-weight: bold;">Sous-total: ${totalPrice.toFixed(
+              2
+            )}€</div>`
+          : ''
+      }
+    </div>
 
-      ${paymentSectionHTML}
+    ${paymentSectionHTML}
 
-      <div class="divider"></div>
+    <div class="divider"></div>
 
-      <div class="footer">
-        <p class="tax">${taxInfo}</p>
-        <p>Merci de votre visite!</p>
-        ${
-          restaurantInfo.owner
-            ? `<p>À bientôt, ${restaurantInfo.owner}</p>`
-            : ''
-        }
-      </div>
-    </body>
-  </html>
+    <div class="footer">
+      <p class="tax">${taxInfo}</p>
+      <p>Merci de votre visite!</p>
+      ${restaurantInfo.owner ? `<p>À bientôt, ${restaurantInfo.owner}</p>` : ''}
+    </div>
+  </body>
+</html>
 `;
   };
 

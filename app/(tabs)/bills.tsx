@@ -1054,25 +1054,7 @@ export default function BillsScreen() {
     }
   };
 
-  const getPaymentDescription = (
-    paymentType?: string,
-    guests?: number
-  ): string => {
-    switch (paymentType) {
-      case 'split':
-        return `<div style="margin: 2mm 0;">Addition divisée en ${
-          guests || 2
-        } parts</div>`;
-      case 'custom':
-        return `<div style="margin: 2mm 0;">Montant partiel payé par le client</div>`;
-      case 'items':
-        return `<div style="margin: 2mm 0;">Articles sélectionnés uniquement</div>`;
-      default:
-        return '';
-    }
-  };
-
-  // ✅ Génération HTML SIMPLIFIÉE pour les tickets depuis Bills
+  // ✅ Fonction generateHTML complète avec ajout du sous-total
   const generateHTML = useCallback(
     (bill: Bill, currentZNumber?: number, isZReport: boolean = false) => {
       const paymentLabel = bill.paymentMethod
@@ -1088,7 +1070,14 @@ export default function BillsScreen() {
       const hasDetailedItems = bill.paidItems && bill.paidItems.length > 0;
       const itemsToDisplay = hasDetailedItems ? getItemsDisplay(bill) : [];
 
-      // ✅ NOUVEAU: Version simplifiée pour les tickets depuis Bills
+      // ✅ Calcul du sous-total des articles
+      let subtotalArticles = 0;
+      if (hasDetailedItems && itemsToDisplay.length > 0) {
+        subtotalArticles = itemsToDisplay.reduce((sum, item) => {
+          return item.offered ? sum : sum + item.price * item.quantity;
+        }, 0);
+      }
+
       let itemsHTML = '';
       if (hasDetailedItems && itemsToDisplay.length > 0) {
         itemsHTML = `
@@ -1120,7 +1109,6 @@ export default function BillsScreen() {
       `;
       }
 
-      // ✅ Articles offerts si applicable (simplifié)
       let offeredHTML = '';
       if ((bill.offeredAmount ?? 0) > 0) {
         offeredHTML = `
@@ -1130,9 +1118,9 @@ export default function BillsScreen() {
       `;
       }
 
-      // ✅ NOUVEAU: Section de paiement ULTRA-SIMPLIFIÉE comme dans full.tsx
+      // ✅ NOUVEAU: Section de paiement SANS cadre, juste une ligne de séparation
       const paymentSectionHTML = `
-      <div style="border: 1px solid #000; padding: 3mm; margin: 3mm 0; text-align: center;">
+      <div style="border-top: 1px dashed #000; padding-top: 3mm; margin-top: 3mm; text-align: center;">
         <div style="font-weight: bold; font-size: 16pt; margin-bottom: 2mm;">
           TOTAL PAYÉ: ${bill.amount.toFixed(2)}€
         </div>
@@ -1140,7 +1128,6 @@ export default function BillsScreen() {
       </div>
     `;
 
-      // ✅ En-tête spécial pour rapport Z seulement
       let headerExtension = '';
       if (isZReport && currentZNumber) {
         headerExtension = `
@@ -1222,6 +1209,15 @@ export default function BillsScreen() {
               hasDetailedItems ? itemsToDisplay.length : bill.items
             }</div>
             ${offeredHTML}
+            ${
+              hasDetailedItems &&
+              subtotalArticles > 0 &&
+              Math.abs(subtotalArticles - bill.amount) > 0.01
+                ? `<div style="font-weight: bold;">Sous-total: ${subtotalArticles.toFixed(
+                    2
+                  )}€</div>`
+                : ''
+            }
           </div>
 
           ${paymentSectionHTML}
@@ -1245,7 +1241,6 @@ export default function BillsScreen() {
     },
     [getPaymentMethodLabel, restaurantInfo]
   );
-
   const handlePrint = useCallback(async () => {
     if (!selectedBill) {
       toast.showToast('Veuillez sélectionner une facture à imprimer.', 'info');

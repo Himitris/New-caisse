@@ -127,6 +127,15 @@ export default function TableScreen() {
     }, 0);
   }, []);
 
+  // Calcul du montant par personne
+  const calculateAmountPerPerson = useCallback(
+    (total: number, guests: number): number => {
+      if (guests <= 0) return 0;
+      return total / guests;
+    },
+    []
+  );
+
   // Ajouter un item
   const addItemToOrder = useCallback(
     (item: MenuItem) => {
@@ -735,7 +744,19 @@ export default function TableScreen() {
 
           <View style={styles.totalSection}>
             <View style={styles.finalTotal}>
-              <Text style={styles.totalLabel}>Total:</Text>
+              <View style={styles.totalRow}>
+                <Text style={styles.totalLabel}>Total:</Text>
+                <View style={styles.totalAmountContainer}>
+                  <Text style={styles.totalAmount}>{total.toFixed(2)} €</Text>
+                  {guestCount > 1 && total > 0 && (
+                    <Text style={styles.perPersonTextCompact}>
+                      ({calculateAmountPerPerson(total, guestCount).toFixed(2)}{' '}
+                      € / pers.)
+                    </Text>
+                  )}
+                </View>
+              </View>
+
               {offeredTotal > 0 && (
                 <View style={styles.offeredTotalRow}>
                   <Text style={styles.offeredTotalLabel}>
@@ -746,7 +767,6 @@ export default function TableScreen() {
                   </Text>
                 </View>
               )}
-              <Text style={styles.totalAmount}>{total.toFixed(2)} €</Text>
             </View>
           </View>
 
@@ -963,6 +983,25 @@ const styles = StyleSheet.create({
     backgroundColor: '#F9F9F9',
     padding: 20,
   },
+  totalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-end',
+    width: '100%',
+    marginBottom: 4,
+  },
+
+  totalAmountContainer: {
+    alignItems: 'flex-end',
+  },
+
+  perPersonTextCompact: {
+    fontSize: 12,
+    color: '#999',
+    fontWeight: '400',
+    fontStyle: 'italic',
+    marginTop: 2,
+  },
   loadingText: { marginTop: 15, fontSize: 16, color: '#333' },
   backButton: {
     marginTop: 20,
@@ -1064,6 +1103,74 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: '#f0f0f0',
   },
+  totalSection: {
+    borderTopWidth: 2,
+    borderTopColor: '#e0e0e0',
+    marginTop: 8,
+    paddingTop: 8,
+  },
+
+  finalTotal: {
+    width: '100%',
+    alignItems: 'flex-end',
+    marginTop: 8,
+  },
+
+  totalLabelRow: {
+    alignSelf: 'stretch',
+    marginBottom: 4,
+  },
+
+  totalLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'left',
+  },
+
+  totalAmountRow: {
+    alignSelf: 'stretch',
+    alignItems: 'flex-end',
+  },
+
+  totalAmount: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#4CAF50',
+  },
+  perPersonContainer: {
+    marginTop: 12,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+    alignSelf: 'stretch',
+    alignItems: 'center',
+  },
+
+  perPersonText: {
+    fontSize: 14,
+    color: '#666',
+    fontWeight: '500',
+    fontStyle: 'italic',
+  },
+  offeredTotalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    alignSelf: 'stretch',
+    marginBottom: 8,
+  },
+
+  offeredTotalLabel: {
+    fontSize: 14,
+    color: '#FF9800',
+    fontWeight: '500',
+  },
+
+  offeredTotalAmount: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#FF9800',
+  },
   activeTypeButton: { backgroundColor: '#2196F3' },
   typeFilterText: { fontSize: 13, fontWeight: '500', color: '#666' },
   activeTypeText: { color: 'white', fontWeight: '600' },
@@ -1147,30 +1254,6 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   offerButtonText: { fontSize: 10, color: '#FF9800' },
-  totalSection: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    borderTopWidth: 2,
-    borderTopColor: '#e0e0e0',
-    marginTop: 8,
-  },
-  finalTotal: {
-    width: '100%',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginTop: 8,
-  },
-  totalLabel: { fontSize: 16, fontWeight: '600', alignItems: 'center' },
-  totalAmount: { fontSize: 20, fontWeight: 'bold', color: '#4CAF50' },
-  offeredTotalRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  offeredTotalLabel: { fontSize: 14, color: '#FF9800', fontWeight: '500' },
-  offeredTotalAmount: { fontSize: 16, fontWeight: '600', color: '#FF9800' },
   paymentActions: {
     flexDirection: 'column',
     gap: 1,
