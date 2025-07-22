@@ -1,4 +1,4 @@
-// app/payment/items.tsx - Version améliorée
+// app/payment/items.tsx - Version avec division d'articles
 import { useSettings } from '@/utils/useSettings';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTableContext } from '@/utils/TableContext';
@@ -11,14 +11,17 @@ import {
   Plus,
   ShoppingCart,
   Wallet,
+  Users, // Nouvelle icône pour le split
 } from 'lucide-react-native';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
+  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import {
@@ -38,6 +41,13 @@ interface MenuItem {
   total: number;
   notes?: string;
   offered?: boolean;
+  // Nouvelles propriétés pour la division
+  isSplit?: boolean;
+  splitInfo?: {
+    originalQuantity: number;
+    splitParts: number;
+    pricePerPart: number;
+  };
 }
 
 interface SelectedMenuItem extends MenuItem {
@@ -45,6 +55,144 @@ interface SelectedMenuItem extends MenuItem {
   offered?: boolean;
   uniqueKey?: string;
 }
+
+// Modal pour configurer la division d'un article
+const SplitItemModal = memo(
+  ({
+    visible,
+    item,
+    onClose,
+    onConfirm,
+  }: {
+    visible: boolean;
+    item: MenuItem | null;
+    onClose: () => void;
+    onConfirm: (quantityToSplit: number, splitParts: number) => void;
+  }) => {
+    const [quantityToSplit, setQuantityToSplit] = useState('1');
+    const [splitParts, setSplitParts] = useState('2');
+    const [error, setError] = useState('');
+
+    // Réinitialiser les valeurs quand la modal s'ouvre
+    useEffect(() => {
+      if (visible && item) {
+        setQuantityToSplit('1');
+        setSplitParts('2');
+        setError('');
+      }
+    }, [visible, item]);
+
+    const handleConfirm = () => {
+      const quantity = parseInt(quantityToSplit);
+      const parts = parseInt(splitParts);
+
+      if (!item) return;
+
+      if (isNaN(quantity) || quantity < 1 || quantity > item.quantity) {
+        setError(`La quantité doit être entre 1 et ${item.quantity}`);
+        return;
+      }
+
+      if (isNaN(parts) || parts < 2 || parts > 10) {
+        setError('Le nombre de parts doit être entre 2 et 10');
+        return;
+      }
+
+      onConfirm(quantity, parts);
+      onClose();
+    };
+
+    const pricePerPart =
+      item && quantityToSplit
+        ? (item.price / parseInt(splitParts || '2')).toFixed(2)
+        : '0.00';
+
+    const totalSplitItems =
+      quantityToSplit && splitParts
+        ? parseInt(quantityToSplit) * parseInt(splitParts)
+        : 0;
+
+    return (
+      <Modal visible={visible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Diviser l'article</Text>
+
+            {item && (
+              <View style={styles.itemPreview}>
+                <Text style={styles.itemPreviewName}>{item.name}</Text>
+                <Text style={styles.itemPreviewPrice}>
+                  Prix unitaire: {item.price.toFixed(2)} €
+                </Text>
+                <Text style={styles.itemPreviewQuantity}>
+                  Quantité disponible: {item.quantity}
+                </Text>
+              </View>
+            )}
+
+            {item && item.quantity > 1 && (
+              <>
+                <Text style={styles.modalLabel}>Quantité à diviser:</Text>
+                <TextInput
+                  style={styles.modalInput}
+                  value={quantityToSplit}
+                  onChangeText={(text) => {
+                    setQuantityToSplit(text);
+                    setError('');
+                  }}
+                  keyboardType="numeric"
+                  placeholder={`1-${item.quantity}`}
+                  maxLength={2}
+                />
+              </>
+            )}
+
+            <Text style={styles.modalLabel}>
+              Diviser chaque unité en combien de parts:
+            </Text>
+            <TextInput
+              style={styles.modalInput}
+              value={splitParts}
+              onChangeText={(text) => {
+                setSplitParts(text);
+                setError('');
+              }}
+              keyboardType="numeric"
+              placeholder="Nombre de parts (2-10)"
+              maxLength={2}
+            />
+
+            {error ? <Text style={styles.errorText}>{error}</Text> : null}
+
+            {!error && quantityToSplit && splitParts && (
+              <View style={styles.calculationContainer}>
+                <Text style={styles.calculationText}>
+                  Prix par part: {pricePerPart} €
+                </Text>
+                <Text style={styles.calculationSubText}>
+                  Total: {totalSplitItems} parts créées ({quantityToSplit} ×{' '}
+                  {splitParts})
+                </Text>
+              </View>
+            )}
+
+            <View style={styles.modalButtons}>
+              <Pressable style={styles.modalCancelButton} onPress={onClose}>
+                <Text style={styles.modalCancelText}>Annuler</Text>
+              </Pressable>
+              <Pressable
+                style={styles.modalConfirmButton}
+                onPress={handleConfirm}
+              >
+                <Text style={styles.modalConfirmText}>Diviser</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
+  }
+);
 
 // Fonction utilitaire pour obtenir l'icône en fonction du type de méthode
 function getMethodIcon(methodId: string) {
@@ -201,7 +349,7 @@ const categorizeItems = (items: (MenuItem | SelectedMenuItem)[]) => {
   );
 };
 
-// Composant ItemCard optimisé avec React.memo
+// Composant ItemCard optimisé avec React.memo - Version avec split
 const ItemCard = memo(
   ({
     item,
@@ -210,6 +358,7 @@ const ItemCard = memo(
     onQuantityChange,
     onRemoveCompletely,
     onToggleOffered,
+    onSplitItem,
   }: {
     item: MenuItem | SelectedMenuItem;
     isSelected: boolean;
@@ -217,6 +366,7 @@ const ItemCard = memo(
     onQuantityChange?: (increment: boolean) => void;
     onRemoveCompletely?: () => void;
     onToggleOffered?: () => void;
+    onSplitItem?: () => void;
   }) => {
     if (isSelected) {
       const selectedItem = item as SelectedMenuItem;
@@ -234,10 +384,14 @@ const ItemCard = memo(
             <View style={styles.leftContent}>
               <View style={styles.itemNameRow}>
                 {isOffered && <Gift size={16} color="#FF9800" />}
+                {selectedItem.isSplit && <Users size={16} color="#9C27B0" />}
                 <Text
                   style={[styles.itemName, isOffered && styles.offeredItemText]}
                 >
                   {selectedItem.name} {isOffered ? '(Offert)' : ''}
+                  {selectedItem.isSplit &&
+                    selectedItem.splitInfo &&
+                    ` (${selectedItem.splitInfo.splitParts} parts)`}
                 </Text>
               </View>
               <View style={styles.quantityControl}>
@@ -306,14 +460,24 @@ const ItemCard = memo(
         <View style={styles.itemHeader}>
           <View style={styles.itemNameRow}>
             {isOffered && <Gift size={16} color="#FF9800" />}
+            {item.isSplit && <Users size={16} color="#9C27B0" />}
             <Text
               style={[styles.itemName, isOffered && styles.offeredItemText]}
             >
               {item.name} {isOffered ? '(Offert)' : ''}
+              {item.isSplit &&
+                item.splitInfo &&
+                ` (${item.splitInfo.splitParts} parts)`}
             </Text>
           </View>
           <Text style={[styles.itemPrice, isOffered && styles.offeredPrice]}>
             {item.price.toFixed(2)} €
+            {item.isSplit && item.splitInfo && (
+              <Text style={styles.originalPriceText}>
+                {' '}
+                (origine: {item.splitInfo.pricePerPart.toFixed(2)}€)
+              </Text>
+            )}
           </Text>
         </View>
 
@@ -321,6 +485,14 @@ const ItemCard = memo(
           <Text style={styles.quantityText}>Quantité: {item.quantity}</Text>
 
           <View style={styles.actionButtons}>
+            {/* Bouton pour diviser l'article */}
+            {!item.isSplit && (
+              <Pressable style={styles.splitButton} onPress={onSplitItem}>
+                <Users size={16} color="white" />
+                <Text style={styles.splitButtonText}>Diviser</Text>
+              </Pressable>
+            )}
+
             {item.quantity > 1 && (
               <Pressable
                 style={[styles.addButton, styles.addAllButton]}
@@ -359,6 +531,13 @@ export default function ItemsPaymentScreen() {
   const { paymentMethods } = useSettings();
   const enabledMethods = paymentMethods.filter((method) => method.enabled);
 
+  // États pour la modal de division
+  const [completelyDividedItems, setCompletelyDividedItems] = useState<
+    Set<number>
+  >(new Set());
+  const [splitModalVisible, setSplitModalVisible] = useState(false);
+  const [itemToSplit, setItemToSplit] = useState<MenuItem | null>(null);
+
   // Mémoïzation des calculs de total
   const totalOrder = useMemo(() => {
     return (
@@ -392,6 +571,75 @@ export default function ItemsPaymentScreen() {
     }, 0);
   }, [selectedItems]);
 
+  // Fonction pour ouvrir la modal de division
+  const handleSplitItem = useCallback((item: MenuItem) => {
+    setItemToSplit(item);
+    setSplitModalVisible(true);
+  }, []);
+
+  // Fonction pour confirmer la division d'un article
+  const handleConfirmSplit = useCallback(
+    (quantityToSplit: number, splitParts: number) => {
+      if (!itemToSplit) return;
+
+      const pricePerPart = itemToSplit.price / splitParts;
+
+      // Créer plusieurs articles divisés basés sur la quantité sélectionnée
+      const splitItems: MenuItem[] = [];
+      const totalPartsToCreate = quantityToSplit * splitParts;
+
+      for (let i = 0; i < totalPartsToCreate; i++) {
+        splitItems.push({
+          id: itemToSplit.id + (i + 1) * 0.001, // ID unique pour chaque part
+          name: itemToSplit.name,
+          quantity: 1,
+          price: pricePerPart,
+          total: pricePerPart,
+          notes: itemToSplit.notes,
+          offered: false,
+          isSplit: true,
+          splitInfo: {
+            originalQuantity: quantityToSplit,
+            splitParts: splitParts,
+            pricePerPart: itemToSplit.price, // Prix original avant division
+          },
+        });
+      }
+
+      // Mettre à jour les articles disponibles
+      setAvailableItems((prevItems) => {
+        const updatedItems = prevItems
+          .map((item) => {
+            if (item.id === itemToSplit.id) {
+              const remainingQuantity = item.quantity - quantityToSplit;
+              if (remainingQuantity <= 0) {
+                // NOUVEAU : Marquer l'article comme complètement divisé s'il n'en reste plus
+                setCompletelyDividedItems(
+                  (prev) => new Set([...prev, Math.floor(item.id)])
+                );
+                return null; // Sera filtré
+              }
+              return {
+                ...item,
+                quantity: remainingQuantity,
+                total: item.price * remainingQuantity,
+              };
+            }
+            return item;
+          })
+          .filter((item): item is MenuItem => item !== null);
+
+        return [...updatedItems, ...splitItems];
+      });
+
+      toast.showToast(
+        `${quantityToSplit} article(s) "${itemToSplit.name}" divisé(s) en ${totalPartsToCreate} parts`,
+        'success'
+      );
+    },
+    [itemToSplit, toast]
+  );
+
   // Fonction pour basculer l'état offert d'un article
   const toggleItemOffered = useCallback((itemId: number) => {
     setSelectedItems((prevItems) => {
@@ -413,21 +661,36 @@ export default function ItemsPaymentScreen() {
       setTableSection(tableData.section);
 
       if (tableData.order && tableData.order.items) {
-        const items = tableData.order.items.map((item: OrderItem) => ({
-          id: item.id,
-          name: item.name,
-          quantity: item.quantity,
-          price: item.price,
-          total: item.price * item.quantity,
-          notes: item.notes,
-          offered: item.offered,
-        }));
-        setAvailableItems(items);
+        const items = tableData.order.items
+          .filter((item: OrderItem) => {
+            // NOUVEAU : Exclure les articles qui ont été complètement divisés
+            return !completelyDividedItems.has(Math.floor(item.id));
+          })
+          .map((item: OrderItem) => ({
+            id: item.id,
+            name: item.name,
+            quantity: item.quantity,
+            price: item.price,
+            total: item.price * item.quantity,
+            notes: item.notes,
+            offered: item.offered,
+          }));
+
+        setAvailableItems((prevItems) => {
+          // Conserver les articles divisés existants
+          const existingSplitItems = prevItems.filter((item) => item.isSplit);
+          return [...items, ...existingSplitItems];
+        });
+
+        // Garder une copie des articles originaux (sans les articles divisés)
         setAllOriginalItems(items);
 
         // Calculer le total des articles offerts dans la commande
         const offeredTotal = tableData.order.items.reduce((sum, item) => {
-          if (item.offered) {
+          if (
+            item.offered &&
+            !completelyDividedItems.has(Math.floor(item.id))
+          ) {
             return sum + item.price * item.quantity;
           }
           return sum;
@@ -435,7 +698,7 @@ export default function ItemsPaymentScreen() {
         setTotalOffered(offeredTotal);
       }
     }
-  }, [tableIdNum]);
+  }, [tableIdNum, completelyDividedItems]);
 
   useEffect(() => {
     loadTable();
@@ -455,6 +718,12 @@ export default function ItemsPaymentScreen() {
                 0,
                 availItem.quantity - quantityToAdd
               );
+
+              // Si c'est un article divisé et qu'il n'y a plus de quantité, on le supprime complètement
+              if (newQuantity <= 0) {
+                return null;
+              }
+
               return {
                 ...availItem,
                 quantity: newQuantity,
@@ -463,7 +732,7 @@ export default function ItemsPaymentScreen() {
             }
             return availItem;
           })
-          .filter((availItem) => availItem.quantity > 0);
+          .filter((availItem): availItem is MenuItem => availItem !== null);
 
         return updatedAvailableItems;
       });
@@ -490,6 +759,9 @@ export default function ItemsPaymentScreen() {
             uniqueKey: `${item.id}-${Date.now()}`,
             selectedQuantity: quantityToAdd,
             offered: item.offered,
+            // Conserver les propriétés de division si elles existent
+            isSplit: item.isSplit,
+            splitInfo: item.splitInfo,
           };
           return [...prevSelectedItems, newSelectedItem];
         }
@@ -509,8 +781,27 @@ export default function ItemsPaymentScreen() {
 
       // Restaurer l'article dans les disponibles
       setAvailableItems((prevAvailableItems) => {
+        // Si c'est un article divisé, on le remet tel quel
+        if (itemToRemove.isSplit) {
+          return [
+            ...prevAvailableItems,
+            {
+              id: itemToRemove.id,
+              name: itemToRemove.name,
+              quantity: itemToRemove.selectedQuantity,
+              price: itemToRemove.price,
+              total: itemToRemove.price * itemToRemove.selectedQuantity,
+              notes: itemToRemove.notes,
+              offered: itemToRemove.offered,
+              isSplit: itemToRemove.isSplit,
+              splitInfo: itemToRemove.splitInfo,
+            },
+          ];
+        }
+
+        // Pour un article normal, chercher s'il existe déjà
         const existingItemIndex = prevAvailableItems.findIndex(
-          (item) => item.id === itemId
+          (item) => item.id === itemId && !item.isSplit
         );
 
         if (existingItemIndex >= 0) {
@@ -527,7 +818,7 @@ export default function ItemsPaymentScreen() {
           return updatedAvailableItems;
         } else {
           const originalItem = allOriginalItems.find(
-            (item) => item.id === itemId
+            (item) => Math.floor(item.id) === Math.floor(itemId)
           );
           if (originalItem) {
             return [
@@ -550,55 +841,42 @@ export default function ItemsPaymentScreen() {
     [selectedItems, allOriginalItems]
   );
 
-  const handleSelectedItemQuantityChange = useCallback(
-    (itemId: number, increment: boolean) => {
-      setSelectedItems((prevSelectedItems) => {
-        return prevSelectedItems
-          .map((item) => {
-            if (item.id === itemId) {
-              const currentQuantity = item.selectedQuantity;
-              const newQuantity = increment
-                ? currentQuantity + 1
-                : Math.max(0, currentQuantity - 1);
-
-              if (newQuantity === 0) {
-                updateAvailableItemsQuantity(itemId, 1);
-                return null;
-              }
-
-              return {
-                ...item,
-                selectedQuantity: newQuantity,
-              };
-            }
-            return item;
-          })
-          .filter((item): item is SelectedMenuItem => item !== null);
-      });
-
-      if (!increment) {
-        const itemToCheck = selectedItems.find((item) => item.id === itemId);
-        if ((itemToCheck?.selectedQuantity ?? 0) > 1) {
-          updateAvailableItemsQuantity(itemId, 1);
-        }
-      } else {
-        updateAvailableItemsQuantity(itemId, -1);
-      }
-    },
-    [selectedItems]
-  );
-
   const updateAvailableItemsQuantity = useCallback(
     (itemId: number, change: number) => {
       setAvailableItems((prevItems) => {
+        // Pour les articles divisés, on les traite individuellement
+        const targetItem = prevItems.find((item) => item.id === itemId);
+        if (targetItem?.isSplit) {
+          if (change > 0) {
+            // Ajouter une part divisée
+            return [
+              ...prevItems,
+              {
+                ...targetItem,
+                quantity: Math.abs(change),
+                total: targetItem.price * Math.abs(change),
+              },
+            ];
+          } else {
+            // Retirer une part divisée (ne devrait pas arriver normalement)
+            return prevItems.filter((item) => item.id !== itemId);
+          }
+        }
+
+        // Logique normale pour les articles non divisés
         const existingItemIndex = prevItems.findIndex(
-          (item) => item.id === itemId
+          (item) => item.id === itemId && !item.isSplit
         );
 
         if (existingItemIndex >= 0) {
           const updatedItems = [...prevItems];
           const item = updatedItems[existingItemIndex];
           const newQuantity = item.quantity + change;
+
+          if (newQuantity <= 0) {
+            updatedItems.splice(existingItemIndex, 1);
+            return updatedItems;
+          }
 
           updatedItems[existingItemIndex] = {
             ...item,
@@ -609,9 +887,9 @@ export default function ItemsPaymentScreen() {
           return updatedItems;
         } else {
           const originalItem = allOriginalItems.find(
-            (item) => item.id === itemId
+            (item) => Math.floor(item.id) === Math.floor(itemId)
           );
-          if (originalItem) {
+          if (originalItem && change > 0) {
             return [
               ...prevItems,
               {
@@ -633,7 +911,49 @@ export default function ItemsPaymentScreen() {
     [allOriginalItems]
   );
 
-  // Dans app/payment/items.tsx - Fonction handlePayment corrigée
+  const handleSelectedItemQuantityChange = useCallback(
+    (itemId: number, increment: boolean) => {
+      setSelectedItems((prevSelectedItems) => {
+        return prevSelectedItems
+          .map((item) => {
+            if (item.id === itemId) {
+              const currentQuantity = item.selectedQuantity;
+              const newQuantity = increment
+                ? currentQuantity + 1
+                : Math.max(0, currentQuantity - 1);
+
+              if (newQuantity === 0) {
+                // Si l'article divisé retourne à 0, on le remet dans les disponibles
+                if (item.isSplit) {
+                  updateAvailableItemsQuantity(itemId, 1);
+                } else {
+                  updateAvailableItemsQuantity(itemId, 1);
+                }
+                return null;
+              }
+
+              return {
+                ...item,
+                selectedQuantity: newQuantity,
+              };
+            }
+            return item;
+          })
+          .filter((item): item is SelectedMenuItem => item !== null);
+      });
+
+      // Gérer les changements dans les articles disponibles
+      if (!increment) {
+        const itemToCheck = selectedItems.find((item) => item.id === itemId);
+        if ((itemToCheck?.selectedQuantity ?? 0) > 1) {
+          updateAvailableItemsQuantity(itemId, 1);
+        }
+      } else {
+        updateAvailableItemsQuantity(itemId, -1);
+      }
+    },
+    [selectedItems, updateAvailableItemsQuantity]
+  );
 
   const handlePayment = useCallback(
     async (method: 'card' | 'cash' | 'check') => {
@@ -670,6 +990,8 @@ export default function ItemsPaymentScreen() {
             quantity: item.selectedQuantity,
             price: item.price,
             offered: item.offered,
+            isSplit: item.isSplit,
+            splitInfo: item.splitInfo,
           };
         });
 
@@ -695,18 +1017,30 @@ export default function ItemsPaymentScreen() {
 
         await addBill(bill);
 
+        // Préserver les articles divisés non payés AVANT le rechargement
+        const unpaidSplitItems = availableItems.filter(
+          (item) =>
+            item.isSplit &&
+            !selectedItems.some((selected) => selected.id === item.id)
+        );
+
         let updatedOrderItems = [...currentTable.order.items];
 
         for (const selectedItem of selectedItems) {
+          if (selectedItem.isSplit) {
+            // Pour les articles divisés, on ne touche PAS à la commande originale
+            continue;
+          }
+
           const originalItem = allOriginalItems.find(
             (origItem) =>
               origItem.name === selectedItem.name &&
-              origItem.price === selectedItem.price
+              Math.floor(origItem.id) === Math.floor(selectedItem.id)
           );
 
           const itemIdToFind = originalItem ? originalItem.id : selectedItem.id;
           const orderItemIndex = updatedOrderItems.findIndex(
-            (item) => item.id === itemIdToFind
+            (item) => Math.floor(item.id) === Math.floor(itemIdToFind)
           );
 
           if (orderItemIndex >= 0) {
@@ -733,11 +1067,20 @@ export default function ItemsPaymentScreen() {
           return sum;
         }, 0);
 
-        if (updatedOrderItems.length === 0 || newTotal <= 0) {
-          // ✅ CORRECTION CRITIQUE : Réinitialisation complète et robuste
-          await resetTable(tableIdNum);
+        const unpaidSplitTotal = unpaidSplitItems.reduce((sum, item) => {
+          if (!item.offered) {
+            return sum + item.price * item.quantity;
+          }
+          return sum;
+        }, 0);
 
-          // ✅ Vérification immédiate avec nettoyage forcé si nécessaire
+        const totalWithUnpaidSplits = newTotal + unpaidSplitTotal;
+
+        if (updatedOrderItems.length === 0 && unpaidSplitItems.length === 0) {
+          await resetTable(tableIdNum);
+          // Réinitialiser aussi le tracking des articles divisés
+          setCompletelyDividedItems(new Set());
+
           let verificationAttempts = 0;
           let tableClean = false;
 
@@ -749,13 +1092,6 @@ export default function ItemsPaymentScreen() {
               break;
             }
 
-            console.warn(
-              `Tentative ${
-                verificationAttempts + 1
-              } - Table non réinitialisée, forçage du nettoyage`
-            );
-
-            // Nettoyage forcé plus agressif
             const forcedCleanTable = {
               ...checkTable,
               status: 'available' as 'available',
@@ -765,14 +1101,10 @@ export default function ItemsPaymentScreen() {
 
             await updateTable(forcedCleanTable);
             verificationAttempts++;
-
-            // Petit délai pour laisser le temps à la base de se mettre à jour
             await new Promise((resolve) => setTimeout(resolve, 50));
           }
 
-          // ✅ AJOUT MANQUANT : Rafraîchir le contexte des tables
           await refreshTables();
-
           router.replace('/');
           toast.showToast('Tous les articles ont été payés.', 'success');
         } else {
@@ -781,22 +1113,32 @@ export default function ItemsPaymentScreen() {
             order: {
               ...currentTable.order,
               items: updatedOrderItems,
-              total: newTotal,
+              total: totalWithUnpaidSplits,
             },
           };
 
           await updateTable(updatedTable);
 
-          // ✅ AJOUT : Rafraîchir aussi dans le cas partiel
-          await refreshTables();
+          // Sauvegarder les articles divisés avant le rechargement
+          const splitItemsToPreserve = [...unpaidSplitItems];
 
+          await refreshTables();
           setSelectedItems([]);
+
+          // Recharger SANS les articles divisés préservés (ils seront rajoutés après)
           await loadTable();
+
+          // Remettre les articles divisés préservés
+          if (splitItemsToPreserve.length > 0) {
+            setAvailableItems((prevItems) => {
+              return [...prevItems, ...splitItemsToPreserve];
+            });
+          }
 
           toast.showToast(
             `Articles payés: ${totalSelected.toFixed(
               2
-            )}€\nRestant à payer: ${newTotal.toFixed(2)}€`,
+            )}€\nRestant à payer: ${totalWithUnpaidSplits.toFixed(2)}€`,
             'success'
           );
         }
@@ -819,7 +1161,10 @@ export default function ItemsPaymentScreen() {
       loadTable,
       router,
       allOriginalItems,
-      refreshTables, // ✅ Ajout de la dépendance
+      refreshTables,
+      availableItems,
+      toast,
+      table,
     ]
   );
 
@@ -883,45 +1228,38 @@ export default function ItemsPaymentScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Pressable style={styles.backButton} onPress={handleBack}>
-          <ArrowLeft size={24} color="#333" />
-        </Pressable>
-        <View>
-          <Text style={styles.title}>Paiement par article - {tableName}</Text>
-          {tableSection && (
-            <View style={styles.sectionBadge}>
-              <Text style={styles.sectionText}>{tableSection}</Text>
+        <View style={styles.headerTop}>
+          <Pressable style={styles.backButton} onPress={handleBack}>
+            <ArrowLeft size={24} color="#333" />
+          </Pressable>
+          <View style={styles.titleContainer}>
+            <View>
+              <Text style={styles.title}>
+                Paiement par article - {tableName}
+              </Text>
+              {tableSection && (
+                <View style={styles.sectionBadge}>
+                  <Text style={styles.sectionText}>{tableSection}</Text>
+                </View>
+              )}
+            </View>
+
+            {/* Résumé déplacé ici */}
+            <View style={styles.inlineSummary}>
+              <Text style={styles.inlineSummaryText}>
+                Total: {totalOrder.toFixed(2)}€ | Sélectionnés:{' '}
+                {totalSelected.toFixed(2)}€
+              </Text>
+            </View>
+          </View>
+          {selectedItems.length > 0 && (
+            <View style={styles.warningBadge}>
+              <Text style={styles.warningText}>
+                {selectedItems.length} article(s) en attente
+              </Text>
             </View>
           )}
         </View>
-        {selectedItems.length > 0 && (
-          <View style={styles.warningBadge}>
-            <Text style={styles.warningText}>
-              {selectedItems.length} article(s) en attente
-            </Text>
-          </View>
-        )}
-      </View>
-
-      <View style={styles.summaryCard}>
-        <View style={styles.totalRow}>
-          <Text style={styles.totalLabel}>Total de la commande:</Text>
-          <Text style={styles.totalAmount}>{totalOrder.toFixed(2)} €</Text>
-        </View>
-        <View style={styles.totalRow}>
-          <Text style={styles.totalLabel}>Articles sélectionnés:</Text>
-          <Text style={styles.selectedAmount}>
-            {totalSelected.toFixed(2)} €
-          </Text>
-        </View>
-        {offeredSelected > 0 && (
-          <View style={styles.offeredRow}>
-            <Text style={styles.offeredLabel}>Articles offerts:</Text>
-            <Text style={styles.offeredAmount}>
-              {offeredSelected.toFixed(2)} €
-            </Text>
-          </View>
-        )}
       </View>
 
       <View style={styles.columnsContainer}>
@@ -951,6 +1289,7 @@ export default function ItemsPaymentScreen() {
                       item={item}
                       isSelected={false}
                       onAdd={(addAll) => addItemToSelection(item, addAll)}
+                      onSplitItem={() => handleSplitItem(item)}
                     />
                   ))}
                 </ScrollView>
@@ -969,6 +1308,7 @@ export default function ItemsPaymentScreen() {
                       item={item}
                       isSelected={false}
                       onAdd={(addAll) => addItemToSelection(item, addAll)}
+                      onSplitItem={() => handleSplitItem(item)}
                     />
                   ))}
                 </ScrollView>
@@ -1065,6 +1405,17 @@ export default function ItemsPaymentScreen() {
           ))}
         </View>
       </View>
+
+      {/* Modal pour diviser un article */}
+      <SplitItemModal
+        visible={splitModalVisible}
+        item={itemToSplit}
+        onClose={() => {
+          setSplitModalVisible(false);
+          setItemToSplit(null);
+        }}
+        onConfirm={handleConfirmSplit}
+      />
     </View>
   );
 }
@@ -1080,15 +1431,26 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   header: {
-    padding: 16,
     backgroundColor: 'white',
     borderBottomWidth: 1,
     borderBottomColor: '#e0e0e0',
+    paddingBottom: 8,
+  },
+  headerTop: {
+    padding: 16,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  titleContainer: {
+    flex: 1,
+    marginHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   backButton: {
-    marginRight: 16,
+    // marginRight supprimé car maintenant géré par titleContainer
   },
   title: {
     fontSize: 20,
@@ -1109,10 +1471,9 @@ const styles = StyleSheet.create({
   },
   warningBadge: {
     backgroundColor: '#FFF9C4',
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 16,
-    marginLeft: 'auto',
   },
   warningText: {
     color: '#F57F17',
@@ -1120,33 +1481,33 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   summaryCard: {
-    backgroundColor: 'white',
-    margin: 12,
-    padding: 12,
-    borderRadius: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    backgroundColor: '#f8f9fa',
+    marginHorizontal: 16,
+    marginBottom: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#e9ecef',
   },
   totalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   totalLabel: {
-    fontSize: 16,
+    fontSize: 14,
     color: '#666',
+    fontWeight: '500',
   },
   totalAmount: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     color: '#666',
   },
   selectedAmount: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: 'bold',
     color: '#4CAF50',
   },
@@ -1154,19 +1515,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 8,
-    paddingTop: 8,
+    marginTop: 4,
+    paddingTop: 4,
     borderTopWidth: 1,
     borderTopColor: '#FFD54F',
     borderStyle: 'dashed',
   },
   offeredLabel: {
-    fontSize: 14,
+    fontSize: 12,
     color: '#FF9800',
     fontWeight: '500',
   },
   offeredAmount: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     color: '#FF9800',
   },
@@ -1268,6 +1629,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
   },
+  originalPriceText: {
+    fontSize: 10,
+    color: '#666',
+    fontWeight: 'normal',
+  },
   selectedItemPrice: {
     fontSize: 12,
     fontWeight: '600',
@@ -1297,6 +1663,20 @@ const styles = StyleSheet.create({
   },
   addAllButton: {
     backgroundColor: '#2196F3',
+  },
+  splitButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#9C27B0',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    gap: 4,
+  },
+  splitButtonText: {
+    color: 'white',
+    fontWeight: '500',
+    fontSize: 11,
   },
   addButtonText: {
     color: 'white',
@@ -1431,5 +1811,142 @@ const styles = StyleSheet.create({
   },
   rightContent: {
     alignItems: 'flex-end',
+  },
+  // Styles pour la modal de division
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContent: {
+    backgroundColor: 'white',
+    borderRadius: 12,
+    padding: 24,
+    margin: 20,
+    minWidth: 300,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.25,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 16,
+    textAlign: 'center',
+    color: '#333',
+  },
+  itemPreview: {
+    backgroundColor: '#f8f8f8',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+    borderLeftWidth: 4,
+    borderLeftColor: '#9C27B0',
+  },
+  itemPreviewName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#333',
+    marginBottom: 4,
+  },
+  itemPreviewPrice: {
+    fontSize: 14,
+    color: '#666',
+    marginBottom: 2,
+  },
+  itemPreviewQuantity: {
+    fontSize: 14,
+    color: '#666',
+  },
+  modalLabel: {
+    fontSize: 16,
+    fontWeight: '500',
+    marginBottom: 8,
+    color: '#333',
+  },
+  modalInput: {
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 16,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  errorText: {
+    color: '#F44336',
+    fontSize: 14,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  calculationContainer: {
+    backgroundColor: '#F1F8E9',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 20,
+  },
+  calculationText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#4CAF50',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  calculationSubText: {
+    fontSize: 14,
+    color: '#2E7D32',
+    textAlign: 'center',
+    fontStyle: 'italic',
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modalCancelButton: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    alignItems: 'center',
+  },
+  modalCancelText: {
+    fontSize: 16,
+    color: '#666',
+    fontWeight: '500',
+  },
+  modalConfirmButton: {
+    flex: 1,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: '#9C27B0',
+    alignItems: 'center',
+  },
+  modalConfirmText: {
+    fontSize: 16,
+    color: 'white',
+    fontWeight: '600',
+  },
+  inlineSummary: {
+    backgroundColor: '#e8f5e8',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 2,
+    borderColor: '#4CAF50',
+    shadowColor: '#4CAF50',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  inlineSummaryText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#2E7D32',
+    textAlign: 'right',
   },
 });
