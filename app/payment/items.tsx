@@ -1,4 +1,4 @@
-// app/payment/items.tsx - VERSION AMÉLIORÉE AVEC DIVISION D'ARTICLES FONCTIONNELLE
+// app/payment/items.tsx - VERSION AMÉLIORÉE
 import { useSettings } from '@/utils/useSettings';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useTableContext } from '@/utils/TableContext';
@@ -141,6 +141,7 @@ const SplitItemModal = memo(
                 Disponible: {item.quantity}
               </Text>
             </View>
+
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Quantité à diviser:</Text>
               <View style={styles.quantitySelector}>
@@ -175,6 +176,7 @@ const SplitItemModal = memo(
                 </Pressable>
               </View>
             </View>
+
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>
                 Diviser en combien de parts:
@@ -211,7 +213,9 @@ const SplitItemModal = memo(
                 </Pressable>
               </View>
             </View>
+
             {error && <Text style={styles.errorText}>{error}</Text>}
+
             <View style={styles.calculationPreview}>
               <Text style={styles.calculationTitle}>Résultat:</Text>
               <Text style={styles.calculationDetail}>
@@ -224,6 +228,7 @@ const SplitItemModal = memo(
                 Valeur totale: {(qtyToDivide * item.price).toFixed(2)} €
               </Text>
             </View>
+
             <View style={styles.modalButtons}>
               <Pressable style={styles.cancelButton} onPress={onClose}>
                 <Text style={styles.cancelButtonText}>Annuler</Text>
@@ -236,64 +241,6 @@ const SplitItemModal = memo(
           </View>
         </View>
       </Modal>
-    );
-  }
-);
-
-const DividedItemCard = memo(
-  ({
-    item,
-    onRemove,
-    onToggleOffered,
-  }: {
-    item: DividedItem;
-    onRemove: () => void;
-    onToggleOffered: () => void;
-  }) => {
-    return (
-      <View
-        style={[styles.dividedItemCard, item.offered && styles.offeredItemCard]}
-      >
-        <View style={styles.dividedItemHeader}>
-          <View style={styles.dividedItemInfo}>
-            <View style={styles.dividedItemNameRow}>
-              {item.offered && <Gift size={14} color="#FF9800" />}
-              <Users size={14} color="#9C27B0" />
-              <Text
-                style={[
-                  styles.itemName,
-                  item.offered && styles.offeredItemText,
-                ]}
-              >
-                {item.name} {item.offered ? '(Offert)' : ''}
-              </Text>
-            </View>
-            <Text style={styles.dividedItemPartInfo}>
-              Part {item.partNumber}/{item.totalParts} • {item.price.toFixed(2)}
-              €
-            </Text>
-            <Text style={styles.dividedItemOriginalPrice}>
-              (Prix original: {item.originalPrice.toFixed(2)}€)
-            </Text>
-          </View>
-          <View style={styles.dividedItemActions}>
-            <Pressable
-              style={[styles.actionButton, { backgroundColor: '#FF9800' }]}
-              onPress={onToggleOffered}
-            >
-              <Text style={styles.actionButtonText}>
-                {item.offered ? 'Annuler' : 'Offrir'}
-              </Text>
-            </Pressable>
-            <Pressable
-              style={[styles.actionButton, { backgroundColor: '#F44336' }]}
-              onPress={onRemove}
-            >
-              <Trash2 size={14} color="white" />
-            </Pressable>
-          </View>
-        </View>
-      </View>
     );
   }
 );
@@ -328,6 +275,9 @@ const getCategoryFromName = (name: string): 'plat' | 'boisson' => {
   const lowerName = name.toLowerCase();
   if (
     lowerName.includes('pinte') ||
+    lowerName.includes('blonde') ||
+    lowerName.includes('ambree') ||
+    lowerName.includes('blanche') ||
     lowerName.includes('demi') ||
     lowerName.includes('bière') ||
     lowerName.includes('vin') ||
@@ -415,60 +365,110 @@ export default function ItemsPaymentScreen() {
   }, []);
 
   const handleConfirmSplit = useCallback(
-    (quantityToDivide: number, numberOfParts: number) => {
+    async (quantityToDivide: number, numberOfParts: number) => {
       if (!itemToSplit) return;
-      const pricePerPart = itemToSplit.price / numberOfParts;
-      const newDividedItems: DividedItem[] = [];
 
-      for (let i = 1; i <= numberOfParts; i++) {
-        for (let qty = 0; qty < quantityToDivide; qty++) {
-          newDividedItems.push({
-            id: `${itemToSplit.id}-${Date.now()}-${i}-${qty}`,
-            originalId: itemToSplit.id,
-            name: itemToSplit.name,
-            price: pricePerPart,
-            originalPrice: itemToSplit.price,
-            quantity: 1,
-            notes: itemToSplit.notes,
-            offered: false,
-            partNumber: i,
-            totalParts: numberOfParts,
-            isDivided: true,
-          });
+      try {
+        const pricePerPart = itemToSplit.price / numberOfParts;
+        const newDividedItems: DividedItem[] = [];
+
+        for (let i = 1; i <= numberOfParts; i++) {
+          for (let qty = 0; qty < quantityToDivide; qty++) {
+            const uniqueId = `${
+              itemToSplit.id
+            }-${Date.now()}-${Math.random()}-${i}-${qty}`;
+            newDividedItems.push({
+              id: uniqueId,
+              originalId: itemToSplit.id,
+              name: itemToSplit.name,
+              price: pricePerPart,
+              originalPrice: itemToSplit.price,
+              quantity: 1,
+              notes: itemToSplit.notes,
+              offered: false,
+              partNumber: i,
+              totalParts: numberOfParts,
+              isDivided: true,
+            });
+          }
         }
-      }
 
-      const remainingQuantity = itemToSplit.quantity - quantityToDivide;
-      if (remainingQuantity === 0) {
-        setFullyDividedItemIds((prev) => new Set([...prev, itemToSplit.id]));
-      }
+        const remainingQuantity = itemToSplit.quantity - quantityToDivide;
 
-      setAvailableItems((prevItems) => {
-        const updatedItems = prevItems
-          .map((item) => {
-            if (item.id === itemToSplit.id) {
-              const newQuantity = item.quantity - quantityToDivide;
-              return newQuantity > 0
-                ? {
-                    ...item,
-                    quantity: newQuantity,
-                    total: item.price * newQuantity,
-                  }
-                : null;
+        // Mettre à jour la table immédiatement
+        const currentTable = await getTable(tableIdNum);
+        if (currentTable && currentTable.order) {
+          let updatedOrderItems = [...currentTable.order.items];
+
+          const originalItemIndex = updatedOrderItems.findIndex(
+            (item) => item.id === itemToSplit.id
+          );
+
+          if (originalItemIndex >= 0) {
+            if (remainingQuantity <= 0) {
+              updatedOrderItems.splice(originalItemIndex, 1);
+              setFullyDividedItemIds(
+                (prev) => new Set([...prev, itemToSplit.id])
+              );
+            } else {
+              updatedOrderItems[originalItemIndex] = {
+                ...updatedOrderItems[originalItemIndex],
+                quantity: remainingQuantity,
+              };
             }
-            return item;
-          })
-          .filter((item): item is MenuItem => item !== null);
-        return updatedItems;
-      });
+          }
 
-      setDividedItems((prev) => [...prev, ...newDividedItems]);
-      toast.showToast(
-        `${quantityToDivide} ${itemToSplit.name} divisé(s) en ${numberOfParts} parts chacun`,
-        'success'
-      );
+          const newTotal = updatedOrderItems.reduce((sum, item) => {
+            return item.offered ? sum : sum + item.price * item.quantity;
+          }, 0);
+
+          const updatedTable = {
+            ...currentTable,
+            order: {
+              ...currentTable.order,
+              items: updatedOrderItems,
+              total: Math.round(newTotal * 100) / 100,
+            },
+          };
+
+          await updateTable(updatedTable);
+        }
+
+        // Mettre à jour les états locaux
+        if (remainingQuantity === 0) {
+          setFullyDividedItemIds((prev) => new Set([...prev, itemToSplit.id]));
+        }
+
+        setAvailableItems((prevItems) => {
+          const updatedItems = prevItems
+            .map((item) => {
+              if (item.id === itemToSplit.id) {
+                const newQuantity = item.quantity - quantityToDivide;
+                return newQuantity > 0
+                  ? {
+                      ...item,
+                      quantity: newQuantity,
+                      total: item.price * newQuantity,
+                    }
+                  : null;
+              }
+              return item;
+            })
+            .filter((item): item is MenuItem => item !== null);
+          return updatedItems;
+        });
+
+        setDividedItems((prev) => [...prev, ...newDividedItems]);
+        toast.showToast(
+          `${quantityToDivide} ${itemToSplit.name} divisé(s) en ${numberOfParts} parts chacun`,
+          'success'
+        );
+      } catch (error) {
+        console.error('Erreur lors de la division:', error);
+        toast.showToast("Erreur lors de la division de l'item", 'error');
+      }
     },
-    [itemToSplit, toast]
+    [itemToSplit, toast, tableIdNum]
   );
 
   const getAllAvailableItemsByCategory = useMemo(() => {
@@ -492,6 +492,11 @@ export default function ItemsPaymentScreen() {
     const allItems = [...availableItems, ...dividedAsMenuItems];
     return categorizeItems(allItems);
   }, [availableItems, dividedItems]);
+
+  // Nouveau: Catégoriser les articles sélectionnés
+  const getSelectedItemsByCategory = useMemo(() => {
+    return categorizeItems(selectedItems);
+  }, [selectedItems]);
 
   const addDividedItemToSelection = useCallback((dividedItem: DividedItem) => {
     setDividedItems((prev) =>
@@ -559,74 +564,141 @@ export default function ItemsPaymentScreen() {
     [selectedItems]
   );
 
-  const toggleDividedItemOffered = useCallback(
-    (uniqueKey: string) => {
-      if (selectedItems.some((item) => item.uniqueKey === uniqueKey)) {
-        setSelectedItems((prev) =>
-          prev.map((item) =>
-            item.uniqueKey === uniqueKey
-              ? { ...item, offered: !item.offered }
-              : item
-          )
-        );
+  // Nouvelle fonction: Ajouter un article unité par unité
+  const handleItemClick = useCallback((item: MenuItem) => {
+    if (item.quantity <= 0) return;
+    const quantityToAdd = 1; // Prendre seulement 1 unité
+
+    setAvailableItems((prev) =>
+      prev
+        .map((availItem) => {
+          if (availItem.id === item.id) {
+            const newQuantity = Math.max(0, availItem.quantity - quantityToAdd);
+            return newQuantity > 0
+              ? {
+                  ...availItem,
+                  quantity: newQuantity,
+                  total: availItem.price * newQuantity,
+                }
+              : null;
+          }
+          return availItem;
+        })
+        .filter((item): item is MenuItem => item !== null)
+    );
+
+    setSelectedItems((prev) => {
+      const existingIndex = prev.findIndex(
+        (selected) => selected.id === item.id && !selected.isDivided
+      );
+      if (existingIndex >= 0) {
+        const updated = [...prev];
+        updated[existingIndex] = {
+          ...updated[existingIndex],
+          selectedQuantity:
+            updated[existingIndex].selectedQuantity + quantityToAdd,
+        };
+        return updated;
       } else {
-        setDividedItems((prev) =>
-          prev.map((item) =>
-            item.id === uniqueKey ? { ...item, offered: !item.offered } : item
-          )
-        );
+        const newSelectedItem: SelectedMenuItem = {
+          ...item,
+          selectedQuantity: quantityToAdd,
+          uniqueKey: `${item.id}-${Date.now()}`,
+        };
+        return [...prev, newSelectedItem];
+      }
+    });
+  }, []);
+
+  // Nouvelle fonction: Retirer un article sélectionné unité par unité
+  const handleSelectedItemClick = useCallback(
+    (item: SelectedMenuItem) => {
+      if (item.isDivided) {
+        removeDividedItemFromSelection(item.uniqueKey || '');
+      } else {
+        if (item.selectedQuantity > 1) {
+          // S'il y a plusieurs unités sélectionnées, n'en retirer qu'une
+          setSelectedItems((prev) =>
+            prev.map((si) =>
+              si.uniqueKey === item.uniqueKey
+                ? {
+                    ...si,
+                    selectedQuantity: si.selectedQuantity - 1,
+                  }
+                : si
+            )
+          );
+
+          // Remettre une unité dans les disponibles
+          setAvailableItems((prev) => {
+            const existing = prev.find((ai) => ai.id === item.id);
+            if (existing) {
+              return prev.map((ai) =>
+                ai.id === item.id
+                  ? {
+                      ...ai,
+                      quantity: ai.quantity + 1,
+                      total: ai.price * (ai.quantity + 1),
+                    }
+                  : ai
+              );
+            } else {
+              const originalItem = allOriginalItems.find(
+                (oi) => oi.id === item.id
+              );
+              if (originalItem) {
+                return [
+                  ...prev,
+                  {
+                    ...originalItem,
+                    quantity: 1,
+                    total: originalItem.price,
+                  },
+                ];
+              }
+            }
+            return prev;
+          });
+        } else {
+          // S'il n'y a qu'une unité, supprimer complètement l'item de la sélection
+          setSelectedItems((prev) =>
+            prev.filter((si) => si.uniqueKey !== item.uniqueKey)
+          );
+
+          // Remettre l'unité dans les disponibles
+          setAvailableItems((prev) => {
+            const existing = prev.find((ai) => ai.id === item.id);
+            if (existing) {
+              return prev.map((ai) =>
+                ai.id === item.id
+                  ? {
+                      ...ai,
+                      quantity: ai.quantity + 1,
+                      total: ai.price * (ai.quantity + 1),
+                    }
+                  : ai
+              );
+            } else {
+              const originalItem = allOriginalItems.find(
+                (oi) => oi.id === item.id
+              );
+              if (originalItem) {
+                return [
+                  ...prev,
+                  {
+                    ...originalItem,
+                    quantity: 1,
+                    total: originalItem.price,
+                  },
+                ];
+              }
+            }
+            return prev;
+          });
+        }
       }
     },
-    [selectedItems]
-  );
-
-  const addItemToSelection = useCallback(
-    (item: MenuItem, addAll: boolean = false) => {
-      if (item.quantity <= 0) return;
-      const quantityToAdd = addAll ? item.quantity : 1;
-      setAvailableItems((prev) =>
-        prev
-          .map((availItem) => {
-            if (availItem.id === item.id) {
-              const newQuantity = Math.max(
-                0,
-                availItem.quantity - quantityToAdd
-              );
-              return newQuantity > 0
-                ? {
-                    ...availItem,
-                    quantity: newQuantity,
-                    total: availItem.price * newQuantity,
-                  }
-                : null;
-            }
-            return availItem;
-          })
-          .filter((item): item is MenuItem => item !== null)
-      );
-      setSelectedItems((prev) => {
-        const existingIndex = prev.findIndex(
-          (selected) => selected.id === item.id && !selected.isDivided
-        );
-        if (existingIndex >= 0) {
-          const updated = [...prev];
-          updated[existingIndex] = {
-            ...updated[existingIndex],
-            selectedQuantity:
-              updated[existingIndex].selectedQuantity + quantityToAdd,
-          };
-          return updated;
-        } else {
-          const newSelectedItem: SelectedMenuItem = {
-            ...item,
-            selectedQuantity: quantityToAdd,
-            uniqueKey: `${item.id}-${Date.now()}`,
-          };
-          return [...prev, newSelectedItem];
-        }
-      });
-    },
-    []
+    [removeDividedItemFromSelection, allOriginalItems]
   );
 
   const totalAvailable = useMemo(() => {
@@ -701,6 +773,7 @@ export default function ItemsPaymentScreen() {
 
         let updatedOrderItems = [...currentTable.order.items];
 
+        // Traitement des items non-divisés
         const nonDividedSelectedItems = selectedItems.filter(
           (item) => !item.isDivided
         );
@@ -724,27 +797,54 @@ export default function ItemsPaymentScreen() {
           }
         }
 
+        // Traitement des items divisés
+        const dividedSelectedItems = selectedItems.filter(
+          (item) => item.isDivided
+        );
+
+        // Calculer les items divisés restants AVANT de les supprimer
+        const paidDividedIds = new Set(
+          dividedSelectedItems.map((item) => item.uniqueKey)
+        );
+
+        const remainingDividedItemsAfterPayment = dividedItems.filter(
+          (item) => !paidDividedIds.has(item.id)
+        );
+
+        // Supprimer les items divisés payés de l'état local
+        setDividedItems(remainingDividedItemsAfterPayment);
+
         const newTotal = updatedOrderItems.reduce((sum, item) => {
           return item.offered ? sum : sum + item.price * item.quantity;
         }, 0);
 
-        if (updatedOrderItems.length === 0 && dividedItems.length === 0) {
+        // Vérification pour fermer la table
+        const tableIsEmpty =
+          updatedOrderItems.length === 0 &&
+          remainingDividedItemsAfterPayment.length === 0;
+
+        if (tableIsEmpty) {
           await resetTable(tableIdNum);
           await refreshTables();
           router.replace('/');
-          toast.showToast('Tous les articles ont été payés.', 'success');
+          toast.showToast(
+            'Tous les articles ont été payés. Table fermée.',
+            'success'
+          );
         } else {
           const updatedTable = {
             ...currentTable,
             order: {
               ...currentTable.order,
               items: updatedOrderItems,
-              total: newTotal,
+              total: Math.round(newTotal * 100) / 100,
             },
           };
           await updateTable(updatedTable);
           await refreshTables();
           setSelectedItems([]);
+
+          // Recharger les items disponibles
           const reloadedTable = await getTable(tableIdNum);
           if (
             reloadedTable &&
@@ -764,6 +864,7 @@ export default function ItemsPaymentScreen() {
               }));
             setAvailableItems(filteredItems);
           }
+
           toast.showToast(
             `Articles payés: ${totalSelected.toFixed(
               2
@@ -789,6 +890,7 @@ export default function ItemsPaymentScreen() {
       tableSection,
       table,
       dividedItems,
+      availableItems,
       refreshTables,
       router,
       toast,
@@ -847,6 +949,7 @@ export default function ItemsPaymentScreen() {
           )}
         </View>
       </View>
+
       <View style={styles.content}>
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Articles disponibles</Text>
@@ -855,7 +958,7 @@ export default function ItemsPaymentScreen() {
               <Text style={styles.subColumnTitle}>Plats</Text>
               <ScrollView style={styles.itemsList}>
                 {getAllAvailableItemsByCategory.plat.map((item: any) => (
-                  <View
+                  <Pressable
                     key={
                       item.isDividedForDisplay ? item.dividedItemId : item.id
                     }
@@ -863,6 +966,13 @@ export default function ItemsPaymentScreen() {
                       styles.itemCard,
                       item.isDividedForDisplay && styles.dividedItemCard,
                     ]}
+                    onPress={() => {
+                      if (item.isDividedForDisplay) {
+                        handleDividedItemAction(item.dividedItemId, 'add');
+                      } else {
+                        handleItemClick(item);
+                      }
+                    }}
                   >
                     <View style={styles.itemHeader}>
                       <View style={styles.itemNameRow}>
@@ -877,7 +987,7 @@ export default function ItemsPaymentScreen() {
                           item.isDividedForDisplay && { color: '#9C27B0' },
                         ]}
                       >
-                        {item.price.toFixed(2)} €
+                        {item.price.toFixed(2)}€
                       </Text>
                     </View>
                     {item.isDividedForDisplay ? (
@@ -886,22 +996,6 @@ export default function ItemsPaymentScreen() {
                           Prix original:{' '}
                           {item.partInfo.originalPrice.toFixed(2)}€
                         </Text>
-                        <View style={styles.actionButtons}>
-                          <Pressable
-                            style={[
-                              styles.actionButton,
-                              { backgroundColor: '#4CAF50' },
-                            ]}
-                            onPress={() =>
-                              handleDividedItemAction(item.dividedItemId, 'add')
-                            }
-                          >
-                            <Plus size={14} color="white" />
-                            <Text style={styles.actionButtonText}>
-                              Sélectionner
-                            </Text>
-                          </Pressable>
-                        </View>
                       </View>
                     ) : (
                       <View style={styles.itemActions}>
@@ -914,37 +1008,18 @@ export default function ItemsPaymentScreen() {
                               styles.actionButton,
                               { backgroundColor: '#9C27B0' },
                             ]}
-                            onPress={() => handleSplitItem(item)}
+                            onPress={(e) => {
+                              e.stopPropagation();
+                              handleSplitItem(item);
+                            }}
                           >
                             <Users size={14} color="white" />
                             <Text style={styles.actionButtonText}>Diviser</Text>
                           </Pressable>
-                          {item.quantity > 1 && (
-                            <Pressable
-                              style={[
-                                styles.actionButton,
-                                { backgroundColor: '#2196F3' },
-                              ]}
-                              onPress={() => addItemToSelection(item, true)}
-                            >
-                              <ShoppingCart size={14} color="white" />
-                              <Text style={styles.actionButtonText}>Tout</Text>
-                            </Pressable>
-                          )}
-                          <Pressable
-                            style={[
-                              styles.actionButton,
-                              { backgroundColor: '#4CAF50' },
-                            ]}
-                            onPress={() => addItemToSelection(item, false)}
-                          >
-                            <Plus size={14} color="white" />
-                            <Text style={styles.actionButtonText}>+1</Text>
-                          </Pressable>
                         </View>
                       </View>
                     )}
-                  </View>
+                  </Pressable>
                 ))}
               </ScrollView>
             </View>
@@ -952,7 +1027,7 @@ export default function ItemsPaymentScreen() {
               <Text style={styles.subColumnTitle}>Boissons</Text>
               <ScrollView style={styles.itemsList}>
                 {getAllAvailableItemsByCategory.boisson.map((item: any) => (
-                  <View
+                  <Pressable
                     key={
                       item.isDividedForDisplay ? item.dividedItemId : item.id
                     }
@@ -960,6 +1035,13 @@ export default function ItemsPaymentScreen() {
                       styles.itemCard,
                       item.isDividedForDisplay && styles.dividedItemCard,
                     ]}
+                    onPress={() => {
+                      if (item.isDividedForDisplay) {
+                        handleDividedItemAction(item.dividedItemId, 'add');
+                      } else {
+                        handleItemClick(item);
+                      }
+                    }}
                   >
                     <View style={styles.itemHeader}>
                       <View style={styles.itemNameRow}>
@@ -974,7 +1056,7 @@ export default function ItemsPaymentScreen() {
                           item.isDividedForDisplay && { color: '#9C27B0' },
                         ]}
                       >
-                        {item.price.toFixed(2)} €
+                        {item.price.toFixed(2)}€
                       </Text>
                     </View>
                     {item.isDividedForDisplay ? (
@@ -983,22 +1065,6 @@ export default function ItemsPaymentScreen() {
                           Prix original:{' '}
                           {item.partInfo.originalPrice.toFixed(2)}€
                         </Text>
-                        <View style={styles.actionButtons}>
-                          <Pressable
-                            style={[
-                              styles.actionButton,
-                              { backgroundColor: '#4CAF50' },
-                            ]}
-                            onPress={() =>
-                              handleDividedItemAction(item.dividedItemId, 'add')
-                            }
-                          >
-                            <Plus size={14} color="white" />
-                            <Text style={styles.actionButtonText}>
-                              Sélectionner
-                            </Text>
-                          </Pressable>
-                        </View>
                       </View>
                     ) : (
                       <View style={styles.itemActions}>
@@ -1011,42 +1077,24 @@ export default function ItemsPaymentScreen() {
                               styles.actionButton,
                               { backgroundColor: '#9C27B0' },
                             ]}
-                            onPress={() => handleSplitItem(item)}
+                            onPress={(e) => {
+                              e.stopPropagation();
+                              handleSplitItem(item);
+                            }}
                           >
                             <Users size={14} color="white" />
                             <Text style={styles.actionButtonText}>Diviser</Text>
                           </Pressable>
-                          {item.quantity > 1 && (
-                            <Pressable
-                              style={[
-                                styles.actionButton,
-                                { backgroundColor: '#2196F3' },
-                              ]}
-                              onPress={() => addItemToSelection(item, true)}
-                            >
-                              <ShoppingCart size={14} color="white" />
-                              <Text style={styles.actionButtonText}>Tout</Text>
-                            </Pressable>
-                          )}
-                          <Pressable
-                            style={[
-                              styles.actionButton,
-                              { backgroundColor: '#4CAF50' },
-                            ]}
-                            onPress={() => addItemToSelection(item, false)}
-                          >
-                            <Plus size={14} color="white" />
-                            <Text style={styles.actionButtonText}>+1</Text>
-                          </Pressable>
                         </View>
                       </View>
                     )}
-                  </View>
+                  </Pressable>
                 ))}
               </ScrollView>
             </View>
           </View>
         </View>
+
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>
             Articles sélectionnés pour paiement
@@ -1054,246 +1102,132 @@ export default function ItemsPaymentScreen() {
           {selectedItems.length === 0 ? (
             <Text style={styles.emptyText}>Aucun article sélectionné</Text>
           ) : (
-            <ScrollView style={styles.selectedItemsList}>
-              {selectedItems.map((item) => (
-                <View
-                  key={item.uniqueKey}
-                  style={[
-                    styles.selectedItemCard,
-                    item.offered && styles.offeredItemCard,
-                  ]}
-                >
-                  <View style={styles.selectedItemHeader}>
-                    <View style={styles.selectedItemInfo}>
-                      <View style={styles.selectedItemNameRow}>
-                        {item.offered && <Gift size={16} color="#FF9800" />}
-                        {item.isDivided && <Users size={16} color="#9C27B0" />}
-                        <Text
-                          style={[
-                            styles.itemName,
-                            item.offered && styles.offeredItemText,
-                          ]}
-                        >
-                          {item.name} {item.offered ? '(Offert)' : ''}
-                        </Text>
-                      </View>
-                      {item.isDivided && item.partInfo && (
-                        <Text style={styles.partInfoText}>
-                          Part {item.partInfo.partNumber}/
-                          {item.partInfo.totalParts} • Prix original:{' '}
-                          {item.partInfo.originalPrice.toFixed(2)}€
-                        </Text>
-                      )}
-                      {!item.isDivided && (
-                        <View style={styles.quantityControls}>
-                          <Pressable
-                            style={styles.quantityBtn}
-                            onPress={() => {
-                              if (item.selectedQuantity > 1) {
-                                setSelectedItems((prev) =>
-                                  prev.map((si) =>
-                                    si.uniqueKey === item.uniqueKey
-                                      ? {
-                                          ...si,
-                                          selectedQuantity:
-                                            si.selectedQuantity - 1,
-                                        }
-                                      : si
-                                  )
-                                );
-                                setAvailableItems((prev) => {
-                                  const existing = prev.find(
-                                    (ai) => ai.id === item.id
-                                  );
-                                  if (existing) {
-                                    return prev.map((ai) =>
-                                      ai.id === item.id
-                                        ? {
-                                            ...ai,
-                                            quantity: ai.quantity + 1,
-                                            total: ai.price * (ai.quantity + 1),
-                                          }
-                                        : ai
-                                    );
-                                  } else {
-                                    const originalItem = allOriginalItems.find(
-                                      (oi) => oi.id === item.id
-                                    );
-                                    if (originalItem) {
-                                      return [
-                                        ...prev,
-                                        {
-                                          ...originalItem,
-                                          quantity: 1,
-                                          total: originalItem.price,
-                                        },
-                                      ];
-                                    }
-                                  }
-                                  return prev;
-                                });
-                              } else {
-                                setSelectedItems((prev) =>
-                                  prev.filter(
-                                    (si) => si.uniqueKey !== item.uniqueKey
-                                  )
-                                );
-                                setAvailableItems((prev) => {
-                                  const existing = prev.find(
-                                    (ai) => ai.id === item.id
-                                  );
-                                  if (existing) {
-                                    return prev.map((ai) =>
-                                      ai.id === item.id
-                                        ? {
-                                            ...ai,
-                                            quantity: ai.quantity + 1,
-                                            total: ai.price * (ai.quantity + 1),
-                                          }
-                                        : ai
-                                    );
-                                  } else {
-                                    const originalItem = allOriginalItems.find(
-                                      (oi) => oi.id === item.id
-                                    );
-                                    if (originalItem) {
-                                      return [
-                                        ...prev,
-                                        {
-                                          ...originalItem,
-                                          quantity: 1,
-                                          total: originalItem.price,
-                                        },
-                                      ];
-                                    }
-                                  }
-                                  return prev;
-                                });
-                              }
-                            }}
-                          >
-                            <Minus size={16} color="#666" />
-                          </Pressable>
-                          <Text style={styles.quantityText}>
-                            {item.selectedQuantity}
-                          </Text>
-                          <Pressable
-                            style={styles.quantityBtn}
-                            onPress={() => {
-                              const availableItem = availableItems.find(
-                                (ai) => ai.id === item.id
-                              );
-                              if (availableItem && availableItem.quantity > 0) {
-                                setSelectedItems((prev) =>
-                                  prev.map((si) =>
-                                    si.uniqueKey === item.uniqueKey
-                                      ? {
-                                          ...si,
-                                          selectedQuantity:
-                                            si.selectedQuantity + 1,
-                                        }
-                                      : si
-                                  )
-                                );
-                                setAvailableItems((prev) =>
-                                  prev
-                                    .map((ai) =>
-                                      ai.id === item.id && ai.quantity > 0
-                                        ? {
-                                            ...ai,
-                                            quantity: ai.quantity - 1,
-                                            total: ai.price * (ai.quantity - 1),
-                                          }
-                                        : ai
-                                    )
-                                    .filter((ai) => ai.quantity > 0)
-                                );
-                              }
-                            }}
-                          >
-                            <Plus size={16} color="#666" />
-                          </Pressable>
-                        </View>
-                      )}
-                    </View>
-                    <View style={styles.selectedItemActions}>
-                      <Text
+            <View style={styles.doubleColumn}>
+              <View style={styles.subColumn}>
+                <Text style={styles.subColumnTitle}>Plats</Text>
+                <ScrollView style={styles.selectedItemsList}>
+                  {getSelectedItemsByCategory.plat.map(
+                    (item: SelectedMenuItem) => (
+                      <Pressable
+                        key={item.uniqueKey}
                         style={[
-                          styles.itemPrice,
-                          item.offered && styles.offeredItemText,
+                          styles.selectedItemCard,
+                          item.offered && styles.offeredItemCard,
                         ]}
+                        onPress={() => handleSelectedItemClick(item)}
                       >
-                        {(item.price * item.selectedQuantity).toFixed(2)}€
-                      </Text>
-                      <View style={styles.actionButtons}>
-                        <Pressable
-                          style={[
-                            styles.actionButton,
-                            { backgroundColor: '#F44336' },
-                          ]}
-                          onPress={() => {
-                            if (item.isDivided) {
-                              removeDividedItemFromSelection(
-                                item.uniqueKey || ''
-                              );
-                            } else {
-                              setAvailableItems((prev) => {
-                                const existing = prev.find(
-                                  (ai) => ai.id === item.id
-                                );
-                                if (existing) {
-                                  return prev.map((ai) =>
-                                    ai.id === item.id
-                                      ? {
-                                          ...ai,
-                                          quantity:
-                                            ai.quantity + item.selectedQuantity,
-                                          total:
-                                            ai.price *
-                                            (ai.quantity +
-                                              item.selectedQuantity),
-                                        }
-                                      : ai
-                                  );
-                                } else {
-                                  const originalItem = allOriginalItems.find(
-                                    (oi) => oi.id === item.id
-                                  );
-                                  if (originalItem) {
-                                    return [
-                                      ...prev,
-                                      {
-                                        ...originalItem,
-                                        quantity: item.selectedQuantity,
-                                        total:
-                                          originalItem.price *
-                                          item.selectedQuantity,
-                                      },
-                                    ];
-                                  }
-                                }
-                                return prev;
-                              });
-                              setSelectedItems((prev) =>
-                                prev.filter(
-                                  (si) => si.uniqueKey !== item.uniqueKey
-                                )
-                              );
-                            }
-                          }}
-                        >
-                          <Trash2 size={14} color="white" />
-                          <Text style={styles.actionButtonText}>Retirer</Text>
-                        </Pressable>
-                      </View>
-                    </View>
-                  </View>
-                </View>
-              ))}
-            </ScrollView>
+                        <View style={styles.selectedItemHeader}>
+                          <View style={styles.selectedItemInfo}>
+                            <View style={styles.selectedItemNameRow}>
+                              {item.offered && (
+                                <Gift size={16} color="#FF9800" />
+                              )}
+                              {item.isDivided && (
+                                <Users size={16} color="#9C27B0" />
+                              )}
+                              <Text
+                                style={[
+                                  styles.itemName,
+                                  item.offered && styles.offeredItemText,
+                                ]}
+                              >
+                                {item.name} {item.offered ? '(Offert)' : ''}
+                              </Text>
+                            </View>
+                            {item.isDivided && item.partInfo && (
+                              <Text style={styles.partInfoText}>
+                                Part {item.partInfo.partNumber}/
+                                {item.partInfo.totalParts} • Prix original:{' '}
+                                {item.partInfo.originalPrice.toFixed(2)}€
+                              </Text>
+                            )}
+                            {!item.isDivided && (
+                              <Text style={styles.quantityText}>
+                                Qté: {item.selectedQuantity}
+                              </Text>
+                            )}
+                          </View>
+                          <View style={styles.selectedItemActions}>
+                            <Text
+                              style={[
+                                styles.itemPrice,
+                                item.offered && styles.offeredItemText,
+                              ]}
+                            >
+                              {(item.price * item.selectedQuantity).toFixed(2)}€
+                            </Text>
+                          </View>
+                        </View>
+                      </Pressable>
+                    )
+                  )}
+                </ScrollView>
+              </View>
+              <View style={styles.subColumn}>
+                <Text style={styles.subColumnTitle}>Boissons</Text>
+                <ScrollView style={styles.selectedItemsList}>
+                  {getSelectedItemsByCategory.boisson.map(
+                    (item: SelectedMenuItem) => (
+                      <Pressable
+                        key={item.uniqueKey}
+                        style={[
+                          styles.selectedItemCard,
+                          item.offered && styles.offeredItemCard,
+                        ]}
+                        onPress={() => handleSelectedItemClick(item)}
+                      >
+                        <View style={styles.selectedItemHeader}>
+                          <View style={styles.selectedItemInfo}>
+                            <View style={styles.selectedItemNameRow}>
+                              {item.offered && (
+                                <Gift size={16} color="#FF9800" />
+                              )}
+                              {item.isDivided && (
+                                <Users size={16} color="#9C27B0" />
+                              )}
+                              <Text
+                                style={[
+                                  styles.itemName,
+                                  item.offered && styles.offeredItemText,
+                                ]}
+                              >
+                                {item.name} {item.offered ? '(Offert)' : ''}
+                              </Text>
+                            </View>
+                            {item.isDivided && item.partInfo && (
+                              <Text style={styles.partInfoText}>
+                                Part {item.partInfo.partNumber}/
+                                {item.partInfo.totalParts} • Prix original:{' '}
+                                {item.partInfo.originalPrice.toFixed(2)}€
+                              </Text>
+                            )}
+                            {!item.isDivided && (
+                              <Text style={styles.quantityText}>
+                                Qté: {item.selectedQuantity}
+                              </Text>
+                            )}
+                          </View>
+                          <View style={styles.selectedItemActions}>
+                            <Text
+                              style={[
+                                styles.itemPrice,
+                                item.offered && styles.offeredItemText,
+                              ]}
+                            >
+                              {(item.price * item.selectedQuantity).toFixed(2)}€
+                            </Text>
+                          </View>
+                        </View>
+                      </Pressable>
+                    )
+                  )}
+                </ScrollView>
+              </View>
+            </View>
           )}
         </View>
       </View>
+
       <View style={styles.paymentSection}>
         <View style={styles.paymentSummary}>
           <Text style={styles.paymentSummaryText}>
@@ -1324,6 +1258,7 @@ export default function ItemsPaymentScreen() {
           </View>
         </View>
       </View>
+
       <SplitItemModal
         visible={splitModalVisible}
         item={itemToSplit}
@@ -1333,6 +1268,7 @@ export default function ItemsPaymentScreen() {
         }}
         onConfirm={handleConfirmSplit}
       />
+
       {processing && (
         <View style={styles.processingOverlay}>
           <Text style={styles.processingText}>Traitement du paiement...</Text>
@@ -1450,7 +1386,7 @@ const styles = StyleSheet.create({
   itemCard: {
     backgroundColor: '#f9f9f9',
     borderRadius: 6,
-    padding: 8,
+    padding: 10,
     marginBottom: 6,
     borderLeftWidth: 3,
     borderLeftColor: '#4CAF50',
@@ -1458,7 +1394,7 @@ const styles = StyleSheet.create({
   itemHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 4,
   },
   itemName: {
@@ -1471,6 +1407,8 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     color: '#4CAF50',
+    minWidth: 60,
+    textAlign: 'right',
   },
   itemActions: {
     flexDirection: 'row',
@@ -1502,30 +1440,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#F3E5F5',
     borderLeftColor: '#9C27B0',
   },
-  dividedItemHeader: {
-    marginBottom: 4,
-  },
-  dividedItemNameRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginBottom: 2,
-  },
-  dividedItemPartInfo: {
-    fontSize: 11,
-    color: '#9C27B0',
-    fontWeight: '600',
-  },
   dividedItemOriginalPrice: {
     fontSize: 10,
     color: '#666',
     fontStyle: 'italic',
-    marginBottom: 4,
-  },
-  dividedItemActions: {
-    flexDirection: 'row',
-    gap: 4,
-    justifyContent: 'flex-end',
   },
   selectedItemsList: {
     flex: 1,
@@ -1566,19 +1484,6 @@ const styles = StyleSheet.create({
     color: '#9C27B0',
     fontWeight: '500',
     marginBottom: 6,
-  },
-  quantityControls: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#fff',
-    borderRadius: 4,
-    paddingHorizontal: 4,
-    alignSelf: 'flex-start',
-  },
-  quantityBtn: {
-    padding: 4,
-    minWidth: 24,
-    alignItems: 'center',
   },
   selectedItemActions: {
     alignItems: 'flex-end',
@@ -1716,6 +1621,11 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     padding: 4,
   },
+  quantityBtn: {
+    padding: 8,
+    minWidth: 32,
+    alignItems: 'center',
+  },
   quantityInput: {
     flex: 1,
     textAlign: 'center',
@@ -1791,9 +1701,5 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-  },
-
-  dividedItemInfo: {
-    flex: 1,
   },
 });
