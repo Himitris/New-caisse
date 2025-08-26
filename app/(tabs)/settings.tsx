@@ -1,7 +1,7 @@
-// app/(tabs)/settings.tsx - Système de stockage simplifié
+// app/(tabs)/settings.tsx - Version modifiée avec easter egg
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Trash2 } from 'lucide-react-native';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, useRef } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -31,11 +31,13 @@ import {
   PaymentMethodsModal,
   RestaurantInfoModal,
 } from '../components/SettingsModals';
+import SecretPasswordModal from '../components/SecretPasswordModal'; // Import du nouveau composant
 
 interface VersionFooterProps {
   version?: string;
   buildNumber?: string;
   style?: any;
+  onSecretTap?: () => void; // Nouvelle prop pour le tap secret
 }
 
 // Clés de stockage
@@ -56,7 +58,7 @@ export default function SettingsScreen() {
   } = useSettingsContext();
   const toast = useToast();
 
-  // États pour les modals
+  // États pour les modals existants
   const [restaurantInfoModalVisible, setRestaurantInfoModalVisible] =
     useState(false);
   const [hoursModalVisible, setHoursModalVisible] = useState(false);
@@ -65,6 +67,46 @@ export default function SettingsScreen() {
   const [processingAction, setProcessingAction] = useState(false);
   const [printSettingsModalVisible, setPrintSettingsModalVisible] =
     useState(false);
+
+  // 🔐 États pour le secret easter egg
+  const [secretModalVisible, setSecretModalVisible] = useState(false);
+  const tapCountRef = useRef(0);
+  const tapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 🥚 Fonction pour gérer le tap secret sur la version
+  const handleSecretTap = useCallback(() => {
+    tapCountRef.current += 1;
+
+    // Réinitialiser le compteur après 3 secondes d'inactivité
+    if (tapTimerRef.current) {
+      clearTimeout(tapTimerRef.current);
+    }
+
+    tapTimerRef.current = setTimeout(() => {
+      tapCountRef.current = 0;
+    }, 3000);
+
+    // Si 10 taps sont détectés, montrer le modal secret
+    if (tapCountRef.current === 10) {
+      tapCountRef.current = 0; // Reset
+      if (tapTimerRef.current) {
+        clearTimeout(tapTimerRef.current);
+      }
+
+      // Petit effet de vibration/feedback si disponible
+      try {
+        // Dans une vraie app React Native, vous pourriez utiliser Haptics
+        console.log('🥚 Easter egg activé!');
+      } catch (error) {
+        // Ignore l'erreur si Haptics n'est pas disponible
+      }
+
+      setSecretModalVisible(true);
+      toast.showToast('🥚 Easter egg découvert !', 'info');
+    }
+
+    // Toast intermédiaire supprimé comme demandé
+  }, [toast]);
 
   const handleResetAppData = useCallback(() => {
     Alert.alert(
@@ -241,19 +283,30 @@ export default function SettingsScreen() {
     setPasswordModalVisible(false);
   }, []);
 
+  // 🔐 Composant VersionFooter modifié avec easter egg
   const VersionFooter: React.FC<VersionFooterProps> = ({
-    version = '1.0.0',
-    buildNumber,
+    version = '2.3.0',
+    buildNumber = '165',
     style,
+    onSecretTap,
   }) => {
     const versionText = buildNumber
       ? `v${version} (${buildNumber})`
       : `v${version}`;
 
     return (
-      <View style={[styles.containerVersion, style]}>
+      <Pressable
+        style={[styles.containerVersion, style]}
+        onPress={onSecretTap}
+        // Désactiver les effets visuels pour rester discret
+        android_ripple={null}
+        // Augmenter légèrement la zone de tap pour faciliter l'activation
+        hitSlop={{ top: 10, bottom: 10, left: 20, right: 20 }}
+      >
         <Text style={styles.versionText}>{versionText}</Text>
-      </View>
+        {/* Petit indicateur visuel subtil pour ceux qui savent */}
+        <Text style={styles.hiddenHint}>🥚</Text>
+      </Pressable>
     );
   };
 
@@ -371,13 +424,15 @@ export default function SettingsScreen() {
         </ScrollView>
       </View>
 
+      {/* Footer avec easter egg sur la version */}
       <VersionFooter
         version="2.2.0"
         buildNumber="160"
         style={{ borderTopWidth: 1, borderTopColor: '#e0e0e0' }}
+        onSecretTap={handleSecretTap}
       />
 
-      {/* Modals de configuration */}
+      {/* Modals de configuration existants */}
       <RestaurantInfoModal
         visible={restaurantInfoModalVisible}
         onClose={() => setRestaurantInfoModalVisible(false)}
@@ -402,6 +457,12 @@ export default function SettingsScreen() {
         type="change"
       />
 
+      {/* 🔐 NOUVEAU: Modal secret pour afficher le mot de passe */}
+      <SecretPasswordModal
+        visible={secretModalVisible}
+        onClose={() => setSecretModalVisible(false)}
+      />
+
       {/* Indicateur de sauvegarde */}
       {(isSaving || processingAction) && (
         <View style={styles.savingOverlay}>
@@ -422,6 +483,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#f5f5f5',
   },
+  // ... tous les autres styles existants restent identiques
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -782,16 +844,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
+  // 🔐 NOUVEAUX STYLES pour l'easter egg
   containerVersion: {
     alignItems: 'center',
     paddingVertical: 12,
     paddingHorizontal: 16,
     backgroundColor: 'transparent',
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
   },
   versionText: {
     fontSize: 12,
     color: '#999',
     fontWeight: '400',
     letterSpacing: 0.5,
+  },
+  hiddenHint: {
+    fontSize: 8,
+    opacity: 0.1, // Très discret
+    color: '#999',
   },
 });

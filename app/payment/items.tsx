@@ -13,6 +13,8 @@ import {
   Wallet,
   Users,
   Trash2,
+  CheckCircle,
+  XCircle,
 } from 'lucide-react-native';
 import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -46,6 +48,7 @@ interface DividedItem {
   partNumber: number;
   totalParts: number;
   isDivided: true;
+  category?: 'plat' | 'boisson';
 }
 
 interface MenuItem {
@@ -56,6 +59,7 @@ interface MenuItem {
   total: number;
   notes?: string;
   offered?: boolean;
+  category?: 'plat' | 'boisson';
 }
 
 interface SelectedMenuItem extends MenuItem {
@@ -271,27 +275,94 @@ function getMethodColor(methodId: string) {
   }
 }
 
+// Amélioration de la fonction de catégorisation avec un système plus flexible
 const getCategoryFromName = (name: string): 'plat' | 'boisson' => {
   const lowerName = name.toLowerCase();
-  if (
-    lowerName.includes('pinte') ||
-    lowerName.includes('blonde') ||
-    lowerName.includes('ambree') ||
-    lowerName.includes('blanche') ||
-    lowerName.includes('demi') ||
-    lowerName.includes('bière') ||
-    lowerName.includes('vin') ||
-    lowerName.includes('pichet') ||
-    lowerName.includes('boisson') ||
-    lowerName.includes('café') ||
-    lowerName.includes('thé') ||
-    lowerName.includes('eau') ||
-    lowerName.includes('soft') ||
-    lowerName.includes('coca')
-  ) {
-    return 'boisson';
-  }
-  return 'plat';
+
+  // Mots-clés spécifiques aux boissons
+  const drinkKeywords = [
+    // Bières
+    'pinte',
+    'blonde',
+    'ambree',
+    'ambrée',
+    'blanche',
+    'demi',
+    'bière',
+    'biere',
+    'ipa',
+    'pils',
+    'lager',
+    'stout',
+    'porter',
+    'weizen',
+    'kriek',
+    // Vins et alcools
+    'vin',
+    'rouge',
+    'blanc',
+    'rosé',
+    'rose',
+    'pichet',
+    'champagne',
+    'prosecco',
+    'whisky',
+    'rhum',
+    'vodka',
+    'gin',
+    'cognac',
+    'armagnac',
+    'calvados',
+    'liqueur',
+    'digestif',
+    'apéritif',
+    'aperitif',
+    // Boissons non alcoolisées
+    'eau',
+    'evian',
+    'vittel',
+    'perrier',
+    'badoit',
+    'san pellegrino',
+    'coca',
+    'pepsi',
+    'sprite',
+    'fanta',
+    'orangina',
+    'schweppes',
+    'jus',
+    'nectar',
+    'smoothie',
+    'milkshake',
+    'café',
+    'cafe',
+    'expresso',
+    'cappuccino',
+    'latte',
+    'americano',
+    'thé',
+    'the',
+    'infusion',
+    'tisane',
+    'chocolat chaud',
+    'limonade',
+    'citronnade',
+    'sirop',
+    // Termes génériques
+    'boisson',
+    'drink',
+    'soft',
+    'soda',
+    'rafraichissant',
+    'rafraîchissant',
+  ];
+
+  // Vérifier si le nom contient un mot-clé de boisson
+  const isBoisson = drinkKeywords.some((keyword) =>
+    lowerName.includes(keyword)
+  );
+
+  return isBoisson ? 'boisson' : 'plat';
 };
 
 const categorizeItems = (
@@ -299,8 +370,9 @@ const categorizeItems = (
 ) => {
   return items.reduce(
     (acc, item) => {
-      const category = getCategoryFromName(item.name);
-      acc[category].push(item);
+      // Utiliser la catégorie stockée ou la déterminer automatiquement
+      const category = item.category || getCategoryFromName(item.name);
+      acc[category].push({ ...item, category });
       return acc;
     },
     { plat: [] as any[], boisson: [] as any[] }
@@ -346,6 +418,7 @@ export default function ItemsPaymentScreen() {
             total: item.price * item.quantity,
             notes: item.notes,
             offered: item.offered,
+            category: getCategoryFromName(item.name),
           }));
         setAvailableItems(items);
         if (allOriginalItems.length === 0) {
@@ -389,6 +462,7 @@ export default function ItemsPaymentScreen() {
               partNumber: i,
               totalParts: numberOfParts,
               isDivided: true,
+              category: itemToSplit.category,
             });
           }
         }
@@ -480,6 +554,7 @@ export default function ItemsPaymentScreen() {
       total: item.price,
       notes: item.notes,
       offered: item.offered,
+      category: item.category,
       isDividedForDisplay: true,
       dividedItemId: item.id,
       partInfo: {
@@ -513,6 +588,7 @@ export default function ItemsPaymentScreen() {
       offered: dividedItem.offered,
       uniqueKey: dividedItem.id,
       isDivided: true,
+      category: dividedItem.category,
       partInfo: {
         partNumber: dividedItem.partNumber,
         totalParts: dividedItem.totalParts,
@@ -558,6 +634,7 @@ export default function ItemsPaymentScreen() {
         partNumber: itemToRemove.partInfo?.partNumber || 1,
         totalParts: itemToRemove.partInfo?.totalParts || 1,
         isDivided: true,
+        category: itemToRemove.category,
       };
       setDividedItems((prev) => [...prev, restoredDividedItem]);
     },
@@ -700,6 +777,118 @@ export default function ItemsPaymentScreen() {
     },
     [removeDividedItemFromSelection, allOriginalItems]
   );
+
+  // Nouvelles fonctions pour "Tout ajouter" et "Tout enlever"
+  const handleAddAllItems = useCallback(() => {
+    // Ajouter tous les articles disponibles à la sélection
+    const itemsToAdd: SelectedMenuItem[] = [];
+
+    availableItems.forEach((item) => {
+      itemsToAdd.push({
+        ...item,
+        selectedQuantity: item.quantity,
+        uniqueKey: `${item.id}-${Date.now()}-all`,
+      });
+    });
+
+    dividedItems.forEach((dividedItem) => {
+      const selectedItem: SelectedMenuItem = {
+        id: parseInt(dividedItem.id.split('-')[0]),
+        name: dividedItem.name,
+        price: dividedItem.price,
+        quantity: 1,
+        total: dividedItem.price,
+        selectedQuantity: 1,
+        offered: dividedItem.offered,
+        uniqueKey: dividedItem.id,
+        isDivided: true,
+        category: dividedItem.category,
+        partInfo: {
+          partNumber: dividedItem.partNumber,
+          totalParts: dividedItem.totalParts,
+          originalPrice: dividedItem.originalPrice,
+        },
+      };
+      itemsToAdd.push(selectedItem);
+    });
+
+    setSelectedItems((prev) => [...prev, ...itemsToAdd]);
+    setAvailableItems([]);
+    setDividedItems([]);
+
+    toast.showToast('Tous les articles ont été ajoutés', 'success');
+  }, [availableItems, dividedItems, toast]);
+
+  const handleRemoveAllItems = useCallback(() => {
+    // Remettre tous les articles sélectionnés dans les disponibles
+    const itemsToRestore: MenuItem[] = [];
+    const dividedItemsToRestore: DividedItem[] = [];
+
+    selectedItems.forEach((selectedItem) => {
+      if (selectedItem.isDivided) {
+        // Restaurer les items divisés
+        const restoredDividedItem: DividedItem = {
+          id: selectedItem.uniqueKey || '',
+          originalId: selectedItem.id,
+          name: selectedItem.name,
+          price: selectedItem.price,
+          originalPrice:
+            selectedItem.partInfo?.originalPrice || selectedItem.price,
+          quantity: 1,
+          offered: selectedItem.offered,
+          partNumber: selectedItem.partInfo?.partNumber || 1,
+          totalParts: selectedItem.partInfo?.totalParts || 1,
+          isDivided: true,
+          category: selectedItem.category,
+        };
+        dividedItemsToRestore.push(restoredDividedItem);
+      } else {
+        // Restaurer les items normaux
+        const existingIndex = itemsToRestore.findIndex(
+          (item) => item.id === selectedItem.id
+        );
+        if (existingIndex >= 0) {
+          itemsToRestore[existingIndex].quantity +=
+            selectedItem.selectedQuantity;
+          itemsToRestore[existingIndex].total =
+            itemsToRestore[existingIndex].price *
+            itemsToRestore[existingIndex].quantity;
+        } else {
+          itemsToRestore.push({
+            ...selectedItem,
+            quantity: selectedItem.selectedQuantity,
+            total: selectedItem.price * selectedItem.selectedQuantity,
+          });
+        }
+      }
+    });
+
+    // Fusionner avec les items disponibles existants
+    setAvailableItems((prev) => {
+      const merged = [...prev];
+      itemsToRestore.forEach((itemToRestore) => {
+        const existingIndex = merged.findIndex(
+          (item) => item.id === itemToRestore.id
+        );
+        if (existingIndex >= 0) {
+          merged[existingIndex].quantity += itemToRestore.quantity;
+          merged[existingIndex].total =
+            merged[existingIndex].price * merged[existingIndex].quantity;
+        } else {
+          merged.push(itemToRestore);
+        }
+      });
+      return merged;
+    });
+
+    setDividedItems((prev) => [...prev, ...dividedItemsToRestore]);
+    setSelectedItems([]);
+
+    toast.showToast(
+      'Tous les articles ont été retirés de la sélection',
+      'success'
+    );
+  }, [selectedItems, toast]);
 
   const totalAvailable = useMemo(() => {
     const availableTotal = availableItems.reduce(
@@ -861,6 +1050,7 @@ export default function ItemsPaymentScreen() {
                 total: item.price * item.quantity,
                 notes: item.notes,
                 offered: item.offered,
+                category: getCategoryFromName(item.name),
               }));
             setAvailableItems(filteredItems);
           }
@@ -921,6 +1111,9 @@ export default function ItemsPaymentScreen() {
     );
   }
 
+  const hasAvailableItems =
+    availableItems.length > 0 || dividedItems.length > 0;
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -952,7 +1145,18 @@ export default function ItemsPaymentScreen() {
 
       <View style={styles.content}>
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Articles disponibles</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Articles disponibles</Text>
+            {hasAvailableItems && (
+              <Pressable
+                style={styles.addAllButton}
+                onPress={handleAddAllItems}
+              >
+                <CheckCircle size={16} color="white" />
+                <Text style={styles.addAllButtonText}>Tout ajouter</Text>
+              </Pressable>
+            )}
+          </View>
           <View style={styles.doubleColumn}>
             <View style={styles.subColumn}>
               <Text style={styles.subColumnTitle}>Plats</Text>
@@ -1000,7 +1204,8 @@ export default function ItemsPaymentScreen() {
                     ) : (
                       <View style={styles.itemActions}>
                         <Text style={styles.quantityText}>
-                          Qté: {item.quantity}
+                          Qté: {item.quantity} • Total:{' '}
+                          {(item.price * item.quantity).toFixed(2)}€
                         </Text>
                         <View style={styles.actionButtons}>
                           <Pressable
@@ -1069,7 +1274,8 @@ export default function ItemsPaymentScreen() {
                     ) : (
                       <View style={styles.itemActions}>
                         <Text style={styles.quantityText}>
-                          Qté: {item.quantity}
+                          Qté: {item.quantity} • Total:{' '}
+                          {(item.price * item.quantity).toFixed(2)}€
                         </Text>
                         <View style={styles.actionButtons}>
                           <Pressable
@@ -1096,9 +1302,20 @@ export default function ItemsPaymentScreen() {
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>
-            Articles sélectionnés pour paiement
-          </Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>
+              Articles sélectionnés pour paiement
+            </Text>
+            {selectedItems.length > 0 && (
+              <Pressable
+                style={styles.removeAllButton}
+                onPress={handleRemoveAllItems}
+              >
+                <XCircle size={16} color="white" />
+                <Text style={styles.removeAllButtonText}>Tout enlever</Text>
+              </Pressable>
+            )}
+          </View>
           {selectedItems.length === 0 ? (
             <Text style={styles.emptyText}>Aucun article sélectionné</Text>
           ) : (
@@ -1143,7 +1360,8 @@ export default function ItemsPaymentScreen() {
                             )}
                             {!item.isDivided && (
                               <Text style={styles.quantityText}>
-                                Qté: {item.selectedQuantity}
+                                Qté: {item.selectedQuantity} • Prix unitaire:{' '}
+                                {item.price.toFixed(2)}€
                               </Text>
                             )}
                           </View>
@@ -1203,7 +1421,8 @@ export default function ItemsPaymentScreen() {
                             )}
                             {!item.isDivided && (
                               <Text style={styles.quantityText}>
-                                Qté: {item.selectedQuantity}
+                                Qté: {item.selectedQuantity} • Prix unitaire:{' '}
+                                {item.price.toFixed(2)}€
                               </Text>
                             )}
                           </View>
@@ -1356,11 +1575,44 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 3,
   },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
   sectionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    marginBottom: 12,
     color: '#333',
+  },
+  addAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#4CAF50',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    gap: 4,
+  },
+  addAllButtonText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  removeAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F44336',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    gap: 4,
+  },
+  removeAllButtonText: {
+    color: 'white',
+    fontSize: 12,
+    fontWeight: '600',
   },
   doubleColumn: {
     flexDirection: 'row',
@@ -1418,6 +1670,7 @@ const styles = StyleSheet.create({
   quantityText: {
     fontSize: 12,
     color: '#666',
+    flex: 1,
   },
   actionButtons: {
     flexDirection: 'row',
