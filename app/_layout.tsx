@@ -8,7 +8,11 @@ import { ActivityIndicator, Text, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { menuManager } from '../utils/MenuManager';
 import { SettingsProvider } from '../utils/SettingsContext';
-import { initializeTables, performBillsMaintenance } from '../utils/storage';
+import {
+  initializeTables,
+  performBillsMaintenance,
+  initializeDatabase,
+} from '../utils/storage';
 import { ToastProvider } from '../utils/ToastContext';
 
 export default function RootLayout() {
@@ -17,7 +21,10 @@ export default function RootLayout() {
   useEffect(() => {
     const setupApp = async () => {
       try {
-        // Initialisation parallèle simple
+        // ✅ Initialiser SQLite en premier (inclut la migration depuis AsyncStorage)
+        await initializeDatabase();
+
+        // Initialisation parallèle des autres services
         await Promise.all([initializeTables(), menuManager.ensureLoaded()]);
 
         // Maintenance légère

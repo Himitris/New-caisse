@@ -1,8 +1,21 @@
-// utils/storage.ts - VERSION OPTIMISÉE AVEC CACHE
-// Intègre le système de cache intelligent pour une meilleure performance
+// utils/storage.ts - VERSION OPTIMISÉE AVEC SQLite
+// Utilise SQLite pour des performances optimales avec grandes quantités de données
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { BillsCache, BillsStatistics } from './BillsCache';
+import { BillsCache } from './BillsCache';
+import { DatabaseService } from './DatabaseService';
+import type { BillsStatistics } from './DatabaseService';
+
+// Initialiser la base de données SQLite au démarrage
+export const initializeDatabase = async (): Promise<void> => {
+  try {
+    await DatabaseService.initialize();
+    console.log('✅ Database initialized');
+  } catch (error) {
+    console.error('❌ Database initialization failed:', error);
+    throw error;
+  }
+};
 
 // Types (inchangés)
 export interface Table {
