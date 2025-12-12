@@ -1,6 +1,8 @@
-// utils/storage.ts - VERSION SANS LOGS EXCESSIFS
+// utils/storage.ts - VERSION OPTIMISÉE AVEC CACHE
+// Intègre le système de cache intelligent pour une meilleure performance
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { BillsCache, BillsStatistics } from './BillsCache';
 
 // Types (inchangés)
 export interface Table {
@@ -203,28 +205,40 @@ export const saveTables = async (tables: Table[]): Promise<void> => {
   await save(STORAGE_KEYS.TABLES, tables);
 };
 
-// BILLS - Fonctions simplifiées
+// BILLS - Fonctions optimisées avec cache
 export const getBills = async (): Promise<Bill[]> => {
   try {
-    return await load<Bill[]>(STORAGE_KEYS.BILLS, []);
+    return await BillsCache.getAllBills();
   } catch (error) {
     console.error('Error loading bills:', error);
     return [];
   }
 };
 
+// Obtenir les factures récentes (optimisé)
+export const getRecentBills = async (limit: number = 200): Promise<Bill[]> => {
+  try {
+    return await BillsCache.getRecentBills(limit);
+  } catch (error) {
+    console.error('Error loading recent bills:', error);
+    return [];
+  }
+};
+
+// Obtenir le nombre total de factures (très rapide)
+export const getBillsCount = async (): Promise<number> => {
+  try {
+    return await BillsCache.getTotalCount();
+  } catch (error) {
+    console.error('Error getting bills count:', error);
+    return 0;
+  }
+};
+
 export const addBill = async (bill: Bill): Promise<void> => {
   try {
-    const bills = await getBills();
-    bills.push(bill);
-
-    // Limite simple
-    if (bills.length > MAX_BILLS) {
-      const sorted = bills.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-      bills.splice(0, bills.length - 800);
-    }
-
-    await save(STORAGE_KEYS.BILLS, bills);
+    // Utilise le cache avec mise à jour incrémentale
+    await BillsCache.addBill(bill);
   } catch (error) {
     console.error('Error adding bill:', error);
     throw error;
@@ -232,7 +246,8 @@ export const addBill = async (bill: Bill): Promise<void> => {
 };
 
 export const saveBills = async (bills: Bill[]): Promise<void> => {
-  await save(STORAGE_KEYS.BILLS, bills);
+  // Remplace toutes les factures dans le cache
+  await BillsCache.setBills(bills);
 };
 
 // Maintenance simplifiée
@@ -252,90 +267,43 @@ export const performBillsMaintenance = async (): Promise<void> => {
   }
 };
 
-// Pagination
+// Pagination optimisée (utilise l'index du cache)
 export const getBillsPage = async (page: number = 0, pageSize: number = 20) => {
-  const allBills = await getBills();
-  const sorted = [...allBills].sort(
-    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-  );
-
-  const start = page * pageSize;
-  const end = start + pageSize;
-
-  return {
-    bills: sorted.slice(start, end),
-    total: sorted.length,
-    hasMore: end < sorted.length,
-  };
+  return await BillsCache.getBillsPage(page, pageSize);
 };
 
-// Filtrage
+// Filtrage optimisé (utilise les index du cache)
 export const getFilteredBills = async (filters: {
   searchText?: string;
   dateRange?: { start: Date; end: Date };
   paymentMethod?: string;
+  date?: Date;
+  section?: string;
 }) => {
-  const allBills = await getBills();
-
-  return allBills.filter((bill) => {
-    if (filters.dateRange) {
-      const billDate = new Date(bill.timestamp);
-      if (billDate < filters.dateRange.start || billDate > filters.dateRange.end) {
-        return false;
-      }
-    }
-
-    if (filters.paymentMethod && bill.paymentMethod !== filters.paymentMethod) {
-      return false;
-    }
-
-    if (filters.searchText) {
-      const search = filters.searchText.toLowerCase();
-      const tableName = bill.tableName || `Table ${bill.tableNumber}`;
-      return (
-        tableName.toLowerCase().includes(search) ||
-        bill.amount.toString().includes(search)
-      );
-    }
-
-    return true;
-  });
+  return await BillsCache.getFilteredBills(filters);
 };
 
-// Statistiques
+// Obtenir les factures d'une journée spécifique (très optimisé)
+export const getBillsForDate = async (date: Date): Promise<Bill[]> => {
+  return await BillsCache.getBillsForDate(date);
+};
+
+// Statistiques optimisées (calculées en une seule passe)
 export const getBillsStatistics = async () => {
-  const bills = await getBills();
-
-  if (bills.length === 0) {
-    return {
-      totalBills: 0,
-      totalAmount: 0,
-      averageAmount: 0,
-      billsToday: 0,
-      billsThisWeek: 0,
-      billsThisMonth: 0,
-    };
-  }
-
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-  const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-
-  const totalAmount = bills.reduce((sum, bill) => sum + bill.amount, 0);
-  const sortedByDate = bills.sort(
-    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-  );
+  const stats = await BillsCache.getStatistics();
 
   return {
-    totalBills: bills.length,
-    totalAmount,
-    averageAmount: totalAmount / bills.length,
-    oldestBill: sortedByDate[0]?.timestamp,
-    newestBill: sortedByDate[sortedByDate.length - 1]?.timestamp,
-    billsToday: bills.filter((bill) => new Date(bill.timestamp) >= today).length,
-    billsThisWeek: bills.filter((bill) => new Date(bill.timestamp) >= weekAgo).length,
-    billsThisMonth: bills.filter((bill) => new Date(bill.timestamp) >= monthAgo).length,
+    totalBills: stats.totalBills,
+    totalAmount: stats.totalAmount,
+    averageAmount: stats.averageAmount,
+    oldestBill: stats.oldestBillTimestamp,
+    newestBill: stats.newestBillTimestamp,
+    billsToday: stats.billsToday || 0,
+    billsThisWeek: stats.billsThisWeek || 0,
+    billsThisMonth: stats.billsThisMonth || 0,
+    amountToday: stats.amountToday || 0,
+    amountThisWeek: stats.amountThisWeek || 0,
+    amountThisMonth: stats.amountThisMonth || 0,
   };
 };
 
@@ -437,11 +405,12 @@ export class BillManager {
   }
 
   static async getProtectionStatus() {
-    const bills = await getBills();
+    // Utilise getTotalCount qui est O(1) avec le cache
+    const totalBills = await getBillsCount();
     return {
-      totalBills: bills.length,
+      totalBills,
       protectionActive: true,
-      message: `${bills.length} factures protégées`,
+      message: `${totalBills} factures protégées`,
     };
   }
 
@@ -470,21 +439,29 @@ export class BillManager {
 
   static async clearAllBills(): Promise<void> {
     try {
-      await saveBills([]);
+      // Utilise le cache pour une suppression optimisée
+      await BillsCache.clearAllBills();
     } catch (error) {
       console.error('Erreur lors de la suppression de toutes les factures:', error);
       throw error;
     }
   }
 
-  static async deleteBills(billsToDelete: number[]): Promise<void>  {
+  static async deleteBills(billsToDelete: number[]): Promise<void> {
     try {
-      const allBills = await getBills();
-      const billIdsSet = new Set(billsToDelete);
-      const remainingBills = allBills.filter((bill) => !billIdsSet.has(bill.id));
-      await saveBills(remainingBills);
+      // Utilise la suppression par lot du cache
+      await BillsCache.deleteBills(billsToDelete);
     } catch (error) {
       console.error('Erreur lors de la suppression des factures spécifiques:', error);
+      throw error;
+    }
+  }
+
+  static async deleteBill(billId: number): Promise<void> {
+    try {
+      await BillsCache.deleteBill(billId);
+    } catch (error) {
+      console.error('Erreur lors de la suppression de la facture:', error);
       throw error;
     }
   }
@@ -495,39 +472,21 @@ export class BillManager {
     paymentMethod?: string;
   }): Promise<number> {
     try {
-      const allBills = await getBills();
-      const billsToDelete = allBills.filter((bill) => {
-        if (filters.dateRange) {
-          const billDate = new Date(bill.timestamp);
-          if (billDate < filters.dateRange.start || billDate > filters.dateRange.end) {
-            return false;
-          }
-        }
+      // Utilise le filtrage optimisé du cache
+      const billsToDelete = await getFilteredBills(filters);
+      const billIds = billsToDelete.map((bill) => bill.id).filter((id) => id !== undefined);
 
-        if (filters.paymentMethod && bill.paymentMethod !== filters.paymentMethod) {
-          return false;
-        }
+      if (billIds.length > 0) {
+        await BillsCache.deleteBills(billIds);
+      }
 
-        if (filters.searchText) {
-          const search = filters.searchText.toLowerCase();
-          const tableName = bill.tableName || `Table ${bill.tableNumber}`;
-          return (
-            tableName.toLowerCase().includes(search) ||
-            bill.amount.toString().includes(search)
-          );
-        }
-
-        return true;
-      });
-
-      const billIdsToDelete = new Set(billsToDelete.map((bill) => bill.id));
-      const remainingBills = allBills.filter((bill) => !billIdsToDelete.has(bill.id));
-
-      await saveBills(remainingBills);
-      return billsToDelete.length;
+      return billIds.length;
     } catch (error) {
       console.error('Erreur lors de la suppression des factures filtrées:', error);
       throw error;
     }
   }
 }
+
+// Export du BillsCache pour un usage direct si nécessaire
+export { BillsCache } from './BillsCache';

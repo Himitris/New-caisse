@@ -29,7 +29,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useToast } from '../../utils/ToastContext';
-import { getBills, Bill } from '../../utils/storage';
+import { getBillsForDate, Bill } from '../../utils/storage';
 import {
   generateZReportData,
   formatMoney,
@@ -84,22 +84,12 @@ export default function ZReportScreen() {
     loadZCounter();
   }, []);
 
-  // Load bills for the selected date
+  // ✅ OPTIMISÉ: Load bills for the selected date using index
   const loadBills = useCallback(async () => {
     setLoading(true);
     try {
-      const allBills = await getBills();
-
-      // Filter bills for the selected date
-      const selectedDate = new Date(filterDate);
-      selectedDate.setHours(0, 0, 0, 0);
-      const nextDay = new Date(selectedDate);
-      nextDay.setDate(selectedDate.getDate() + 1);
-
-      const filteredBills = allBills.filter((bill) => {
-        const billDate = new Date(bill.timestamp);
-        return billDate >= selectedDate && billDate < nextDay;
-      });
+      // Utilise getBillsForDate qui utilise l'index pour une recherche O(1)
+      const filteredBills = await getBillsForDate(filterDate);
 
       setBills(filteredBills);
 

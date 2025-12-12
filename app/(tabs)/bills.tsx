@@ -35,9 +35,12 @@ import {
 import {
   Bill,
   getBills,
+  getRecentBills,
+  getBillsCount,
   saveBills,
   getFilteredBills,
   BillManager,
+  BillsCache,
 } from '../../utils/storage';
 import { useToast } from '../../utils/ToastContext';
 import { useSettings } from '@/utils/useSettings';
@@ -755,7 +758,7 @@ export default function BillsScreen() {
   const { restaurantInfo, paymentMethods } = useSettings();
   const toast = useToast();
 
-  // ✅ NOUVEAU: Fonction pour charger les factures selon les filtres
+  // ✅ OPTIMISÉ: Fonction pour charger les factures selon les filtres
   const loadBills = useCallback(async () => {
     setLoading(true);
     try {
@@ -763,28 +766,28 @@ export default function BillsScreen() {
         searchText.trim() || dateFilter || paymentMethodFilter;
 
       if (hasActiveFilters) {
-        // ✅ Si il y a des filtres actifs, charger TOUTES les factures filtrées
+        // ✅ Utilise le filtrage optimisé avec index
+        const startOfDay = dateFilter ? new Date(dateFilter) : null;
+        if (startOfDay) {
+          startOfDay.setHours(0, 0, 0, 0);
+        }
+        const endOfDay = dateFilter ? new Date(dateFilter) : null;
+        if (endOfDay) {
+          endOfDay.setHours(23, 59, 59, 999);
+        }
+
         const filters = {
           searchText: searchText.trim() || undefined,
-          dateRange: dateFilter
-            ? {
-                start: new Date(dateFilter.setHours(0, 0, 0, 0)),
-                end: new Date(dateFilter.setHours(23, 59, 59, 999)),
-              }
+          dateRange: startOfDay && endOfDay
+            ? { start: startOfDay, end: endOfDay }
             : undefined,
           paymentMethod: paymentMethodFilter || undefined,
         };
         const filtered = await getFilteredBills(filters);
         setFilteredBills(filtered);
       } else {
-        // ✅ Si pas de filtres, charger seulement les 200 DERNIÈRES factures
-        const allBills = await getBills();
-        // Trier par date décroissante et prendre les 200 premières (= les plus récentes)
-        const sortedBills = allBills.sort(
-          (a, b) =>
-            new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-        );
-        const recentBills = sortedBills.slice(0, MAX_BILLS_DISPLAY);
+        // ✅ OPTIMISÉ: Utilise getRecentBills qui utilise l'index pré-trié
+        const recentBills = await getRecentBills(MAX_BILLS_DISPLAY);
         setFilteredBills(recentBills);
       }
     } catch (error) {
@@ -795,19 +798,38 @@ export default function BillsScreen() {
     }
   }, [searchText, dateFilter, paymentMethodFilter, toast]);
 
-  // ✅ Charger le nombre total de factures pour l'affichage
+  // ✅ OPTIMISÉ: Charger le nombre total et les factures efficacement
   useEffect(() => {
-    const loadAllBillsCount = async () => {
+    const loadData = async () => {
       try {
-        const allBills = await getBills();
-        setBills(allBills); // Garder toutes les factures pour les stats
+        // Charge en parallèle le count et les factures récentes
+        const [totalCount, recentBills] = await Promise.all([
+          getBillsCount(), // O(1) avec le cache
+          getRecentBills(MAX_BILLS_DISPLAY),
+        ]);
+
+        // On ne charge plus TOUTES les factures dans bills
+        // On utilise juste le count pour l'affichage
+        setBills(new Array(totalCount) as Bill[]); // Tableau vide de la bonne taille pour le count
+        setFilteredBills(recentBills);
+        setLoading(false);
       } catch (error) {
-        console.error('Error loading bills count:', error);
+        console.error('Error loading bills:', error);
+        setLoading(false);
       }
     };
-    loadAllBillsCount();
-    loadBills();
-  }, [loadBills]);
+
+    loadData();
+
+    // Écouter les changements du cache pour mettre à jour automatiquement
+    const unsubscribe = BillsCache.addListener(() => {
+      loadData();
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
 
   // Tri des factures
   const sortBillsByDate = useCallback(
@@ -830,7 +852,7 @@ export default function BillsScreen() {
     [paymentMethods]
   );
 
-  // ✅ CORRIGÉ: Supprimer les factures filtrées - version sécurisée
+  // ✅ OPTIMISÉ: Supprimer les factures filtrées - utilise le cache
   const handleDeleteFiltered = useCallback(() => {
     if (filteredBills.length === 0) {
       toast.showToast('Aucune facture à supprimer.', 'info');
@@ -859,26 +881,21 @@ export default function BillsScreen() {
           onPress: async () => {
             try {
               setProcessing(true);
-              const billIdsToDelete = new Set(
-                filteredBills
-                  .map((bill) => bill.id)
-                  .filter((id) => id !== undefined)
-              );
+              const billIdsToDelete = filteredBills
+                .map((bill) => bill.id)
+                .filter((id) => id !== undefined);
 
-              const remainingBills = bills.filter(
-                (bill) => !billIdsToDelete.has(bill.id)
-              );
+              // Utilise la suppression optimisée par lot
+              await BillManager.deleteBills(billIdsToDelete);
 
-              await saveBills(remainingBills);
-              setBills(remainingBills);
-              await loadBills();
-
-              if (selectedBill && billIdsToDelete.has(selectedBill.id)) {
+              if (selectedBill && billIdsToDelete.includes(selectedBill.id)) {
                 setSelectedBill(null);
               }
 
+              // Le cache notifiera automatiquement via le listener
+
               toast.showToast(
-                `${billIdsToDelete.size} facture(s) supprimée(s).`,
+                `${billIdsToDelete.length} facture(s) supprimée(s).`,
                 'success'
               );
             } catch (error) {
@@ -893,9 +910,7 @@ export default function BillsScreen() {
     );
   }, [
     filteredBills,
-    bills,
     selectedBill,
-    loadBills,
     toast,
     searchText,
     dateFilter,
@@ -926,6 +941,13 @@ export default function BillsScreen() {
   const hasActiveFilters = useMemo(() => {
     return !!(searchText.trim() || dateFilter || paymentMethodFilter);
   }, [searchText, dateFilter, paymentMethodFilter]);
+
+  // ✅ Recharger quand les filtres changent
+  useEffect(() => {
+    if (dateFilter || paymentMethodFilter) {
+      loadBills();
+    }
+  }, [dateFilter, paymentMethodFilter, loadBills]);
 
   // Handlers
   const handleSearch = useCallback((text: string) => {
@@ -977,16 +999,18 @@ export default function BillsScreen() {
     }
   }, [selectedBill, toast]);
 
-  // ✅ CORRIGÉ: Supprimer toutes les factures - version sécurisée
-  const handleDeleteAll = useCallback(() => {
-    if (bills.length === 0) {
+  // ✅ OPTIMISÉ: Supprimer toutes les factures - utilise le cache
+  const handleDeleteAll = useCallback(async () => {
+    const totalCount = await getBillsCount();
+
+    if (totalCount === 0) {
       toast.showToast('Aucune facture à supprimer.', 'info');
       return;
     }
 
     Alert.alert(
       'Supprimer toutes les factures',
-      `Êtes-vous sûr de vouloir supprimer TOUTES les ${bills.length} facture(s) ?`,
+      `Êtes-vous sûr de vouloir supprimer TOUTES les ${totalCount} facture(s) ?`,
       [
         { text: 'Annuler', style: 'cancel' },
         {
@@ -996,9 +1020,8 @@ export default function BillsScreen() {
             try {
               setProcessing(true);
               await BillManager.clearAllBills();
-              setBills([]);
-              setFilteredBills([]);
               setSelectedBill(null);
+              // Le cache notifiera automatiquement via le listener
               toast.showToast(
                 'Toutes les factures ont été supprimées.',
                 'success'
@@ -1013,9 +1036,9 @@ export default function BillsScreen() {
         },
       ]
     );
-  }, [bills.length, toast]);
+  }, [toast]);
 
-  // ✅ CORRIGÉ: Supprimer une facture spécifique - version sécurisée
+  // ✅ OPTIMISÉ: Supprimer une facture spécifique - utilise le cache
   const handleDeleteBill = useCallback(async () => {
     if (!selectedBill || !selectedBill.id) {
       toast.showToast('Facture non valide.', 'error');
@@ -1024,13 +1047,12 @@ export default function BillsScreen() {
 
     try {
       setProcessing(true);
-      const updatedBills = bills.filter((bill) => bill.id !== selectedBill.id);
-      await saveBills(updatedBills);
-      setBills(updatedBills);
-      await loadBills();
+      // Utilise la suppression optimisée du cache
+      await BillManager.deleteBill(selectedBill.id);
 
       setSelectedBill(null);
       setViewModalVisible(false);
+      // Le cache notifiera automatiquement via le listener
       toast.showToast('Facture supprimée avec succès.', 'success');
     } catch (error) {
       console.error('Erreur lors de la suppression:', error);
@@ -1038,7 +1060,7 @@ export default function BillsScreen() {
     } finally {
       setProcessing(false);
     }
-  }, [selectedBill, bills, loadBills, toast]);
+  }, [selectedBill, toast]);
 
   const getPaymentTypeDisplayName = (paymentType?: string): string => {
     switch (paymentType) {
