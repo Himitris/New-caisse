@@ -15,7 +15,7 @@ import {
   X,
   FileText,
 } from 'lucide-react-native';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState, useRef } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -84,6 +84,28 @@ export default function TableScreen() {
   const [splitModalVisible, setSplitModalVisible] = useState(false);
   const [processing, setProcessing] = useState(false);
 
+  // ✅ OPTIMISATION: Refs pour éviter les race conditions et le debounce
+  const tableRef = useRef<Table | null>(null);
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSaveRef = useRef<boolean>(false);
+  const isMountedRef = useRef<boolean>(true);
+
+  // Sync tableRef avec l'état
+  useEffect(() => {
+    tableRef.current = table;
+  }, [table]);
+
+  // Cleanup au démontage
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
+  }, []);
+
   // Chargement table simplifié
   const loadTable = useCallback(async () => {
     try {
@@ -107,11 +129,50 @@ export default function TableScreen() {
     loadTable();
   }, [loadTable]);
 
-  // Sauvegarde simplifiée avec debounce
-  const saveTable = useCallback(
+  // ✅ OPTIMISÉ: Sauvegarde avec vrai debounce (300ms)
+  const saveTableDebounced = useCallback(
+    (updatedTable: Table) => {
+      // Annuler le timeout précédent
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+
+      pendingSaveRef.current = true;
+
+      // Nouveau timeout de 300ms
+      saveTimeoutRef.current = setTimeout(async () => {
+        if (!isMountedRef.current) return;
+
+        try {
+          // Utiliser la ref pour avoir la dernière version
+          const tableToSave = tableRef.current;
+          if (tableToSave) {
+            await updateTableData(tableId, tableToSave);
+          }
+          pendingSaveRef.current = false;
+        } catch (error) {
+          console.error('Save error:', error);
+          if (isMountedRef.current) {
+            toast.showToast('Erreur lors de la sauvegarde', 'error');
+          }
+        }
+      }, 300);
+    },
+    [tableId, updateTableData, toast]
+  );
+
+  // Force la sauvegarde immédiate (pour les actions critiques)
+  const saveTableImmediate = useCallback(
     async (updatedTable: Table) => {
+      // Annuler le debounce en cours
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+      }
+
       try {
         await updateTableData(tableId, updatedTable);
+        pendingSaveRef.current = false;
       } catch (error) {
         console.error('Save error:', error);
         toast.showToast('Erreur lors de la sauvegarde', 'error');
@@ -136,65 +197,75 @@ export default function TableScreen() {
     []
   );
 
-  // Ajouter un item
+  // ✅ OPTIMISÉ: Ajouter un item avec mise à jour fonctionnelle (évite les race conditions)
   const addItemToOrder = useCallback(
     (item: MenuItem) => {
-      if (!table) return;
+      // Utilise la mise à jour fonctionnelle pour éviter les race conditions
+      setTable((currentTable) => {
+        if (!currentTable) return currentTable;
 
-      const updatedTable = { ...table };
-
-      if (!updatedTable.order) {
-        updatedTable.order = {
-          id: Date.now(),
-          items: [],
-          guests: guestCount,
-          status: 'active',
-          timestamp: new Date().toISOString(),
-          total: 0,
+        // Clone profond pour éviter les mutations
+        const updatedTable: Table = {
+          ...currentTable,
+          order: currentTable.order
+            ? {
+                ...currentTable.order,
+                items: [...currentTable.order.items],
+              }
+            : {
+                id: Date.now(),
+                items: [],
+                guests: guestCount,
+                status: 'active' as const,
+                timestamp: new Date().toISOString(),
+                total: 0,
+              },
         };
-      }
 
-      const items = [...updatedTable.order.items];
-      const existingItemIndex = items.findIndex(
-        (orderItem) =>
-          orderItem.menuId === item.id && orderItem.name === item.name
-      );
+        const items = updatedTable.order!.items;
+        const existingItemIndex = items.findIndex(
+          (orderItem) =>
+            orderItem.menuId === item.id && orderItem.name === item.name
+        );
 
-      if (existingItemIndex >= 0) {
-        items[existingItemIndex] = {
-          ...items[existingItemIndex],
-          quantity: items[existingItemIndex].quantity + 1,
-        };
-      } else {
-        items.push({
-          id: Date.now() + Math.random(),
-          menuId: item.id,
-          name: item.name,
-          price: item.price,
-          quantity: 1,
-          type: item.type,
-        });
-      }
+        if (existingItemIndex >= 0) {
+          // Modifier la quantité de l'item existant
+          items[existingItemIndex] = {
+            ...items[existingItemIndex],
+            quantity: items[existingItemIndex].quantity + 1,
+          };
+        } else {
+          // Ajouter un nouvel item
+          items.push({
+            id: Date.now() + Math.random(),
+            menuId: item.id,
+            name: item.name,
+            price: item.price,
+            quantity: 1,
+            type: item.type,
+          });
+        }
 
-      updatedTable.order.items = items;
-      updatedTable.order.total = calculateTotal(items);
+        updatedTable.order!.total = calculateTotal(items);
 
-      setTable(updatedTable);
-      saveTable(updatedTable);
+        // Déclencher la sauvegarde debounced
+        saveTableDebounced(updatedTable);
+
+        return updatedTable;
+      });
     },
-    [table, guestCount, calculateTotal, saveTable]
+    [guestCount, calculateTotal, saveTableDebounced]
   );
 
-  // Modifier quantité
+  // ✅ OPTIMISÉ: Modifier quantité avec mise à jour fonctionnelle
   const updateItemQuantity = useCallback(
     (itemId: number, increment: boolean) => {
-      if (!table?.order) return;
+      setTable((currentTable) => {
+        if (!currentTable?.order) return currentTable;
 
-      const updatedTable = { ...table };
-      const newItems: OrderItem[] = [];
+        const newItems: OrderItem[] = [];
 
-      if (updatedTable.order && updatedTable.order.items) {
-        for (const item of updatedTable.order.items) {
+        for (const item of currentTable.order.items) {
           if (item.id !== itemId) {
             newItems.push(item);
           } else {
@@ -207,56 +278,70 @@ export default function TableScreen() {
           }
         }
 
-        updatedTable.order.items = newItems;
-        updatedTable.order.total = calculateTotal(newItems);
+        const updatedTable: Table = {
+          ...currentTable,
+          order: {
+            ...currentTable.order,
+            items: newItems,
+            total: calculateTotal(newItems),
+          },
+        };
 
-        setTable(updatedTable);
-        saveTable(updatedTable);
-      }
+        saveTableDebounced(updatedTable);
+        return updatedTable;
+      });
     },
-    [table, calculateTotal, saveTable]
+    [calculateTotal, saveTableDebounced]
   );
 
-  // Toggle offert
+  // ✅ OPTIMISÉ: Toggle offert avec mise à jour fonctionnelle
   const toggleItemOffered = useCallback(
     (itemId: number) => {
-      if (!table?.order) return;
+      setTable((currentTable) => {
+        if (!currentTable?.order) return currentTable;
 
-      const updatedTable = { ...table };
-      if (!updatedTable.order) return;
+        const newItems = currentTable.order.items.map((item) => {
+          return item.id !== itemId ? item : { ...item, offered: !item.offered };
+        });
 
-      const newItems = updatedTable.order.items.map((item) => {
-        return item.id !== itemId ? item : { ...item, offered: !item.offered };
+        const updatedTable: Table = {
+          ...currentTable,
+          order: {
+            ...currentTable.order,
+            items: newItems,
+            total: calculateTotal(newItems),
+          },
+        };
+
+        saveTableDebounced(updatedTable);
+        return updatedTable;
       });
-
-      updatedTable.order.items = newItems;
-      updatedTable.order.total = calculateTotal(newItems);
-
-      setTable(updatedTable);
-      saveTable(updatedTable);
     },
-    [table, calculateTotal, saveTable]
+    [calculateTotal, saveTableDebounced]
   );
 
-  // Modifier invités
+  // ✅ OPTIMISÉ: Modifier invités avec mise à jour fonctionnelle
   const updateGuestCount = useCallback(
     (newCount: number) => {
       const validCount = Math.max(1, newCount);
       setGuestCount(validCount);
 
-      if (table) {
-        const updatedTable = {
-          ...table,
+      setTable((currentTable) => {
+        if (!currentTable) return currentTable;
+
+        const updatedTable: Table = {
+          ...currentTable,
           guests: validCount,
-          order: table.order
-            ? { ...table.order, guests: validCount }
+          order: currentTable.order
+            ? { ...currentTable.order, guests: validCount }
             : undefined,
         };
-        setTable(updatedTable);
-        saveTable(updatedTable);
-      }
+
+        saveTableDebounced(updatedTable);
+        return updatedTable;
+      });
     },
-    [table, saveTable]
+    [saveTableDebounced]
   );
 
   // Génération HTML ticket
@@ -337,9 +422,10 @@ export default function TableScreen() {
     [restaurantInfo, guestCount]
   );
 
-  // Actions simplifiées
+  // ✅ OPTIMISÉ: Actions avec sauvegarde immédiate pour les actions critiques
   const handleClearOrder = useCallback(() => {
-    if (!table?.order || table.order.items.length === 0) return;
+    const currentTable = tableRef.current;
+    if (!currentTable?.order || currentTable.order.items.length === 0) return;
 
     Alert.alert(
       'Supprimer la commande',
@@ -350,61 +436,79 @@ export default function TableScreen() {
           text: 'Supprimer',
           style: 'destructive',
           onPress: async () => {
-            const clearedTable = {
-              ...table,
+            const latestTable = tableRef.current;
+            if (!latestTable) return;
+
+            const clearedTable: Table = {
+              ...latestTable,
               order: {
-                id: table.order?.id ?? Date.now(),
+                id: latestTable.order?.id ?? Date.now(),
                 items: [],
-                guests: table.order?.guests ?? 1,
-                status: table.order?.status ?? 'active',
-                timestamp: table.order?.timestamp ?? new Date().toISOString(),
+                guests: latestTable.order?.guests ?? 1,
+                status: latestTable.order?.status ?? 'active',
+                timestamp: latestTable.order?.timestamp ?? new Date().toISOString(),
                 total: 0,
               },
             };
             setTable(clearedTable);
-            await saveTable(clearedTable);
+            // Sauvegarde immédiate pour action critique
+            await saveTableImmediate(clearedTable);
             toast.showToast('Commande supprimée', 'success');
           },
         },
       ]
     );
-  }, [table, saveTable, toast]);
+  }, [saveTableImmediate, toast]);
 
   const handleCloseTable = useCallback(() => {
-    if (!table) return;
+    const currentTable = tableRef.current;
+    if (!currentTable) return;
 
     Alert.alert(
       'Fermer la table',
-      `Êtes-vous sûr de vouloir fermer "${table.name}" ?`,
+      `Êtes-vous sûr de vouloir fermer "${currentTable.name}" ?`,
       [
         { text: 'Annuler', style: 'cancel' },
         {
           text: 'Fermer',
           style: 'destructive',
           onPress: async () => {
+            // Annuler tout debounce en cours avant de fermer
+            if (saveTimeoutRef.current) {
+              clearTimeout(saveTimeoutRef.current);
+              saveTimeoutRef.current = null;
+            }
             await resetTable(tableId);
             setTable(null);
             setGuestCount(1);
             refreshTables();
             router.replace('/');
-            toast.showToast(`Table ${table.name} fermée`, 'success');
+            toast.showToast(`Table ${currentTable.name} fermée`, 'success');
           },
         },
       ]
     );
-  }, [table, tableId, refreshTables, router, toast]);
+  }, [tableId, refreshTables, router, toast]);
 
   const handlePayment = useCallback(
-    (type: 'full' | 'split' | 'custom' | 'items') => {
-      if (!table?.order) return;
+    async (type: 'full' | 'split' | 'custom' | 'items') => {
+      const currentTable = tableRef.current;
+      if (!currentTable?.order) return;
 
-      const total = table.order.total;
+      const total = currentTable.order.total;
       if (total <= 0) {
         toast.showToast("Il n'y a pas d'articles à payer", 'warning');
         return;
       }
 
-      const serializedItems = JSON.stringify(table.order.items);
+      // ✅ OPTIMISÉ: Forcer la sauvegarde avant d'aller au paiement
+      if (pendingSaveRef.current && saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+        saveTimeoutRef.current = null;
+        await saveTableImmediate(currentTable);
+      }
+
+      const serializedItems = JSON.stringify(currentTable.order.items);
 
       switch (type) {
         case 'full':
@@ -445,7 +549,7 @@ export default function TableScreen() {
           break;
       }
     },
-    [table?.order, guestCount, tableId, router, toast]
+    [guestCount, tableId, router, toast, saveTableImmediate]
   );
 
   const handlePreviewNote = useCallback(async () => {
