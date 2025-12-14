@@ -1,7 +1,7 @@
-// utils/DatabaseService.ts - Service de base de données SQLite
-// Migration depuis AsyncStorage pour de meilleures performances
+// utils/DatabaseService.ts - Service de base de données multi-plateforme
+// SQLite sur mobile, AsyncStorage optimisé sur web
 
-import * as SQLite from 'expo-sqlite';
+import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Types pour les factures
@@ -53,84 +53,280 @@ export interface BillsStatistics {
   amountThisMonth: number;
 }
 
-// Clés de migration
+// Clés de stockage
+const BILLS_KEY = 'manjo_carn_bills';
 const MIGRATION_KEY = 'manjo_carn_sqlite_migrated';
-const LEGACY_BILLS_KEY = 'manjo_carn_bills';
 const DB_NAME = 'manjo_carn.db';
 
-class DatabaseServiceClass {
-  private static instance: DatabaseServiceClass;
-  private db: SQLite.SQLiteDatabase | null = null;
-  private isInitialized: boolean = false;
-  private initPromise: Promise<void> | null = null;
-  private listeners: Set<() => void> = new Set();
+// Interface pour le backend de stockage
+interface StorageBackend {
+  initialize(): Promise<void>;
+  getAllBills(): Promise<Bill[]>;
+  getTotalCount(): Promise<number>;
+  getBillById(id: number): Promise<Bill | null>;
+  getBillsPage(page: number, pageSize: number): Promise<{ bills: Bill[]; total: number; hasMore: boolean }>;
+  getRecentBills(limit: number): Promise<Bill[]>;
+  getFilteredBills(filters: {
+    searchText?: string;
+    date?: Date;
+    dateRange?: { start: Date; end: Date };
+    paymentMethod?: string;
+    section?: string;
+  }): Promise<Bill[]>;
+  getBillsForDate(date: Date): Promise<Bill[]>;
+  getStatistics(): Promise<BillsStatistics>;
+  addBill(bill: Bill): Promise<void>;
+  deleteBill(billId: number): Promise<void>;
+  deleteBills(billIds: number[]): Promise<void>;
+  clearAllBills(): Promise<void>;
+  setBills(bills: Bill[]): Promise<void>;
+  performMaintenance(maxBills: number): Promise<number>;
+}
 
-  private constructor() {}
+// ============================================
+// Backend AsyncStorage (Web + Fallback)
+// ============================================
+class AsyncStorageBackend implements StorageBackend {
+  private cache: Bill[] | null = null;
+  private cacheValid: boolean = false;
 
-  static getInstance(): DatabaseServiceClass {
-    if (!DatabaseServiceClass.instance) {
-      DatabaseServiceClass.instance = new DatabaseServiceClass();
-    }
-    return DatabaseServiceClass.instance;
-  }
-
-  // Ajouter un listener pour les changements
-  addListener(callback: () => void): () => void {
-    this.listeners.add(callback);
-    return () => this.listeners.delete(callback);
-  }
-
-  private notifyListeners(): void {
-    this.listeners.forEach((callback) => {
-      try {
-        callback();
-      } catch (error) {
-        console.error('Listener error:', error);
-      }
-    });
-  }
-
-  // Initialiser la base de données
   async initialize(): Promise<void> {
-    if (this.isInitialized) return;
-
-    if (this.initPromise) {
-      await this.initPromise;
-      return;
-    }
-
-    this.initPromise = this._doInitialize();
-    await this.initPromise;
+    await this.loadCache();
+    console.log('✅ AsyncStorage backend initialized (web mode)');
   }
 
-  private async _doInitialize(): Promise<void> {
+  private async loadCache(): Promise<Bill[]> {
+    if (this.cacheValid && this.cache !== null) {
+      return this.cache;
+    }
+
     try {
-      // Ouvrir la base de données
-      this.db = await SQLite.openDatabaseAsync(DB_NAME);
+      const data = await AsyncStorage.getItem(BILLS_KEY);
+      this.cache = data ? JSON.parse(data) : [];
+      this.cacheValid = true;
+      return this.cache;
+    } catch (error) {
+      console.error('Error loading bills from AsyncStorage:', error);
+      this.cache = [];
+      this.cacheValid = true;
+      return this.cache;
+    }
+  }
 
-      // Créer les tables
-      await this.createTables();
+  private async saveCache(): Promise<void> {
+    if (this.cache === null) return;
+    try {
+      await AsyncStorage.setItem(BILLS_KEY, JSON.stringify(this.cache));
+    } catch (error) {
+      console.error('Error saving bills to AsyncStorage:', error);
+    }
+  }
 
-      // Vérifier si migration nécessaire
-      const migrated = await AsyncStorage.getItem(MIGRATION_KEY);
-      if (!migrated) {
-        await this.migrateFromAsyncStorage();
-        await AsyncStorage.setItem(MIGRATION_KEY, 'true');
+  private invalidateCache(): void {
+    this.cacheValid = false;
+  }
+
+  async getAllBills(): Promise<Bill[]> {
+    const bills = await this.loadCache();
+    return [...bills].sort((a, b) =>
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+  }
+
+  async getTotalCount(): Promise<number> {
+    const bills = await this.loadCache();
+    return bills.length;
+  }
+
+  async getBillById(id: number): Promise<Bill | null> {
+    const bills = await this.loadCache();
+    return bills.find(b => b.id === id) || null;
+  }
+
+  async getBillsPage(page: number, pageSize: number): Promise<{ bills: Bill[]; total: number; hasMore: boolean }> {
+    const allBills = await this.getAllBills();
+    const start = page * pageSize;
+    const bills = allBills.slice(start, start + pageSize);
+    return {
+      bills,
+      total: allBills.length,
+      hasMore: start + pageSize < allBills.length,
+    };
+  }
+
+  async getRecentBills(limit: number): Promise<Bill[]> {
+    const allBills = await this.getAllBills();
+    return allBills.slice(0, limit);
+  }
+
+  async getFilteredBills(filters: {
+    searchText?: string;
+    date?: Date;
+    dateRange?: { start: Date; end: Date };
+    paymentMethod?: string;
+    section?: string;
+  }): Promise<Bill[]> {
+    let bills = await this.getAllBills();
+
+    if (filters.date) {
+      const dateStr = filters.date.toISOString().substring(0, 10);
+      bills = bills.filter(b => b.timestamp.substring(0, 10) === dateStr);
+    }
+
+    if (filters.dateRange) {
+      const start = filters.dateRange.start.getTime();
+      const end = filters.dateRange.end.getTime();
+      bills = bills.filter(b => {
+        const t = new Date(b.timestamp).getTime();
+        return t >= start && t <= end;
+      });
+    }
+
+    if (filters.paymentMethod) {
+      bills = bills.filter(b => b.paymentMethod === filters.paymentMethod);
+    }
+
+    if (filters.section) {
+      bills = bills.filter(b => b.section === filters.section);
+    }
+
+    if (filters.searchText) {
+      const search = filters.searchText.toLowerCase();
+      bills = bills.filter(b =>
+        (b.tableName?.toLowerCase().includes(search)) ||
+        (b.section?.toLowerCase().includes(search)) ||
+        b.amount.toString().includes(search)
+      );
+    }
+
+    return bills;
+  }
+
+  async getBillsForDate(date: Date): Promise<Bill[]> {
+    return this.getFilteredBills({ date });
+  }
+
+  async getStatistics(): Promise<BillsStatistics> {
+    const bills = await this.loadCache();
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+    const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+    let totalAmount = 0;
+    let oldestTimestamp: string | null = null;
+    let newestTimestamp: string | null = null;
+    let billsToday = 0, billsThisWeek = 0, billsThisMonth = 0;
+    let amountToday = 0, amountThisWeek = 0, amountThisMonth = 0;
+
+    for (const bill of bills) {
+      totalAmount += bill.amount;
+      const billTime = new Date(bill.timestamp);
+
+      if (!oldestTimestamp || bill.timestamp < oldestTimestamp) {
+        oldestTimestamp = bill.timestamp;
+      }
+      if (!newestTimestamp || bill.timestamp > newestTimestamp) {
+        newestTimestamp = bill.timestamp;
       }
 
-      this.isInitialized = true;
-      console.log('✅ SQLite database initialized successfully');
+      if (billTime >= todayStart) {
+        billsToday++;
+        amountToday += bill.amount;
+      }
+      if (billTime >= weekAgo) {
+        billsThisWeek++;
+        amountThisWeek += bill.amount;
+      }
+      if (billTime >= monthAgo) {
+        billsThisMonth++;
+        amountThisMonth += bill.amount;
+      }
+    }
+
+    return {
+      totalBills: bills.length,
+      totalAmount,
+      averageAmount: bills.length > 0 ? totalAmount / bills.length : 0,
+      oldestBillTimestamp: oldestTimestamp,
+      newestBillTimestamp: newestTimestamp,
+      billsToday,
+      billsThisWeek,
+      billsThisMonth,
+      amountToday,
+      amountThisWeek,
+      amountThisMonth,
+    };
+  }
+
+  async addBill(bill: Bill): Promise<void> {
+    const bills = await this.loadCache();
+    bills.push(bill);
+    this.cache = bills;
+    await this.saveCache();
+  }
+
+  async deleteBill(billId: number): Promise<void> {
+    const bills = await this.loadCache();
+    this.cache = bills.filter(b => b.id !== billId);
+    await this.saveCache();
+  }
+
+  async deleteBills(billIds: number[]): Promise<void> {
+    const idSet = new Set(billIds);
+    const bills = await this.loadCache();
+    this.cache = bills.filter(b => !idSet.has(b.id));
+    await this.saveCache();
+  }
+
+  async clearAllBills(): Promise<void> {
+    this.cache = [];
+    await this.saveCache();
+  }
+
+  async setBills(bills: Bill[]): Promise<void> {
+    this.cache = bills;
+    await this.saveCache();
+  }
+
+  async performMaintenance(maxBills: number): Promise<number> {
+    const bills = await this.loadCache();
+    if (bills.length <= maxBills) return 0;
+
+    const sorted = [...bills].sort((a, b) =>
+      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+    const toDelete = bills.length - maxBills;
+    this.cache = sorted.slice(0, maxBills);
+    await this.saveCache();
+    return toDelete;
+  }
+}
+
+// ============================================
+// Backend SQLite (Mobile natif)
+// ============================================
+class SQLiteBackend implements StorageBackend {
+  private db: any = null; // SQLite.SQLiteDatabase
+  private SQLite: any = null;
+
+  async initialize(): Promise<void> {
+    try {
+      // Import dynamique pour éviter l'erreur sur web
+      this.SQLite = await import('expo-sqlite');
+      this.db = await this.SQLite.openDatabaseAsync(DB_NAME);
+      await this.createTables();
+      await this.migrateIfNeeded();
+      console.log('✅ SQLite backend initialized (native mode)');
     } catch (error) {
-      console.error('❌ Database initialization error:', error);
+      console.error('SQLite initialization error:', error);
       throw error;
     }
   }
 
-  // Créer les tables
   private async createTables(): Promise<void> {
     if (!this.db) throw new Error('Database not open');
 
-    // Table des factures avec index
     await this.db.execAsync(`
       CREATE TABLE IF NOT EXISTS bills (
         id INTEGER PRIMARY KEY,
@@ -148,49 +344,34 @@ class DatabaseServiceClass {
         guests INTEGER
       );
 
-      -- Index pour les recherches fréquentes
       CREATE INDEX IF NOT EXISTS idx_bills_timestamp ON bills(timestamp DESC);
       CREATE INDEX IF NOT EXISTS idx_bills_date ON bills(date(timestamp));
       CREATE INDEX IF NOT EXISTS idx_bills_payment_method ON bills(paymentMethod);
       CREATE INDEX IF NOT EXISTS idx_bills_section ON bills(section);
       CREATE INDEX IF NOT EXISTS idx_bills_status ON bills(status);
     `);
-
-    console.log('✅ Tables and indexes created');
   }
 
-  // Migration depuis AsyncStorage
-  private async migrateFromAsyncStorage(): Promise<void> {
+  private async migrateIfNeeded(): Promise<void> {
+    const migrated = await AsyncStorage.getItem(MIGRATION_KEY);
+    if (migrated) return;
+
     try {
-      const legacyData = await AsyncStorage.getItem(LEGACY_BILLS_KEY);
-      if (!legacyData) {
-        console.log('No legacy data to migrate');
-        return;
+      const legacyData = await AsyncStorage.getItem(BILLS_KEY);
+      if (legacyData) {
+        const bills: Bill[] = JSON.parse(legacyData);
+        if (bills.length > 0) {
+          console.log(`📦 Migrating ${bills.length} bills to SQLite...`);
+          await this.insertBillsBatch(bills);
+          console.log(`✅ Migration completed`);
+        }
       }
-
-      const bills: Bill[] = JSON.parse(legacyData);
-      if (bills.length === 0) {
-        console.log('No bills to migrate');
-        return;
-      }
-
-      console.log(`📦 Migrating ${bills.length} bills to SQLite...`);
-
-      // Insérer par lots de 100 pour les performances
-      const batchSize = 100;
-      for (let i = 0; i < bills.length; i += batchSize) {
-        const batch = bills.slice(i, i + batchSize);
-        await this.insertBillsBatch(batch);
-      }
-
-      console.log(`✅ Migration completed: ${bills.length} bills migrated`);
+      await AsyncStorage.setItem(MIGRATION_KEY, 'true');
     } catch (error) {
-      console.error('❌ Migration error:', error);
-      throw error;
+      console.error('Migration error:', error);
     }
   }
 
-  // Insérer un lot de factures
   private async insertBillsBatch(bills: Bill[]): Promise<void> {
     if (!this.db) throw new Error('Database not open');
 
@@ -224,54 +405,51 @@ class DatabaseServiceClass {
     }
   }
 
-  // === API PUBLIQUE ===
+  private recordToBill(record: BillRecord): Bill {
+    return {
+      id: record.id,
+      tableNumber: record.tableNumber,
+      tableName: record.tableName || undefined,
+      section: record.section || undefined,
+      amount: record.amount,
+      items: record.items,
+      status: record.status,
+      timestamp: record.timestamp,
+      paymentMethod: record.paymentMethod as Bill['paymentMethod'],
+      paymentType: record.paymentType as Bill['paymentType'],
+      paidItems: record.paidItems ? JSON.parse(record.paidItems) : undefined,
+      offeredAmount: record.offeredAmount || undefined,
+      guests: record.guests || undefined,
+    };
+  }
 
-  // Obtenir toutes les factures
   async getAllBills(): Promise<Bill[]> {
-    await this.initialize();
     if (!this.db) throw new Error('Database not open');
-
     const rows = await this.db.getAllAsync<BillRecord>(
       'SELECT * FROM bills ORDER BY timestamp DESC'
     );
-
-    return rows.map(this.recordToBill);
+    return rows.map((r: BillRecord) => this.recordToBill(r));
   }
 
-  // Obtenir le nombre total de factures (O(1) avec COUNT)
   async getTotalCount(): Promise<number> {
-    await this.initialize();
     if (!this.db) throw new Error('Database not open');
-
     const result = await this.db.getFirstAsync<{ count: number }>(
       'SELECT COUNT(*) as count FROM bills'
     );
-
     return result?.count || 0;
   }
 
-  // Obtenir une facture par ID
   async getBillById(id: number): Promise<Bill | null> {
-    await this.initialize();
     if (!this.db) throw new Error('Database not open');
-
     const row = await this.db.getFirstAsync<BillRecord>(
       'SELECT * FROM bills WHERE id = ?',
       [id]
     );
-
     return row ? this.recordToBill(row) : null;
   }
 
-  // Obtenir les factures avec pagination (vraie pagination SQL)
-  async getBillsPage(page: number = 0, pageSize: number = 20): Promise<{
-    bills: Bill[];
-    total: number;
-    hasMore: boolean;
-  }> {
-    await this.initialize();
+  async getBillsPage(page: number, pageSize: number): Promise<{ bills: Bill[]; total: number; hasMore: boolean }> {
     if (!this.db) throw new Error('Database not open');
-
     const offset = page * pageSize;
 
     const [rows, countResult] = await Promise.all([
@@ -283,28 +461,22 @@ class DatabaseServiceClass {
     ]);
 
     const total = countResult?.count || 0;
-
     return {
-      bills: rows.map(this.recordToBill),
+      bills: rows.map((r: BillRecord) => this.recordToBill(r)),
       total,
       hasMore: offset + rows.length < total,
     };
   }
 
-  // Obtenir les N factures les plus récentes
-  async getRecentBills(limit: number = 200): Promise<Bill[]> {
-    await this.initialize();
+  async getRecentBills(limit: number): Promise<Bill[]> {
     if (!this.db) throw new Error('Database not open');
-
     const rows = await this.db.getAllAsync<BillRecord>(
       'SELECT * FROM bills ORDER BY timestamp DESC LIMIT ?',
       [limit]
     );
-
-    return rows.map(this.recordToBill);
+    return rows.map((r: BillRecord) => this.recordToBill(r));
   }
 
-  // Filtrer les factures (utilise les index SQL)
   async getFilteredBills(filters: {
     searchText?: string;
     date?: Date;
@@ -312,39 +484,33 @@ class DatabaseServiceClass {
     paymentMethod?: string;
     section?: string;
   }): Promise<Bill[]> {
-    await this.initialize();
     if (!this.db) throw new Error('Database not open');
 
     let query = 'SELECT * FROM bills WHERE 1=1';
     const params: any[] = [];
 
-    // Filtre par date exacte
     if (filters.date) {
       const dateStr = filters.date.toISOString().substring(0, 10);
       query += ' AND date(timestamp) = ?';
       params.push(dateStr);
     }
 
-    // Filtre par plage de dates
     if (filters.dateRange) {
       query += ' AND timestamp >= ? AND timestamp <= ?';
       params.push(filters.dateRange.start.toISOString());
       params.push(filters.dateRange.end.toISOString());
     }
 
-    // Filtre par méthode de paiement
     if (filters.paymentMethod) {
       query += ' AND paymentMethod = ?';
       params.push(filters.paymentMethod);
     }
 
-    // Filtre par section
     if (filters.section) {
       query += ' AND section = ?';
       params.push(filters.section);
     }
 
-    // Filtre par texte (recherche dans tableName et section)
     if (filters.searchText) {
       const search = `%${filters.searchText}%`;
       query += ' AND (tableName LIKE ? OR section LIKE ? OR CAST(amount AS TEXT) LIKE ?)';
@@ -354,27 +520,20 @@ class DatabaseServiceClass {
     query += ' ORDER BY timestamp DESC';
 
     const rows = await this.db.getAllAsync<BillRecord>(query, params);
-    return rows.map(this.recordToBill);
+    return rows.map((r: BillRecord) => this.recordToBill(r));
   }
 
-  // Obtenir les factures d'une journée spécifique
   async getBillsForDate(date: Date): Promise<Bill[]> {
-    await this.initialize();
     if (!this.db) throw new Error('Database not open');
-
     const dateStr = date.toISOString().substring(0, 10);
-
     const rows = await this.db.getAllAsync<BillRecord>(
       'SELECT * FROM bills WHERE date(timestamp) = ? ORDER BY timestamp DESC',
       [dateStr]
     );
-
-    return rows.map(this.recordToBill);
+    return rows.map((r: BillRecord) => this.recordToBill(r));
   }
 
-  // Obtenir les statistiques (une seule requête SQL)
   async getStatistics(): Promise<BillsStatistics> {
-    await this.initialize();
     if (!this.db) throw new Error('Database not open');
 
     const now = new Date();
@@ -396,26 +555,17 @@ class DatabaseServiceClass {
       FROM bills
     `);
 
-    const todayStats = await this.db.getFirstAsync<{
-      count: number;
-      amount: number;
-    }>(`
+    const todayStats = await this.db.getFirstAsync<{ count: number; amount: number }>(`
       SELECT COUNT(*) as count, COALESCE(SUM(amount), 0) as amount
       FROM bills WHERE timestamp >= ?
     `, [todayStart]);
 
-    const weekStats = await this.db.getFirstAsync<{
-      count: number;
-      amount: number;
-    }>(`
+    const weekStats = await this.db.getFirstAsync<{ count: number; amount: number }>(`
       SELECT COUNT(*) as count, COALESCE(SUM(amount), 0) as amount
       FROM bills WHERE timestamp >= ?
     `, [weekAgo]);
 
-    const monthStats = await this.db.getFirstAsync<{
-      count: number;
-      amount: number;
-    }>(`
+    const monthStats = await this.db.getFirstAsync<{ count: number; amount: number }>(`
       SELECT COUNT(*) as count, COALESCE(SUM(amount), 0) as amount
       FROM bills WHERE timestamp >= ?
     `, [monthAgo]);
@@ -438,11 +588,8 @@ class DatabaseServiceClass {
     };
   }
 
-  // Ajouter une facture
   async addBill(bill: Bill): Promise<void> {
-    await this.initialize();
     if (!this.db) throw new Error('Database not open');
-
     await this.db.runAsync(
       `INSERT INTO bills
        (id, tableNumber, tableName, section, amount, items, status, timestamp,
@@ -464,52 +611,27 @@ class DatabaseServiceClass {
         bill.guests || null,
       ]
     );
-
-    this.notifyListeners();
   }
 
-  // Supprimer une facture
   async deleteBill(billId: number): Promise<void> {
-    await this.initialize();
     if (!this.db) throw new Error('Database not open');
-
     await this.db.runAsync('DELETE FROM bills WHERE id = ?', [billId]);
-    this.notifyListeners();
   }
 
-  // Supprimer plusieurs factures
   async deleteBills(billIds: number[]): Promise<void> {
-    await this.initialize();
-    if (!this.db) throw new Error('Database not open');
-
-    if (billIds.length === 0) return;
-
+    if (!this.db || billIds.length === 0) return;
     const placeholders = billIds.map(() => '?').join(',');
-    await this.db.runAsync(
-      `DELETE FROM bills WHERE id IN (${placeholders})`,
-      billIds
-    );
-
-    this.notifyListeners();
+    await this.db.runAsync(`DELETE FROM bills WHERE id IN (${placeholders})`, billIds);
   }
 
-  // Supprimer toutes les factures
   async clearAllBills(): Promise<void> {
-    await this.initialize();
     if (!this.db) throw new Error('Database not open');
-
     await this.db.runAsync('DELETE FROM bills');
-    this.notifyListeners();
   }
 
-  // Remplacer toutes les factures (pour import/restore)
   async setBills(bills: Bill[]): Promise<void> {
-    await this.initialize();
     if (!this.db) throw new Error('Database not open');
-
-    // Transaction pour atomicité
     await this.db.execAsync('BEGIN TRANSACTION');
-
     try {
       await this.db.runAsync('DELETE FROM bills');
       await this.insertBillsBatch(bills);
@@ -518,59 +640,199 @@ class DatabaseServiceClass {
       await this.db.execAsync('ROLLBACK');
       throw error;
     }
-
-    this.notifyListeners();
   }
 
-  // Maintenance: garder seulement les N factures les plus récentes
-  async performMaintenance(maxBills: number = 1000): Promise<number> {
-    await this.initialize();
+  async performMaintenance(maxBills: number): Promise<number> {
     if (!this.db) throw new Error('Database not open');
-
     const count = await this.getTotalCount();
     if (count <= maxBills) return 0;
 
     const toDelete = count - maxBills;
-
-    // Supprimer les plus anciennes
     await this.db.runAsync(`
       DELETE FROM bills WHERE id IN (
         SELECT id FROM bills ORDER BY timestamp ASC LIMIT ?
       )
     `, [toDelete]);
-
-    this.notifyListeners();
     return toDelete;
   }
+}
 
-  // Forcer la réinitialisation (pour debug)
-  async reset(): Promise<void> {
-    if (this.db) {
-      await this.db.closeAsync();
-      this.db = null;
+// ============================================
+// Service principal avec sélection automatique du backend
+// ============================================
+class DatabaseServiceClass {
+  private static instance: DatabaseServiceClass;
+  private backend: StorageBackend | null = null;
+  private isInitialized: boolean = false;
+  private initPromise: Promise<void> | null = null;
+  private listeners: Set<() => void> = new Set();
+
+  private constructor() {}
+
+  static getInstance(): DatabaseServiceClass {
+    if (!DatabaseServiceClass.instance) {
+      DatabaseServiceClass.instance = new DatabaseServiceClass();
     }
+    return DatabaseServiceClass.instance;
+  }
+
+  // Ajouter un listener pour les changements
+  addListener(callback: () => void): () => void {
+    this.listeners.add(callback);
+    return () => this.listeners.delete(callback);
+  }
+
+  private notifyListeners(): void {
+    this.listeners.forEach((callback) => {
+      try {
+        callback();
+      } catch (error) {
+        console.error('Listener error:', error);
+      }
+    });
+  }
+
+  async initialize(): Promise<void> {
+    if (this.isInitialized) return;
+
+    if (this.initPromise) {
+      await this.initPromise;
+      return;
+    }
+
+    this.initPromise = this._doInitialize();
+    await this.initPromise;
+  }
+
+  private async _doInitialize(): Promise<void> {
+    try {
+      // Choisir le backend selon la plateforme
+      if (Platform.OS === 'web') {
+        console.log('📱 Platform: Web - using AsyncStorage backend');
+        this.backend = new AsyncStorageBackend();
+      } else {
+        console.log('📱 Platform: Native - using SQLite backend');
+        this.backend = new SQLiteBackend();
+      }
+
+      await this.backend.initialize();
+      this.isInitialized = true;
+      console.log('✅ Database service initialized successfully');
+    } catch (error) {
+      console.error('❌ Database initialization error:', error);
+      // Fallback vers AsyncStorage si SQLite échoue
+      if (Platform.OS !== 'web') {
+        console.log('⚠️ Falling back to AsyncStorage backend');
+        this.backend = new AsyncStorageBackend();
+        await this.backend.initialize();
+        this.isInitialized = true;
+      } else {
+        throw error;
+      }
+    }
+  }
+
+  private async getBackend(): Promise<StorageBackend> {
+    await this.initialize();
+    if (!this.backend) throw new Error('Backend not initialized');
+    return this.backend;
+  }
+
+  // === API PUBLIQUE ===
+
+  async getAllBills(): Promise<Bill[]> {
+    const backend = await this.getBackend();
+    return backend.getAllBills();
+  }
+
+  async getTotalCount(): Promise<number> {
+    const backend = await this.getBackend();
+    return backend.getTotalCount();
+  }
+
+  async getBillById(id: number): Promise<Bill | null> {
+    const backend = await this.getBackend();
+    return backend.getBillById(id);
+  }
+
+  async getBillsPage(page: number = 0, pageSize: number = 20): Promise<{
+    bills: Bill[];
+    total: number;
+    hasMore: boolean;
+  }> {
+    const backend = await this.getBackend();
+    return backend.getBillsPage(page, pageSize);
+  }
+
+  async getRecentBills(limit: number = 200): Promise<Bill[]> {
+    const backend = await this.getBackend();
+    return backend.getRecentBills(limit);
+  }
+
+  async getFilteredBills(filters: Parameters<StorageBackend['getFilteredBills']>[0]): Promise<Bill[]> {
+    const backend = await this.getBackend();
+    return backend.getFilteredBills(filters);
+  }
+
+  async getBillsForDate(date: Date): Promise<Bill[]> {
+    const backend = await this.getBackend();
+    return backend.getBillsForDate(date);
+  }
+
+  async getStatistics(): Promise<BillsStatistics> {
+    const backend = await this.getBackend();
+    return backend.getStatistics();
+  }
+
+  async addBill(bill: Bill): Promise<void> {
+    const backend = await this.getBackend();
+    await backend.addBill(bill);
+    this.notifyListeners();
+  }
+
+  async deleteBill(billId: number): Promise<void> {
+    const backend = await this.getBackend();
+    await backend.deleteBill(billId);
+    this.notifyListeners();
+  }
+
+  async deleteBills(billIds: number[]): Promise<void> {
+    const backend = await this.getBackend();
+    await backend.deleteBills(billIds);
+    this.notifyListeners();
+  }
+
+  async clearAllBills(): Promise<void> {
+    const backend = await this.getBackend();
+    await backend.clearAllBills();
+    this.notifyListeners();
+  }
+
+  async setBills(bills: Bill[]): Promise<void> {
+    const backend = await this.getBackend();
+    await backend.setBills(bills);
+    this.notifyListeners();
+  }
+
+  async performMaintenance(maxBills: number = 1000): Promise<number> {
+    const backend = await this.getBackend();
+    const deleted = await backend.performMaintenance(maxBills);
+    if (deleted > 0) this.notifyListeners();
+    return deleted;
+  }
+
+  // Pour debug uniquement
+  async reset(): Promise<void> {
     this.isInitialized = false;
     this.initPromise = null;
+    this.backend = null;
     await AsyncStorage.removeItem(MIGRATION_KEY);
   }
 
-  // Convertir un enregistrement DB en Bill
-  private recordToBill(record: BillRecord): Bill {
-    return {
-      id: record.id,
-      tableNumber: record.tableNumber,
-      tableName: record.tableName || undefined,
-      section: record.section || undefined,
-      amount: record.amount,
-      items: record.items,
-      status: record.status,
-      timestamp: record.timestamp,
-      paymentMethod: record.paymentMethod as Bill['paymentMethod'],
-      paymentType: record.paymentType as Bill['paymentType'],
-      paidItems: record.paidItems ? JSON.parse(record.paidItems) : undefined,
-      offeredAmount: record.offeredAmount || undefined,
-      guests: record.guests || undefined,
-    };
+  // Getter pour savoir quel backend est utilisé
+  getBackendType(): 'sqlite' | 'asyncstorage' | 'not_initialized' {
+    if (!this.backend) return 'not_initialized';
+    return this.backend instanceof SQLiteBackend ? 'sqlite' : 'asyncstorage';
   }
 }
 
