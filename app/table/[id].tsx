@@ -24,6 +24,7 @@ import {
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import {
   OrderItem,
@@ -72,6 +73,11 @@ export default function TableScreen() {
     getCategories,
     getItem: getMenuItem,
   } = useMenu();
+  const { width, height } = useWindowDimensions();
+
+  // Responsive breakpoints
+  const isSmallScreen = width < 600;
+  const isLandscape = width > height;
 
   // États simplifiés
   const [table, setTable] = useState<Table | null>(null);
@@ -660,57 +666,58 @@ export default function TableScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Header simplifié */}
-      <View style={styles.header}>
+      {/* Header simplifié - responsive */}
+      <View style={[styles.header, isSmallScreen && styles.headerSmall]}>
         <Pressable onPress={() => router.replace('/')} style={styles.backLink}>
-          <ArrowLeft size={28} color="#333" />
+          <ArrowLeft size={isSmallScreen ? 22 : 28} color="#333" />
         </Pressable>
         <View style={styles.headerTitleContainer}>
-          <Text style={styles.title}>{table.name}</Text>
-          <View style={styles.sectionBadge}>
-            <Text style={styles.sectionText}>{table.section}</Text>
+          <Text style={[styles.title, isSmallScreen && { fontSize: 16 }]}>{table.name}</Text>
+          <View style={[styles.sectionBadge, isSmallScreen && { paddingHorizontal: 6, paddingVertical: 2 }]}>
+            <Text style={[styles.sectionText, isSmallScreen && { fontSize: 10 }]}>{table.section}</Text>
           </View>
         </View>
-        <View style={styles.guestCounter}>
-          <Users size={24} color="#666" />
+        <View style={[styles.guestCounter, isSmallScreen && { gap: 4 }]}>
+          <Users size={isSmallScreen ? 18 : 24} color="#666" />
           <Pressable onPress={() => updateGuestCount(guestCount - 1)}>
-            <Minus size={24} color="#666" />
+            <Minus size={isSmallScreen ? 18 : 24} color="#666" />
           </Pressable>
-          <Text style={styles.guestCount}>{guestCount}</Text>
+          <Text style={[styles.guestCount, isSmallScreen && { fontSize: 14 }]}>{guestCount}</Text>
           <Pressable onPress={() => updateGuestCount(guestCount + 1)}>
-            <Plus size={24} color="#666" />
+            <Plus size={isSmallScreen ? 18 : 24} color="#666" />
           </Pressable>
         </View>
         <Pressable
-          style={[styles.paymentButton, { backgroundColor: '#673AB7' }]}
+          style={[styles.paymentButton, isSmallScreen && styles.paymentButtonSmall, { backgroundColor: '#673AB7' }]}
           onPress={handlePreviewNote}
         >
-          <FileText size={24} color="white" />
-          <Text style={styles.paymentButtonText}>Note</Text>
+          <FileText size={isSmallScreen ? 18 : 24} color="white" />
+          {!isSmallScreen && <Text style={styles.paymentButtonText}>Note</Text>}
         </Pressable>
         <Pressable
           style={[
             styles.paymentButton,
+            isSmallScreen && styles.paymentButtonSmall,
             { backgroundColor: orderItems.length > 0 ? '#FF6600' : '#BDBDBD' },
           ]}
           onPress={handleClearOrder}
           disabled={orderItems.length === 0}
         >
-          <ShoppingCart size={24} color="white" />
-          <Text style={styles.paymentButtonText}>Vider</Text>
+          <ShoppingCart size={isSmallScreen ? 18 : 24} color="white" />
+          {!isSmallScreen && <Text style={styles.paymentButtonText}>Vider</Text>}
         </Pressable>
         <Pressable
-          style={[styles.paymentButton, { backgroundColor: '#F44336' }]}
+          style={[styles.paymentButton, isSmallScreen && styles.paymentButtonSmall, { backgroundColor: '#F44336' }]}
           onPress={handleCloseTable}
         >
-          <X size={24} color="white" />
-          <Text style={styles.paymentButtonText}>Fermer</Text>
+          <X size={isSmallScreen ? 18 : 24} color="white" />
+          {!isSmallScreen && <Text style={styles.paymentButtonText}>Fermer</Text>}
         </Pressable>
       </View>
 
-      <View style={styles.content}>
+      <ScrollView style={styles.scrollContent} contentContainerStyle={[styles.content, isSmallScreen && styles.contentSmall]}>
         {/* Section commande */}
-        <View style={styles.orderSection}>
+        <View style={[styles.orderSection, isSmallScreen && styles.orderSectionSmall]}>
           <Text style={styles.sectionTitle}>Commande actuelle</Text>
           {orderItems.length === 0 ? (
             <Text style={styles.emptyOrder}>
@@ -911,7 +918,7 @@ export default function TableScreen() {
         </View>
 
         {/* Section menu */}
-        <View style={styles.menuSection}>
+        <View style={[styles.menuSection, isSmallScreen && styles.menuSectionSmall]}>
           <View style={styles.menuHeader}>
             <Text style={styles.sectionTitle}>Menu</Text>
             <View style={styles.typeFilters}>
@@ -1046,7 +1053,7 @@ export default function TableScreen() {
             </ScrollView>
           </View>
         </View>
-      </View>
+      </ScrollView>
 
       <SplitSelectionModal
         visible={splitModalVisible}
@@ -1440,4 +1447,33 @@ const styles = StyleSheet.create({
     zIndex: 1000,
   },
   processingText: { color: 'white', marginTop: 12, fontSize: 16 },
+  // Responsive styles
+  headerSmall: {
+    padding: 8,
+    minHeight: 50,
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  paymentButtonSmall: {
+    padding: 8,
+    minWidth: 40,
+  },
+  scrollContent: {
+    flex: 1,
+  },
+  contentSmall: {
+    flexDirection: 'column',
+    padding: 6,
+  },
+  orderSectionSmall: {
+    minWidth: 'auto',
+    width: '100%',
+    flex: 0,
+    marginBottom: 8,
+  },
+  menuSectionSmall: {
+    minWidth: 'auto',
+    width: '100%',
+    flex: 0,
+  },
 });

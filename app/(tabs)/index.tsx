@@ -13,6 +13,7 @@ import {
   StyleSheet,
   Text,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { useTableContext } from '../../utils/TableContext';
 import { useToast } from '../../utils/ToastContext';
@@ -38,6 +39,11 @@ export default function TablesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [activeSection, setActiveSection] = useState<string | null>(null);
   const toast = useToast();
+  const { width } = useWindowDimensions();
+
+  // Responsive breakpoints
+  const isSmallScreen = width < 600;
+  const isMediumScreen = width >= 600 && width < 900;
 
   // États pour les modals
   const [customCoversModalVisible, setCustomCoversModalVisible] =
@@ -218,40 +224,42 @@ export default function TablesScreen() {
   const renderTableItem = useCallback(
     (table: Table) => {
       const colorGradient = getTableColors(table.status);
+      const tableSize = isSmallScreen ? 100 : isMediumScreen ? 120 : 150;
 
       return (
         <Pressable
           key={`table-${table.id}`}
           style={({ pressed }) => [
             styles.table,
+            { width: tableSize, height: tableSize },
             pressed && styles.tablePressed,
           ]}
           onPress={() => openTable(table)}
         >
           <LinearGradient
             colors={colorGradient}
-            style={styles.tableGradient}
+            style={[styles.tableGradient, isSmallScreen && { padding: 8 }]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
           >
             <View style={styles.tableHeader}>
-              <Text style={styles.tableNumber}>{table.name}</Text>
-              <View style={styles.tableInfo}>
-                <Users size={16} color="white" />
-                <Text style={styles.seats}>{table.guests || 0}</Text>
+              <Text style={[styles.tableNumber, isSmallScreen && { fontSize: 14 }]}>{table.name}</Text>
+              <View style={[styles.tableInfo, isSmallScreen && { padding: 2, paddingHorizontal: 4 }]}>
+                <Users size={isSmallScreen ? 12 : 16} color="white" />
+                <Text style={[styles.seats, isSmallScreen && { fontSize: 11 }]}>{table.guests || 0}</Text>
               </View>
             </View>
 
             <View style={styles.tableContent}>
               {table.status === 'occupied' && (
-                <Coffee size={16} color="white" style={styles.statusIcon} />
+                <Coffee size={isSmallScreen ? 12 : 16} color="white" style={styles.statusIcon} />
               )}
             </View>
 
             <View style={styles.tableFooter}>
-              <Text style={styles.status}>{table.status}</Text>
+              <Text style={[styles.status, isSmallScreen && { fontSize: 9 }]}>{table.status}</Text>
               {table.order?.items.length ? (
-                <Text style={styles.orderInfo}>
+                <Text style={[styles.orderInfo, isSmallScreen && { fontSize: 8 }]}>
                   {table.order.items.length} items -{' '}
                   {table.order.total.toFixed(2)}€
                 </Text>
@@ -261,7 +269,7 @@ export default function TablesScreen() {
         </Pressable>
       );
     },
-    [getTableColors, openTable]
+    [getTableColors, openTable, isSmallScreen, isMediumScreen]
   );
 
   const renderSectionContent = useCallback(
@@ -290,12 +298,12 @@ export default function TablesScreen() {
       }
 
       return (
-        <View style={styles.tablesGrid}>
+        <View style={[styles.tablesGrid, isSmallScreen && styles.tablesGridSmall]}>
           {sectionTables.map((table) => renderTableItem(table))}
         </View>
       );
     },
-    [tablesBySection, handleResetAllTables, renderTableItem]
+    [tablesBySection, handleResetAllTables, renderTableItem, isSmallScreen]
   );
 
   if (isLoading) {
@@ -324,89 +332,125 @@ export default function TablesScreen() {
         tableName={selectedTable?.name || ''}
       />
 
-      <LinearGradient colors={['#FFFFFF', '#F5F5F5']} style={styles.header}>
-        <Text style={styles.title}>Plan du Restaurant</Text>
-        <View style={styles.headerButtons}>
+      <LinearGradient colors={['#FFFFFF', '#F5F5F5']} style={[styles.header, isSmallScreen && styles.headerSmall]}>
+        <Text style={[styles.title, isSmallScreen && { fontSize: 18 }]}>Plan du Restaurant</Text>
+        <View style={[styles.headerButtons, isSmallScreen && { gap: 6 }]}>
           {refreshing && (
             <ActivityIndicator
               size="small"
               color="#2196F3"
-              style={{ marginRight: 10 }}
+              style={{ marginRight: 5 }}
             />
           )}
           <Pressable
             style={({ pressed }) => [
               styles.refreshButton,
+              isSmallScreen && styles.buttonSmall,
               pressed && styles.buttonPressed,
             ]}
             onPress={handleRefreshTables}
           >
-            <RefreshCcw size={20} color="#2196F3" />
-            <Text style={styles.refreshButtonText}>Rafraîchir</Text>
+            <RefreshCcw size={isSmallScreen ? 16 : 20} color="#2196F3" />
+            {!isSmallScreen && <Text style={styles.refreshButtonText}>Rafraîchir</Text>}
           </Pressable>
           <Pressable
             style={({ pressed }) => [
               styles.filterButton,
+              isSmallScreen && styles.buttonSmall,
               activeSection && styles.filterButtonInactive,
               pressed && styles.buttonPressed,
             ]}
             onPress={() => setActiveSection(null)}
           >
-            <Filter size={20} color={activeSection ? '#666' : '#2196F3'} />
-            <Text
-              style={[
-                styles.filterButtonText,
-                { color: activeSection ? '#666' : '#2196F3' },
-              ]}
-            >
-              Tout
-            </Text>
+            <Filter size={isSmallScreen ? 16 : 20} color={activeSection ? '#666' : '#2196F3'} />
+            {!isSmallScreen && (
+              <Text
+                style={[
+                  styles.filterButtonText,
+                  { color: activeSection ? '#666' : '#2196F3' },
+                ]}
+              >
+                Tout
+              </Text>
+            )}
           </Pressable>
           <Pressable
             style={({ pressed }) => [
               styles.resetButton,
+              isSmallScreen && styles.buttonSmall,
               pressed && styles.buttonPressed,
             ]}
             onPress={handleResetAllTables}
           >
-            <RefreshCcw size={20} color="white" />
-            <Text style={styles.resetButtonText}>Réinitialiser</Text>
+            <RefreshCcw size={isSmallScreen ? 16 : 20} color="white" />
+            {!isSmallScreen && <Text style={styles.resetButtonText}>Réinitialiser</Text>}
           </Pressable>
         </View>
       </LinearGradient>
 
-      <View style={styles.mainContent}>
-        <View style={styles.sectionTabs}>
-          {sections.map((section) => (
-            <Pressable
-              key={section}
-              style={({ pressed }) => [
-                styles.sectionTab,
-                activeSection === section && styles.activeTab,
-                pressed && styles.sectionTabPressed,
-              ]}
-              onPress={() => toggleSection(section)}
-            >
-              <Text
-                style={[
-                  styles.sectionTabText,
-                  activeSection === section && styles.activeTabText,
+      <View style={[styles.mainContent, isSmallScreen && styles.mainContentSmall]}>
+        {/* Section tabs - horizontal on small screens, vertical sidebar on larger screens */}
+        {isSmallScreen ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.sectionTabsHorizontal}
+            contentContainerStyle={styles.sectionTabsHorizontalContent}
+          >
+            {sections.map((section) => (
+              <Pressable
+                key={section}
+                style={({ pressed }) => [
+                  styles.sectionTabHorizontal,
+                  activeSection === section && styles.activeTabHorizontal,
+                  pressed && styles.sectionTabPressed,
                 ]}
+                onPress={() => toggleSection(section)}
               >
-                {section}
-              </Text>
-            </Pressable>
-          ))}
-        </View>
+                <Text
+                  style={[
+                    styles.sectionTabTextSmall,
+                    activeSection === section && styles.activeTabText,
+                  ]}
+                >
+                  {section}
+                </Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+        ) : (
+          <View style={styles.sectionTabs}>
+            {sections.map((section) => (
+              <Pressable
+                key={section}
+                style={({ pressed }) => [
+                  styles.sectionTab,
+                  activeSection === section && styles.activeTab,
+                  pressed && styles.sectionTabPressed,
+                ]}
+                onPress={() => toggleSection(section)}
+              >
+                <Text
+                  style={[
+                    styles.sectionTabText,
+                    activeSection === section && styles.activeTabText,
+                  ]}
+                >
+                  {section}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
 
         <ScrollView
           style={styles.scrollContainer}
           showsVerticalScrollIndicator={false}
         >
-          <View style={styles.tablesContainer}>
+          <View style={[styles.tablesContainer, isSmallScreen && styles.tablesContainerSmall]}>
             {sectionsToDisplay.map((section) => (
               <View key={section} style={styles.sectionContainer}>
-                <Text style={styles.sectionTitle}>{section}</Text>
+                <Text style={[styles.sectionTitle, isSmallScreen && { fontSize: 16 }]}>{section}</Text>
                 {renderSectionContent(section)}
               </View>
             ))}
@@ -608,10 +652,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 20,
+    justifyContent: 'flex-start',
+  },
+  tablesGridSmall: {
+    gap: 10,
+    justifyContent: 'space-around',
   },
   table: {
-    width: 150,
-    height: 150,
+    // width and height now set dynamically
     borderRadius: 12,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 3 },
@@ -690,5 +738,46 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     overflow: 'hidden',
     maxWidth: '100%',
+  },
+  // Responsive styles for small screens
+  headerSmall: {
+    padding: 10,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+  },
+  buttonSmall: {
+    padding: 8,
+    minWidth: 36,
+  },
+  mainContentSmall: {
+    flexDirection: 'column',
+  },
+  sectionTabsHorizontal: {
+    maxHeight: 50,
+    backgroundColor: 'white',
+    borderBottomWidth: 1,
+    borderBottomColor: '#e0e0e0',
+  },
+  sectionTabsHorizontalContent: {
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    gap: 8,
+  },
+  sectionTabHorizontal: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 20,
+    backgroundColor: '#f0f0f0',
+  },
+  activeTabHorizontal: {
+    backgroundColor: '#e3f2fd',
+  },
+  sectionTabTextSmall: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#666',
+  },
+  tablesContainerSmall: {
+    padding: 10,
   },
 });
