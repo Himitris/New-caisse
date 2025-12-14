@@ -3,85 +3,14 @@
 
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { Bill, BillRecord, BillsStatistics, StorageBackend } from './DatabaseService.types';
 
-// Types pour les factures
-export interface BillRecord {
-  id: number;
-  tableNumber: number;
-  tableName: string | null;
-  section: string | null;
-  amount: number;
-  items: number;
-  status: 'pending' | 'paid' | 'split';
-  timestamp: string;
-  paymentMethod: string | null;
-  paymentType: string | null;
-  paidItems: string | null; // JSON string
-  offeredAmount: number | null;
-  guests: number | null;
-}
-
-// Interface compatible avec l'ancien système
-export interface Bill {
-  id: number;
-  tableNumber: number;
-  tableName?: string;
-  section?: string;
-  amount: number;
-  items: number;
-  status: 'pending' | 'paid' | 'split';
-  timestamp: string;
-  paymentMethod?: 'card' | 'cash' | 'check';
-  paymentType?: 'full' | 'split' | 'custom' | 'items';
-  paidItems?: any[];
-  offeredAmount?: number;
-  guests?: number;
-}
-
-// Statistiques
-export interface BillsStatistics {
-  totalBills: number;
-  totalAmount: number;
-  averageAmount: number;
-  oldestBillTimestamp: string | null;
-  newestBillTimestamp: string | null;
-  billsToday: number;
-  billsThisWeek: number;
-  billsThisMonth: number;
-  amountToday: number;
-  amountThisWeek: number;
-  amountThisMonth: number;
-}
+// Re-export des types
+export type { Bill, BillRecord, BillsStatistics, StorageBackend };
 
 // Clés de stockage
 const BILLS_KEY = 'manjo_carn_bills';
 const MIGRATION_KEY = 'manjo_carn_sqlite_migrated';
-const DB_NAME = 'manjo_carn.db';
-
-// Interface pour le backend de stockage
-interface StorageBackend {
-  initialize(): Promise<void>;
-  getAllBills(): Promise<Bill[]>;
-  getTotalCount(): Promise<number>;
-  getBillById(id: number): Promise<Bill | null>;
-  getBillsPage(page: number, pageSize: number): Promise<{ bills: Bill[]; total: number; hasMore: boolean }>;
-  getRecentBills(limit: number): Promise<Bill[]>;
-  getFilteredBills(filters: {
-    searchText?: string;
-    date?: Date;
-    dateRange?: { start: Date; end: Date };
-    paymentMethod?: string;
-    section?: string;
-  }): Promise<Bill[]>;
-  getBillsForDate(date: Date): Promise<Bill[]>;
-  getStatistics(): Promise<BillsStatistics>;
-  addBill(bill: Bill): Promise<void>;
-  deleteBill(billId: number): Promise<void>;
-  deleteBills(billIds: number[]): Promise<void>;
-  clearAllBills(): Promise<void>;
-  setBills(bills: Bill[]): Promise<void>;
-  performMaintenance(maxBills: number): Promise<number>;
-}
 
 // ============================================
 // Backend AsyncStorage (Web + Fallback)
@@ -120,10 +49,6 @@ class AsyncStorageBackend implements StorageBackend {
     } catch (error) {
       console.error('Error saving bills to AsyncStorage:', error);
     }
-  }
-
-  private invalidateCache(): void {
-    this.cacheValid = false;
   }
 
   async getAllBills(): Promise<Bill[]> {
@@ -304,360 +229,6 @@ class AsyncStorageBackend implements StorageBackend {
 }
 
 // ============================================
-// Backend SQLite (Mobile natif)
-// ============================================
-class SQLiteBackend implements StorageBackend {
-  private db: any = null; // SQLite.SQLiteDatabase
-  private SQLite: any = null;
-
-  async initialize(): Promise<void> {
-    try {
-      // Import dynamique pour éviter l'erreur sur web
-      this.SQLite = await import('expo-sqlite');
-      this.db = await this.SQLite.openDatabaseAsync(DB_NAME);
-      await this.createTables();
-      await this.migrateIfNeeded();
-      console.log('✅ SQLite backend initialized (native mode)');
-    } catch (error) {
-      console.error('SQLite initialization error:', error);
-      throw error;
-    }
-  }
-
-  private async createTables(): Promise<void> {
-    if (!this.db) throw new Error('Database not open');
-
-    await this.db.execAsync(`
-      CREATE TABLE IF NOT EXISTS bills (
-        id INTEGER PRIMARY KEY,
-        tableNumber INTEGER NOT NULL,
-        tableName TEXT,
-        section TEXT,
-        amount REAL NOT NULL DEFAULT 0,
-        items INTEGER NOT NULL DEFAULT 0,
-        status TEXT NOT NULL DEFAULT 'pending',
-        timestamp TEXT NOT NULL,
-        paymentMethod TEXT,
-        paymentType TEXT,
-        paidItems TEXT,
-        offeredAmount REAL,
-        guests INTEGER
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_bills_timestamp ON bills(timestamp DESC);
-      CREATE INDEX IF NOT EXISTS idx_bills_date ON bills(date(timestamp));
-      CREATE INDEX IF NOT EXISTS idx_bills_payment_method ON bills(paymentMethod);
-      CREATE INDEX IF NOT EXISTS idx_bills_section ON bills(section);
-      CREATE INDEX IF NOT EXISTS idx_bills_status ON bills(status);
-    `);
-  }
-
-  private async migrateIfNeeded(): Promise<void> {
-    const migrated = await AsyncStorage.getItem(MIGRATION_KEY);
-    if (migrated) return;
-
-    try {
-      const legacyData = await AsyncStorage.getItem(BILLS_KEY);
-      if (legacyData) {
-        const bills: Bill[] = JSON.parse(legacyData);
-        if (bills.length > 0) {
-          console.log(`📦 Migrating ${bills.length} bills to SQLite...`);
-          await this.insertBillsBatch(bills);
-          console.log(`✅ Migration completed`);
-        }
-      }
-      await AsyncStorage.setItem(MIGRATION_KEY, 'true');
-    } catch (error) {
-      console.error('Migration error:', error);
-    }
-  }
-
-  private async insertBillsBatch(bills: Bill[]): Promise<void> {
-    if (!this.db) throw new Error('Database not open');
-
-    const statement = await this.db.prepareAsync(`
-      INSERT OR REPLACE INTO bills
-      (id, tableNumber, tableName, section, amount, items, status, timestamp,
-       paymentMethod, paymentType, paidItems, offeredAmount, guests)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    try {
-      for (const bill of bills) {
-        await statement.executeAsync([
-          bill.id,
-          bill.tableNumber,
-          bill.tableName || null,
-          bill.section || null,
-          bill.amount,
-          bill.items,
-          bill.status,
-          bill.timestamp,
-          bill.paymentMethod || null,
-          bill.paymentType || null,
-          bill.paidItems ? JSON.stringify(bill.paidItems) : null,
-          bill.offeredAmount || null,
-          bill.guests || null,
-        ]);
-      }
-    } finally {
-      await statement.finalizeAsync();
-    }
-  }
-
-  private recordToBill(record: BillRecord): Bill {
-    return {
-      id: record.id,
-      tableNumber: record.tableNumber,
-      tableName: record.tableName || undefined,
-      section: record.section || undefined,
-      amount: record.amount,
-      items: record.items,
-      status: record.status,
-      timestamp: record.timestamp,
-      paymentMethod: record.paymentMethod as Bill['paymentMethod'],
-      paymentType: record.paymentType as Bill['paymentType'],
-      paidItems: record.paidItems ? JSON.parse(record.paidItems) : undefined,
-      offeredAmount: record.offeredAmount || undefined,
-      guests: record.guests || undefined,
-    };
-  }
-
-  async getAllBills(): Promise<Bill[]> {
-    if (!this.db) throw new Error('Database not open');
-    const rows = await this.db.getAllAsync<BillRecord>(
-      'SELECT * FROM bills ORDER BY timestamp DESC'
-    );
-    return rows.map((r: BillRecord) => this.recordToBill(r));
-  }
-
-  async getTotalCount(): Promise<number> {
-    if (!this.db) throw new Error('Database not open');
-    const result = await this.db.getFirstAsync<{ count: number }>(
-      'SELECT COUNT(*) as count FROM bills'
-    );
-    return result?.count || 0;
-  }
-
-  async getBillById(id: number): Promise<Bill | null> {
-    if (!this.db) throw new Error('Database not open');
-    const row = await this.db.getFirstAsync<BillRecord>(
-      'SELECT * FROM bills WHERE id = ?',
-      [id]
-    );
-    return row ? this.recordToBill(row) : null;
-  }
-
-  async getBillsPage(page: number, pageSize: number): Promise<{ bills: Bill[]; total: number; hasMore: boolean }> {
-    if (!this.db) throw new Error('Database not open');
-    const offset = page * pageSize;
-
-    const [rows, countResult] = await Promise.all([
-      this.db.getAllAsync<BillRecord>(
-        'SELECT * FROM bills ORDER BY timestamp DESC LIMIT ? OFFSET ?',
-        [pageSize, offset]
-      ),
-      this.db.getFirstAsync<{ count: number }>('SELECT COUNT(*) as count FROM bills'),
-    ]);
-
-    const total = countResult?.count || 0;
-    return {
-      bills: rows.map((r: BillRecord) => this.recordToBill(r)),
-      total,
-      hasMore: offset + rows.length < total,
-    };
-  }
-
-  async getRecentBills(limit: number): Promise<Bill[]> {
-    if (!this.db) throw new Error('Database not open');
-    const rows = await this.db.getAllAsync<BillRecord>(
-      'SELECT * FROM bills ORDER BY timestamp DESC LIMIT ?',
-      [limit]
-    );
-    return rows.map((r: BillRecord) => this.recordToBill(r));
-  }
-
-  async getFilteredBills(filters: {
-    searchText?: string;
-    date?: Date;
-    dateRange?: { start: Date; end: Date };
-    paymentMethod?: string;
-    section?: string;
-  }): Promise<Bill[]> {
-    if (!this.db) throw new Error('Database not open');
-
-    let query = 'SELECT * FROM bills WHERE 1=1';
-    const params: any[] = [];
-
-    if (filters.date) {
-      const dateStr = filters.date.toISOString().substring(0, 10);
-      query += ' AND date(timestamp) = ?';
-      params.push(dateStr);
-    }
-
-    if (filters.dateRange) {
-      query += ' AND timestamp >= ? AND timestamp <= ?';
-      params.push(filters.dateRange.start.toISOString());
-      params.push(filters.dateRange.end.toISOString());
-    }
-
-    if (filters.paymentMethod) {
-      query += ' AND paymentMethod = ?';
-      params.push(filters.paymentMethod);
-    }
-
-    if (filters.section) {
-      query += ' AND section = ?';
-      params.push(filters.section);
-    }
-
-    if (filters.searchText) {
-      const search = `%${filters.searchText}%`;
-      query += ' AND (tableName LIKE ? OR section LIKE ? OR CAST(amount AS TEXT) LIKE ?)';
-      params.push(search, search, search);
-    }
-
-    query += ' ORDER BY timestamp DESC';
-
-    const rows = await this.db.getAllAsync<BillRecord>(query, params);
-    return rows.map((r: BillRecord) => this.recordToBill(r));
-  }
-
-  async getBillsForDate(date: Date): Promise<Bill[]> {
-    if (!this.db) throw new Error('Database not open');
-    const dateStr = date.toISOString().substring(0, 10);
-    const rows = await this.db.getAllAsync<BillRecord>(
-      'SELECT * FROM bills WHERE date(timestamp) = ? ORDER BY timestamp DESC',
-      [dateStr]
-    );
-    return rows.map((r: BillRecord) => this.recordToBill(r));
-  }
-
-  async getStatistics(): Promise<BillsStatistics> {
-    if (!this.db) throw new Error('Database not open');
-
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
-    const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
-
-    const stats = await this.db.getFirstAsync<{
-      totalBills: number;
-      totalAmount: number;
-      oldestBill: string | null;
-      newestBill: string | null;
-    }>(`
-      SELECT
-        COUNT(*) as totalBills,
-        COALESCE(SUM(amount), 0) as totalAmount,
-        MIN(timestamp) as oldestBill,
-        MAX(timestamp) as newestBill
-      FROM bills
-    `);
-
-    const todayStats = await this.db.getFirstAsync<{ count: number; amount: number }>(`
-      SELECT COUNT(*) as count, COALESCE(SUM(amount), 0) as amount
-      FROM bills WHERE timestamp >= ?
-    `, [todayStart]);
-
-    const weekStats = await this.db.getFirstAsync<{ count: number; amount: number }>(`
-      SELECT COUNT(*) as count, COALESCE(SUM(amount), 0) as amount
-      FROM bills WHERE timestamp >= ?
-    `, [weekAgo]);
-
-    const monthStats = await this.db.getFirstAsync<{ count: number; amount: number }>(`
-      SELECT COUNT(*) as count, COALESCE(SUM(amount), 0) as amount
-      FROM bills WHERE timestamp >= ?
-    `, [monthAgo]);
-
-    const totalBills = stats?.totalBills || 0;
-    const totalAmount = stats?.totalAmount || 0;
-
-    return {
-      totalBills,
-      totalAmount,
-      averageAmount: totalBills > 0 ? totalAmount / totalBills : 0,
-      oldestBillTimestamp: stats?.oldestBill || null,
-      newestBillTimestamp: stats?.newestBill || null,
-      billsToday: todayStats?.count || 0,
-      billsThisWeek: weekStats?.count || 0,
-      billsThisMonth: monthStats?.count || 0,
-      amountToday: todayStats?.amount || 0,
-      amountThisWeek: weekStats?.amount || 0,
-      amountThisMonth: monthStats?.amount || 0,
-    };
-  }
-
-  async addBill(bill: Bill): Promise<void> {
-    if (!this.db) throw new Error('Database not open');
-    await this.db.runAsync(
-      `INSERT INTO bills
-       (id, tableNumber, tableName, section, amount, items, status, timestamp,
-        paymentMethod, paymentType, paidItems, offeredAmount, guests)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        bill.id,
-        bill.tableNumber,
-        bill.tableName || null,
-        bill.section || null,
-        bill.amount,
-        bill.items,
-        bill.status,
-        bill.timestamp,
-        bill.paymentMethod || null,
-        bill.paymentType || null,
-        bill.paidItems ? JSON.stringify(bill.paidItems) : null,
-        bill.offeredAmount || null,
-        bill.guests || null,
-      ]
-    );
-  }
-
-  async deleteBill(billId: number): Promise<void> {
-    if (!this.db) throw new Error('Database not open');
-    await this.db.runAsync('DELETE FROM bills WHERE id = ?', [billId]);
-  }
-
-  async deleteBills(billIds: number[]): Promise<void> {
-    if (!this.db || billIds.length === 0) return;
-    const placeholders = billIds.map(() => '?').join(',');
-    await this.db.runAsync(`DELETE FROM bills WHERE id IN (${placeholders})`, billIds);
-  }
-
-  async clearAllBills(): Promise<void> {
-    if (!this.db) throw new Error('Database not open');
-    await this.db.runAsync('DELETE FROM bills');
-  }
-
-  async setBills(bills: Bill[]): Promise<void> {
-    if (!this.db) throw new Error('Database not open');
-    await this.db.execAsync('BEGIN TRANSACTION');
-    try {
-      await this.db.runAsync('DELETE FROM bills');
-      await this.insertBillsBatch(bills);
-      await this.db.execAsync('COMMIT');
-    } catch (error) {
-      await this.db.execAsync('ROLLBACK');
-      throw error;
-    }
-  }
-
-  async performMaintenance(maxBills: number): Promise<number> {
-    if (!this.db) throw new Error('Database not open');
-    const count = await this.getTotalCount();
-    if (count <= maxBills) return 0;
-
-    const toDelete = count - maxBills;
-    await this.db.runAsync(`
-      DELETE FROM bills WHERE id IN (
-        SELECT id FROM bills ORDER BY timestamp ASC LIMIT ?
-      )
-    `, [toDelete]);
-    return toDelete;
-  }
-}
-
-// ============================================
 // Service principal avec sélection automatique du backend
 // ============================================
 class DatabaseServiceClass {
@@ -712,7 +283,14 @@ class DatabaseServiceClass {
         this.backend = new AsyncStorageBackend();
       } else {
         console.log('📱 Platform: Native - using SQLite backend');
-        this.backend = new SQLiteBackend();
+        try {
+          // Import dynamique pour éviter le bundling sur web
+          const { SQLiteBackend } = require('./SQLiteBackend');
+          this.backend = new SQLiteBackend();
+        } catch (error) {
+          console.warn('⚠️ SQLite not available, falling back to AsyncStorage');
+          this.backend = new AsyncStorageBackend();
+        }
       }
 
       await this.backend.initialize();
@@ -721,7 +299,7 @@ class DatabaseServiceClass {
     } catch (error) {
       console.error('❌ Database initialization error:', error);
       // Fallback vers AsyncStorage si SQLite échoue
-      if (Platform.OS !== 'web') {
+      if (Platform.OS !== 'web' && !(this.backend instanceof AsyncStorageBackend)) {
         console.log('⚠️ Falling back to AsyncStorage backend');
         this.backend = new AsyncStorageBackend();
         await this.backend.initialize();
@@ -832,7 +410,7 @@ class DatabaseServiceClass {
   // Getter pour savoir quel backend est utilisé
   getBackendType(): 'sqlite' | 'asyncstorage' | 'not_initialized' {
     if (!this.backend) return 'not_initialized';
-    return this.backend instanceof SQLiteBackend ? 'sqlite' : 'asyncstorage';
+    return this.backend instanceof AsyncStorageBackend ? 'asyncstorage' : 'sqlite';
   }
 }
 
