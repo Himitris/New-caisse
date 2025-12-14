@@ -1,4 +1,4 @@
-// utils/SQLiteBackend.ts - Backend SQLite pour plateformes natives uniquement
+// utils/SQLiteBackend.native.ts - Backend SQLite pour plateformes natives uniquement
 // Ce fichier ne doit JAMAIS être importé sur web
 
 import * as SQLite from 'expo-sqlite';
@@ -6,8 +6,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { Bill, BillRecord, BillsStatistics, StorageBackend } from './DatabaseService.types';
 
 const BILLS_KEY = 'manjo_carn_bills';
-const MIGRATION_KEY = 'manjo_carn_sqlite_migrated';
+const MIGRATION_KEY = 'manjo_carn_sqlite_migrated_v2'; // Version 2 pour forcer re-migration
 const DB_NAME = 'manjo_carn.db';
+const SCHEMA_VERSION = 2;
 
 export class SQLiteBackend implements StorageBackend {
   private db: SQLite.SQLiteDatabase | null = null;
@@ -15,8 +16,8 @@ export class SQLiteBackend implements StorageBackend {
   async initialize(): Promise<void> {
     try {
       this.db = await SQLite.openDatabaseAsync(DB_NAME);
-      await this.createTables();
-      await this.migrateIfNeeded();
+      await this.ensureSchema();
+      await this.migrateFromAsyncStorageIfNeeded();
       console.log('✅ SQLite backend initialized (native mode)');
     } catch (error) {
       console.error('SQLite initialization error:', error);
@@ -24,11 +25,53 @@ export class SQLiteBackend implements StorageBackend {
     }
   }
 
-  private async createTables(): Promise<void> {
+  // Vérifie et met à jour le schéma si nécessaire
+  private async ensureSchema(): Promise<void> {
     if (!this.db) throw new Error('Database not open');
 
+    try {
+      // Vérifier si la table existe et a les bonnes colonnes
+      const tableInfo = await this.db.getAllAsync<{ name: string }>(
+        "PRAGMA table_info(bills)"
+      );
+
+      const columns = tableInfo.map(col => col.name);
+      const requiredColumns = ['id', 'tableNumber', 'tableName', 'section', 'amount',
+                               'items', 'status', 'timestamp', 'paymentMethod',
+                               'paymentType', 'paidItems', 'offeredAmount', 'guests'];
+
+      const hasAllColumns = requiredColumns.every(col => columns.includes(col));
+
+      if (!hasAllColumns || columns.length === 0) {
+        console.log('📦 Schema outdated or missing, recreating tables...');
+        await this.recreateTables();
+      }
+    } catch (error) {
+      console.log('📦 Creating new database schema...');
+      await this.recreateTables();
+    }
+  }
+
+  // Recrée les tables avec le bon schéma
+  private async recreateTables(): Promise<void> {
+    if (!this.db) throw new Error('Database not open');
+
+    // Sauvegarder les données existantes si possible
+    let existingBills: Bill[] = [];
+    try {
+      const rows = await this.db.getAllAsync<any>('SELECT * FROM bills');
+      existingBills = rows.map(row => this.rowToBill(row)).filter(b => b !== null) as Bill[];
+      console.log(`💾 Backed up ${existingBills.length} existing bills`);
+    } catch (e) {
+      // Table doesn't exist or is corrupted, ignore
+    }
+
+    // Supprimer l'ancienne table
+    await this.db.execAsync('DROP TABLE IF EXISTS bills');
+
+    // Créer la nouvelle table
     await this.db.execAsync(`
-      CREATE TABLE IF NOT EXISTS bills (
+      CREATE TABLE bills (
         id INTEGER PRIMARY KEY,
         tableNumber INTEGER NOT NULL,
         tableName TEXT,
@@ -50,9 +93,41 @@ export class SQLiteBackend implements StorageBackend {
       CREATE INDEX IF NOT EXISTS idx_bills_section ON bills(section);
       CREATE INDEX IF NOT EXISTS idx_bills_status ON bills(status);
     `);
+
+    // Restaurer les données sauvegardées
+    if (existingBills.length > 0) {
+      await this.insertBillsBatch(existingBills);
+      console.log(`✅ Restored ${existingBills.length} bills`);
+    }
+
+    // Réinitialiser le flag de migration pour forcer la re-migration depuis AsyncStorage
+    await AsyncStorage.removeItem(MIGRATION_KEY);
   }
 
-  private async migrateIfNeeded(): Promise<void> {
+  // Convertit une row brute en Bill (gère les anciens schémas)
+  private rowToBill(row: any): Bill | null {
+    try {
+      return {
+        id: row.id,
+        tableNumber: row.tableNumber || row.table_number || 0,
+        tableName: row.tableName || row.table_name || undefined,
+        section: row.section || undefined,
+        amount: row.amount || 0,
+        items: row.items || 0,
+        status: row.status || 'pending',
+        timestamp: row.timestamp || row.created_at || new Date().toISOString(),
+        paymentMethod: row.paymentMethod || row.payment_method || undefined,
+        paymentType: row.paymentType || row.payment_type || undefined,
+        paidItems: row.paidItems ? (typeof row.paidItems === 'string' ? JSON.parse(row.paidItems) : row.paidItems) : undefined,
+        offeredAmount: row.offeredAmount || row.offered_amount || undefined,
+        guests: row.guests || undefined,
+      };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  private async migrateFromAsyncStorageIfNeeded(): Promise<void> {
     const migrated = await AsyncStorage.getItem(MIGRATION_KEY);
     if (migrated) return;
 
@@ -61,9 +136,13 @@ export class SQLiteBackend implements StorageBackend {
       if (legacyData) {
         const bills: Bill[] = JSON.parse(legacyData);
         if (bills.length > 0) {
-          console.log(`📦 Migrating ${bills.length} bills to SQLite...`);
-          await this.insertBillsBatch(bills);
-          console.log(`✅ Migration completed`);
+          // Vérifier si des bills sont déjà dans SQLite
+          const count = await this.getTotalCount();
+          if (count === 0) {
+            console.log(`📦 Migrating ${bills.length} bills from AsyncStorage to SQLite...`);
+            await this.insertBillsBatch(bills);
+            console.log(`✅ Migration completed`);
+          }
         }
       }
       await AsyncStorage.setItem(MIGRATION_KEY, 'true');
@@ -73,7 +152,7 @@ export class SQLiteBackend implements StorageBackend {
   }
 
   private async insertBillsBatch(bills: Bill[]): Promise<void> {
-    if (!this.db) throw new Error('Database not open');
+    if (!this.db || bills.length === 0) return;
 
     const statement = await this.db.prepareAsync(`
       INSERT OR REPLACE INTO bills
@@ -92,7 +171,7 @@ export class SQLiteBackend implements StorageBackend {
           bill.amount,
           bill.items,
           bill.status,
-          bill.timestamp,
+          bill.timestamp || new Date().toISOString(),
           bill.paymentMethod || null,
           bill.paymentType || null,
           bill.paidItems ? JSON.stringify(bill.paidItems) : null,
@@ -303,7 +382,7 @@ export class SQLiteBackend implements StorageBackend {
         bill.amount,
         bill.items,
         bill.status,
-        bill.timestamp,
+        bill.timestamp || new Date().toISOString(),
         bill.paymentMethod || null,
         bill.paymentType || null,
         bill.paidItems ? JSON.stringify(bill.paidItems) : null,

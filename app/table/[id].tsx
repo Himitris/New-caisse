@@ -79,10 +79,11 @@ export default function TableScreen() {
   const isSmallScreen = width < 600;
   const isLandscape = width > height;
 
-  // États simplifiés
-  const [table, setTable] = useState<Table | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [guestCount, setGuestCount] = useState(1);
+  // ✅ OPTIMISATION: Initialiser avec les données du cache si disponibles
+  const cachedTable = getTableById(tableId);
+  const [table, setTable] = useState<Table | null>(cachedTable || null);
+  const [loading, setLoading] = useState(!cachedTable); // Pas de loading si données en cache
+  const [guestCount, setGuestCount] = useState(cachedTable?.guests || 1);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [activeType, setActiveType] = useState<'resto' | 'boisson' | null>(
     'resto'
@@ -641,25 +642,7 @@ export default function TableScreen() {
     );
   }
 
-  if (!menuLoaded) {
-    return (
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Pressable
-            onPress={() => router.replace('/')}
-            style={styles.backLink}
-          >
-            <ArrowLeft size={28} color="#333" />
-          </Pressable>
-          <Text style={styles.title}>{table.name}</Text>
-        </View>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#007AFF" />
-          <Text style={styles.loadingText}>Chargement du menu...</Text>
-        </View>
-      </View>
-    );
-  }
+  // ✅ OPTIMISATION: Plus de blocage sur menuLoaded - on affiche le menu en chargement
 
   const orderItems = table.order?.items || [];
   const total = table.order?.total || 0;
@@ -1025,32 +1008,39 @@ export default function TableScreen() {
           </ScrollView>
 
           <View style={styles.menuItems}>
-            <ScrollView
-              style={styles.menuItemsScroll}
-              showsVerticalScrollIndicator={false}
-            >
-              {categories.map((category) => {
-                const categoryItems = filteredMenuItems.filter(
-                  (item) => item.category === category
-                );
-                if (categoryItems.length === 0) return null;
+            {!menuLoaded ? (
+              <View style={styles.menuLoadingContainer}>
+                <ActivityIndicator size="small" color="#4CAF50" />
+                <Text style={styles.menuLoadingText}>Chargement du menu...</Text>
+              </View>
+            ) : (
+              <ScrollView
+                style={styles.menuItemsScroll}
+                showsVerticalScrollIndicator={false}
+              >
+                {categories.map((category) => {
+                  const categoryItems = filteredMenuItems.filter(
+                    (item) => item.category === category
+                  );
+                  if (categoryItems.length === 0) return null;
 
-                return (
-                  <View key={category} style={styles.categorySection}>
-                    <Text style={styles.categoryHeaderText}>{category}</Text>
-                    <View style={styles.categoryItems}>
-                      {categoryItems.map((item) => (
-                        <MenuItemComponent
-                          key={item.id}
-                          item={item}
-                          onPress={() => addItemToOrder(item)}
-                        />
-                      ))}
+                  return (
+                    <View key={category} style={styles.categorySection}>
+                      <Text style={styles.categoryHeaderText}>{category}</Text>
+                      <View style={styles.categoryItems}>
+                        {categoryItems.map((item) => (
+                          <MenuItemComponent
+                            key={item.id}
+                            item={item}
+                            onPress={() => addItemToOrder(item)}
+                          />
+                        ))}
+                      </View>
                     </View>
-                  </View>
-                );
-              })}
-            </ScrollView>
+                  );
+                })}
+              </ScrollView>
+            )}
           </View>
         </View>
       </ScrollView>
@@ -1475,5 +1465,16 @@ const styles = StyleSheet.create({
     minWidth: 'auto',
     width: '100%',
     flex: 0,
+  },
+  menuLoadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  menuLoadingText: {
+    marginTop: 10,
+    color: '#666',
+    fontSize: 14,
   },
 });

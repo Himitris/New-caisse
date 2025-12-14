@@ -52,16 +52,33 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
     await loadTables();
   }, [loadTables]);
 
-  // ✅ Mise à jour simple sans cache (INCHANGÉ)
+  // ✅ OPTIMISÉ: Utilise le cache local au lieu de refetch
   const updateTableData = useCallback(
     async (tableId: number, updatedData: Partial<Table>) => {
       if (!mountedRef.current) return;
 
       try {
-        const currentTable = await getTable(tableId);
-        if (!currentTable) return;
+        // Utiliser les données locales si c'est un objet complet
+        const isFullTable = 'order' in updatedData && 'name' in updatedData;
 
-        const updatedTable = { ...currentTable, ...updatedData };
+        let updatedTable: Table;
+        if (isFullTable) {
+          // Si on reçoit une table complète, l'utiliser directement
+          updatedTable = updatedData as Table;
+        } else {
+          // Sinon, fusionner avec les données en cache
+          const currentTable = tables.find(t => t.id === tableId);
+          if (!currentTable) {
+            // Fallback: charger depuis le storage
+            const loaded = await getTable(tableId);
+            if (!loaded) return;
+            updatedTable = { ...loaded, ...updatedData };
+          } else {
+            updatedTable = { ...currentTable, ...updatedData };
+          }
+        }
+
+        // Sauvegarder et mettre à jour l'état local en parallèle
         await updateTable(updatedTable);
 
         if (mountedRef.current) {
@@ -76,7 +93,7 @@ export const TableProvider = ({ children }: { children: ReactNode }) => {
         throw error;
       }
     },
-    []
+    [tables]
   );
 
   // ✅ Getter simple sans cache (INCHANGÉ)

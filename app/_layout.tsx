@@ -1,4 +1,4 @@
-// app/_layout.tsx - VERSION SIMPLIFIÉE
+// app/_layout.tsx - VERSION OPTIMISÉE POUR LA VITESSE
 
 import { TableProvider } from '@/utils/TableContext';
 import { Stack } from 'expo-router';
@@ -21,16 +21,19 @@ export default function RootLayout() {
   useEffect(() => {
     const setupApp = async () => {
       try {
-        // ✅ Initialiser SQLite en premier (inclut la migration depuis AsyncStorage)
-        await initializeDatabase();
-
-        // Initialisation parallèle des autres services
-        await Promise.all([initializeTables(), menuManager.ensureLoaded()]);
-
-        // Maintenance légère
-        await performBillsMaintenance();
+        // ✅ Initialisation parallèle TOTALE pour max vitesse
+        await Promise.all([
+          initializeDatabase(),
+          initializeTables(),
+          menuManager.ensureLoaded(),
+        ]);
 
         setInitialized(true);
+
+        // Maintenance en arrière-plan (après affichage)
+        setTimeout(() => {
+          performBillsMaintenance().catch(console.error);
+        }, 2000);
       } catch (error) {
         console.error("Erreur lors de l'initialisation:", error);
         setInitialized(true);
@@ -40,13 +43,13 @@ export default function RootLayout() {
     setupApp();
   }, []);
 
-  // Nettoyage périodique simple
+  // Nettoyage périodique - moins fréquent
   useEffect(() => {
     if (!initialized) return;
 
     const cleanupInterval = setInterval(() => {
-      performBillsMaintenance();
-    }, 5 * 60 * 1000); // 5 minutes
+      performBillsMaintenance().catch(console.error);
+    }, 10 * 60 * 1000); // 10 minutes au lieu de 5
 
     return () => clearInterval(cleanupInterval);
   }, [initialized]);
@@ -63,7 +66,7 @@ export default function RootLayout() {
       >
         <ActivityIndicator size="large" color="#4CAF50" />
         <Text style={{ marginTop: 16, fontSize: 16, color: '#666' }}>
-          Initialisation...
+          Chargement...
         </Text>
       </View>
     );
@@ -78,7 +81,9 @@ export default function RootLayout() {
               screenOptions={{
                 headerShown: false,
                 contentStyle: { backgroundColor: 'white' },
-                animation: 'fade_from_bottom',
+                // ✅ Animation ultra-rapide
+                animation: 'fade',
+                animationDuration: 150,
                 presentation: 'card',
                 gestureEnabled: true,
                 gestureDirection: 'horizontal',
@@ -90,6 +95,8 @@ export default function RootLayout() {
                 name="table/[id]"
                 options={{
                   presentation: 'card',
+                  animation: 'slide_from_right',
+                  animationDuration: 200,
                   freezeOnBlur: true,
                   gestureEnabled: true,
                 }}
@@ -97,41 +104,46 @@ export default function RootLayout() {
               <Stack.Screen
                 name="payment/full"
                 options={{
-                  presentation: 'card',
+                  presentation: 'modal',
+                  animation: 'slide_from_bottom',
+                  animationDuration: 200,
                   freezeOnBlur: true,
-                  gestureEnabled: true,
                 }}
               />
               <Stack.Screen
                 name="payment/split"
                 options={{
-                  presentation: 'card',
+                  presentation: 'modal',
+                  animation: 'slide_from_bottom',
+                  animationDuration: 200,
                   freezeOnBlur: true,
-                  gestureEnabled: true,
                 }}
               />
               <Stack.Screen
                 name="payment/custom"
                 options={{
-                  presentation: 'card',
+                  presentation: 'modal',
+                  animation: 'slide_from_bottom',
+                  animationDuration: 200,
                   freezeOnBlur: true,
-                  gestureEnabled: true,
                 }}
               />
               <Stack.Screen
                 name="payment/items"
                 options={{
-                  presentation: 'card',
+                  presentation: 'modal',
+                  animation: 'slide_from_bottom',
+                  animationDuration: 200,
                   freezeOnBlur: true,
-                  gestureEnabled: true,
                 }}
               />
               <Stack.Screen
                 name="print-preview"
                 options={{
-                  presentation: 'card',
+                  presentation: 'modal',
+                  animation: 'fade',
+                  animationDuration: 150,
                   freezeOnBlur: true,
-                  gestureEnabled: true,
                 }}
               />
             </Stack>
