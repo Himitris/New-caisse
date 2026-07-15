@@ -1,6 +1,7 @@
 // utils/payment-utils.ts - Version simplifiée sans événements
 
 import { getTable, updateTable, resetTable } from './storage';
+import { logger } from '@/utils/logger';
 
 /**
  * Fonction simplifiée pour traiter un paiement partiel
@@ -143,7 +144,7 @@ export const processPartialPayment = async (
       };
     }
   } catch (error) {
-    console.error('Erreur lors du traitement du paiement partiel:', error);
+    logger.error('Erreur lors du traitement du paiement partiel:', error);
     return { success: false, error };
   }
 };

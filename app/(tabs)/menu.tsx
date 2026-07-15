@@ -10,9 +10,10 @@ import {
   Trash2,
   X
 } from 'lucide-react-native';
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  FlatList,
   Modal,
   Pressable,
   ScrollView,
@@ -31,7 +32,7 @@ import {
   updateCustomMenuItem
 } from '../../utils/storage';
 import { useInstanceManager } from '../../utils/useInstanceManager'; // ✅ Import du gestionnaire
-
+import { logger } from '@/utils/logger';
 
 const CATEGORIES_BY_TYPE = {
   resto: [
@@ -207,21 +208,30 @@ const EditItemModal = ({ visible, item, onClose, onSave }: EditModalProps) => {
     );
   };
 
-// ✅ Composant MenuItemCard optimisé
-const MenuItemCard = memo(
-  ({
-    item,
-    onToggleAvailability,
-    onEdit,
-    onDelete,
-  }: {
-    item: MenuItem;
-    onToggleAvailability: () => void;
-    onEdit: () => void;
-    onDelete: () => void;
-  }) => {
+// ✅ Composant MenuItemCard optimisé — reçoit les handlers stables directement
+// (pattern onAdd du Prompt 3) : l'item est passé en argument, jamais de closure
+// recréée par ligne dans le parent.
+interface MenuItemCardProps {
+  item: MenuItem;
+  onToggleAvailability: (item: MenuItem) => void;
+  onEdit: (item: MenuItem) => void;
+  onDelete: (item: MenuItem) => void;
+}
+
+const MenuItemCard = memo<MenuItemCardProps>(
+  ({ item, onToggleAvailability, onEdit, onDelete }) => {
     // ✅ Déterminer si c'est un item personnalisé (ID > 10000 par exemple)
     const isCustomItem = item.id > 10000;
+
+    const handleToggle = useCallback(
+      () => onToggleAvailability(item),
+      [item, onToggleAvailability]
+    );
+    const handleEditPress = useCallback(() => onEdit(item), [item, onEdit]);
+    const handleDeletePress = useCallback(
+      () => onDelete(item),
+      [item, onDelete]
+    );
 
     return (
       <View style={[styles.menuItem, { borderLeftColor: item.color }]}>
@@ -243,7 +253,7 @@ const MenuItemCard = memo(
               styles.actionButton,
               { backgroundColor: item.available ? '#f44336' : '#4CAF50' },
             ]}
-            onPress={onToggleAvailability}
+            onPress={handleToggle}
           >
             {item.available ? (
               <MinusCircle size={16} color="#fff" />
@@ -259,7 +269,7 @@ const MenuItemCard = memo(
           {isCustomItem && (
             <Pressable
               style={[styles.actionButton, { backgroundColor: '#2196F3' }]}
-              onPress={onEdit}
+              onPress={handleEditPress}
             >
               <Edit size={16} color="#fff" />
               <Text style={styles.actionButtonText}>Modifier</Text>
@@ -270,7 +280,7 @@ const MenuItemCard = memo(
           {isCustomItem && (
             <Pressable
               style={[styles.actionButton, { backgroundColor: '#F44336' }]}
-              onPress={onDelete}
+              onPress={handleDeletePress}
             >
               <Trash2 size={16} color="#fff" />
               <Text style={styles.actionButtonText}>Supprimer</Text>
@@ -285,10 +295,14 @@ const MenuItemCard = memo(
       prevProps.item.id === nextProps.item.id &&
       prevProps.item.available === nextProps.item.available &&
       prevProps.item.name === nextProps.item.name &&
-      prevProps.item.price === nextProps.item.price
+      prevProps.item.price === nextProps.item.price &&
+      prevProps.onToggleAvailability === nextProps.onToggleAvailability &&
+      prevProps.onEdit === nextProps.onEdit &&
+      prevProps.onDelete === nextProps.onDelete
     );
   }
 );
+MenuItemCard.displayName = 'MenuItemCard';
 
 export default function MenuScreen() {
   // ✅ Utilisation des nouveaux hooks
@@ -318,6 +332,12 @@ export default function MenuScreen() {
   const [unavailableItems, setUnavailableItems] = useState<Set<number>>(
     new Set()
   );
+  // Miroir de `unavailableItems` lisible sans dépendre de sa valeur, pour que
+  // toggleItemAvailability reste une référence stable entre les rendus.
+  const unavailableItemsRef = useRef<Set<number>>(unavailableItems);
+  useEffect(() => {
+    unavailableItemsRef.current = unavailableItems;
+  }, [unavailableItems]);
 
   const toast = useToast();
 
@@ -333,7 +353,7 @@ export default function MenuScreen() {
           setUnavailableItems(unavailable);
         }
       } catch (error) {
-        console.error('Error loading menu availability:', error);
+        logger.error('Error loading menu availability:', error);
       }
     };
 
@@ -381,12 +401,15 @@ export default function MenuScreen() {
   ]);
 
   // ✅ Handler pour changer la disponibilité
+  // Référence stable (deps sans `unavailableItems`/`getItems`) pour que
+  // MenuItemCard.memo() ne se re-rende pas quand une autre ligne est togglée.
   const toggleItemAvailability = useCallback(
-    async (itemId: number): Promise<void> => {
+    (item: MenuItem): void => {
       if (!isMounted()) return;
 
       try {
-        const isCurrentlyAvailable = !unavailableItems.has(itemId);
+        const itemId = item.id;
+        const isCurrentlyAvailable = !unavailableItemsRef.current.has(itemId);
         const newAvailability = !isCurrentlyAvailable;
 
         // Mise à jour optimiste
@@ -407,17 +430,12 @@ export default function MenuScreen() {
           if (!isMounted()) return;
 
           try {
-            const item = getItems().find((i) => i.id === itemId);
-            if (!item) return;
-
             const availability = await getMenuAvailability();
             const updatedAvailability = availability.some(
-              (item) => item.id === itemId
+              (a) => a.id === itemId
             )
-              ? availability.map((item) =>
-                  item.id === itemId
-                    ? { ...item, available: newAvailability }
-                    : item
+              ? availability.map((a) =>
+                  a.id === itemId ? { ...a, available: newAvailability } : a
                 )
               : [
                   ...availability,
@@ -435,7 +453,7 @@ export default function MenuScreen() {
             menuManager.reset();
             await menuManager.ensureLoaded();
           } catch (error) {
-            console.error('Erreur lors de la mise à jour:', error);
+            logger.error('Erreur lors de la mise à jour:', error);
             toast.showToast(
               'Impossible de mettre à jour la disponibilité.',
               'error'
@@ -458,14 +476,14 @@ export default function MenuScreen() {
           }
         }, 500);
       } catch (error) {
-        console.error('Erreur lors du toggle:', error);
+        logger.error('Erreur lors du toggle:', error);
         toast.showToast(
           'Impossible de mettre à jour la disponibilité.',
           'error'
         );
       }
     },
-    [unavailableItems, isMounted, safeExecute, setSafeTimeout, getItems, toast]
+    [isMounted, safeExecute, setSafeTimeout, toast]
   );
 
   // ✅ Handlers simplifiés
@@ -507,7 +525,7 @@ export default function MenuScreen() {
 
                 toast.showToast('Article supprimé avec succès.', 'success');
               } catch (error) {
-                console.error('Error deleting menu item:', error);
+                logger.error('Error deleting menu item:', error);
                 toast.showToast("Impossible de supprimer l'article.", 'error');
               }
             },
@@ -566,7 +584,7 @@ export default function MenuScreen() {
       setAddModalVisible(false);
       toast.showToast('Article ajouté avec succès.', 'success');
     } catch (error) {
-      console.error('Error adding menu item:', error);
+      logger.error('Error adding menu item:', error);
       toast.showToast("Impossible d'ajouter l'article.", 'error');
     }
   }, [newItem, toast]);
@@ -638,7 +656,7 @@ export default function MenuScreen() {
 
         toast.showToast('Article mis à jour avec succès.', 'success');
       } catch (error) {
-        console.error('Error updating menu item:', error);
+        logger.error('Error updating menu item:', error);
         toast.showToast("Impossible de mettre à jour l'article.", 'error');
       }
     },
@@ -659,6 +677,24 @@ export default function MenuScreen() {
       selectedCategory: null, // Reset category when changing type
     }));
   }, []);
+
+  // ✅ Grille virtualisée : FlatList à 3 colonnes plutôt que ScrollView + .map()
+  const keyExtractorMenuItem = useCallback(
+    (item: MenuItem) => `menu-item-${item.id}`,
+    []
+  );
+
+  const renderMenuItem = useCallback(
+    ({ item }: { item: MenuItem }) => (
+      <MenuItemCard
+        item={item}
+        onToggleAvailability={toggleItemAvailability}
+        onEdit={handleEdit}
+        onDelete={handleDelete}
+      />
+    ),
+    [toggleItemAvailability, handleEdit, handleDelete]
+  );
 
   // ✅ Affichage conditionnel si le menu n'est pas chargé
   if (!isLoaded) {
@@ -776,19 +812,16 @@ export default function MenuScreen() {
         </View>
 
         <View style={styles.menuItemsContainer}>
-          <ScrollView>
-            <View style={styles.menuItemsGrid}>
-              {filteredItems.map((item) => (
-                <MenuItemCard
-                  key={item.id}
-                  item={item}
-                  onToggleAvailability={() => toggleItemAvailability(item.id)}
-                  onEdit={() => handleEdit(item)}
-                  onDelete={() => handleDelete(item)}
-                />
-              ))}
-            </View>
-          </ScrollView>
+          <FlatList
+            data={filteredItems}
+            renderItem={renderMenuItem}
+            keyExtractor={keyExtractorMenuItem}
+            numColumns={3}
+            columnWrapperStyle={styles.menuItemsGridRow}
+            initialNumToRender={12}
+            windowSize={7}
+            removeClippedSubviews
+          />
         </View>
       </View>
       <Modal
@@ -1050,10 +1083,9 @@ const styles = StyleSheet.create({
     flex: 1,
     padding: 16,
   },
-  menuItemsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+  menuItemsGridRow: {
     gap: 8,
+    marginBottom: 4,
   },
   menuItem: {
     width: '32%',

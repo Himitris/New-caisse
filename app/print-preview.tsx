@@ -8,6 +8,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { useSettings } from '@/utils/useSettings';
 import { OrderItem } from '@/utils/storage';
+import { logger } from '@/utils/logger';
 
 export default function PrintPreviewScreen() {
   const { paymentMethods } = useSettings();
@@ -316,7 +317,7 @@ export default function PrintPreviewScreen() {
       });
       setLoading(false);
     } catch (error) {
-      console.error("Échec de l'impression:", error);
+      logger.error("Échec de l'impression:", error);
       setLoading(false);
     }
   };
@@ -330,7 +331,7 @@ export default function PrintPreviewScreen() {
       await Sharing.shareAsync(uri);
       setLoading(false);
     } catch (error) {
-      console.error('Échec du partage:', error);
+      logger.error('Échec du partage:', error);
       setLoading(false);
     }
   };

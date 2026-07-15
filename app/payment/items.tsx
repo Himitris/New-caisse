@@ -1,7 +1,7 @@
 // app/payment/items.tsx - VERSION AMÉLIORÉE
 import { useSettings } from '@/utils/useSettings';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useTableContext } from '@/utils/TableContext';
+import { useTableActions } from '@/utils/TableContext';
 import {
   ArrowLeft,
   CreditCard,
@@ -35,6 +35,7 @@ import {
   updateTable,
 } from '../../utils/storage';
 import { useToast } from '../../utils/ToastContext';
+import { logger } from '@/utils/logger';
 
 interface DividedItem {
   id: string;
@@ -384,7 +385,7 @@ export default function ItemsPaymentScreen() {
   const router = useRouter();
   const tableIdNum = parseInt(tableId as string, 10);
   const toast = useToast();
-  const { refreshTables } = useTableContext();
+  const { refreshTables } = useTableActions();
   const [table, setTable] = useState<any>(null);
   const [availableItems, setAvailableItems] = useState<MenuItem[]>([]);
   const [selectedItems, setSelectedItems] = useState<SelectedMenuItem[]>([]);
@@ -538,7 +539,7 @@ export default function ItemsPaymentScreen() {
           'success'
         );
       } catch (error) {
-        console.error('Erreur lors de la division:', error);
+        logger.error('Erreur lors de la division:', error);
         toast.showToast("Erreur lors de la division de l'item", 'error');
       }
     },
@@ -1063,7 +1064,7 @@ export default function ItemsPaymentScreen() {
           );
         }
       } catch (error) {
-        console.error('Erreur lors du paiement:', error);
+        logger.error('Erreur lors du paiement:', error);
         toast.showToast(
           'Une erreur est survenue lors du traitement du paiement.',
           'error'

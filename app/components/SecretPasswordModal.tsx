@@ -11,6 +11,7 @@ import {
 import { Eye, EyeOff, Copy, X } from 'lucide-react-native';
 import { useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { logger } from '@/utils/logger';
 
 interface SecretPasswordModalProps {
   visible: boolean;
@@ -43,7 +44,7 @@ const SecretPasswordModal: React.FC<SecretPasswordModalProps> = ({
           setCurrentPassword('tototo');
         }
       } catch (error) {
-        console.error('Erreur lors du chargement du mot de passe:', error);
+        logger.error('Erreur lors du chargement du mot de passe:', error);
         setCurrentPassword('tototo'); // Fallback
       } finally {
         setLoading(false);

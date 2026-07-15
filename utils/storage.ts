@@ -1,6 +1,8 @@
-// utils/storage.ts - VERSION SANS LOGS EXCESSIFS
+// utils/storage.ts - Persistance SQLite (expo-sqlite)
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { db, ensureReady } from './db';
+import { logger } from '@/utils/logger';
 
 // Types (inchangés)
 export interface Table {
@@ -71,242 +73,469 @@ export const TABLE_SECTIONS = {
   BUIS: 'Buis',
 } as const;
 
-const STORAGE_KEYS = {
-  TABLES: 'manjo_carn_tables',
-  BILLS: 'manjo_carn_bills',
-  MENU_AVAILABILITY: 'manjo_carn_menu_availability',
-  CUSTOM_MENU_ITEMS: 'manjo_carn_custom_menu_items',
-} as const;
-
 const MAX_BILLS = 1000;
+const MAX_BILLS_KEEP = 800;
 
-// Fonctions utilitaires simplifiées
-const save = async (key: string, data: any): Promise<void> => {
-  try {
-    await AsyncStorage.setItem(key, JSON.stringify(data));
-  } catch (error) {
-    console.error(`Error saving ${key}:`, error);
-    throw error;
+const calculateTotal = (items: OrderItem[]): number =>
+  items.reduce((sum, item) => (item.offered ? sum : sum + item.price * item.quantity), 0);
+
+// ---------------------------------------------------------------------------
+// Row <-> modèle
+// ---------------------------------------------------------------------------
+
+type TableRow = {
+  id: number;
+  name: string;
+  section: string;
+  status: Table['status'];
+  seats: number;
+  guests: number | null;
+};
+
+type OrderRow = {
+  id: number;
+  table_id: number;
+  guests: number;
+  status: Order['status'];
+  timestamp: string;
+};
+
+type OrderItemRow = {
+  order_id: number;
+  item_id: number;
+  menu_id: number | null;
+  name: string;
+  price: number;
+  quantity: number;
+  offered: number | null;
+  type: OrderItem['type'] | null;
+  notes: string | null;
+};
+
+const rowToOrderItem = (row: OrderItemRow): OrderItem => ({
+  id: row.item_id,
+  menuId: row.menu_id ?? undefined,
+  name: row.name,
+  price: row.price,
+  quantity: row.quantity,
+  notes: row.notes ?? undefined,
+  offered: !!row.offered,
+  type: row.type ?? undefined,
+});
+
+const assembleTable = (
+  tableRow: TableRow,
+  orderRow: OrderRow | undefined,
+  itemRows: OrderItemRow[]
+): Table => {
+  const table: Table = {
+    id: tableRow.id,
+    name: tableRow.name,
+    section: tableRow.section,
+    status: tableRow.status,
+    seats: tableRow.seats,
+    guests: tableRow.guests ?? undefined,
+  };
+
+  if (orderRow) {
+    const items = itemRows.filter((i) => i.order_id === orderRow.id).map(rowToOrderItem);
+    table.order = {
+      id: orderRow.id,
+      items,
+      guests: orderRow.guests,
+      status: orderRow.status,
+      timestamp: orderRow.timestamp,
+      total: calculateTotal(items),
+    };
+  }
+
+  return table;
+};
+
+// Applique la table (y compris son order) en base. Doit être appelé dans une transaction.
+const upsertTableTx = async (table: Table): Promise<void> => {
+  await db.runAsync(
+    `UPDATE tables SET name = ?, section = ?, status = ?, seats = ?, guests = ? WHERE id = ?`,
+    [table.name, table.section, table.status, table.seats, table.guests ?? null, table.id]
+  );
+
+  await db.runAsync(`DELETE FROM orders WHERE table_id = ?`, [table.id]);
+
+  if (table.order) {
+    const order = table.order;
+    await db.runAsync(
+      `INSERT INTO orders (id, table_id, guests, status, timestamp) VALUES (?, ?, ?, ?, ?)`,
+      [order.id, table.id, order.guests, order.status, order.timestamp]
+    );
+
+    for (const item of order.items) {
+      await db.runAsync(
+        `INSERT INTO order_items (order_id, item_id, menu_id, name, price, quantity, offered, type, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          order.id,
+          item.id,
+          item.menuId ?? null,
+          item.name,
+          item.price,
+          item.quantity,
+          item.offered ? 1 : 0,
+          item.type ?? null,
+          item.notes ?? null,
+        ]
+      );
+    }
   }
 };
 
-const load = async <T>(key: string, defaultValue: T): Promise<T> => {
-  try {
-    const data = await AsyncStorage.getItem(key);
-    return data ? JSON.parse(data) : defaultValue;
-  } catch (error) {
-    console.error(`Error loading ${key}:`, error);
-    return defaultValue;
-  }
-};
-
-// Tables par défaut (inchangées)
+// Tables par défaut
 export const defaultTables: Table[] = [
   // Tables EAU
   { id: 1, name: 'Doc 1', section: TABLE_SECTIONS.EAU, status: 'available', seats: 4 },
   { id: 2, name: 'Doc 2', section: TABLE_SECTIONS.EAU, status: 'available', seats: 4 },
   { id: 3, name: 'Doc 3', section: TABLE_SECTIONS.EAU, status: 'available', seats: 4 },
-  { id: 4, name: 'Vue 1', section: TABLE_SECTIONS.EAU, status: 'available', seats: 4 },
-  { id: 5, name: 'Vue 2', section: TABLE_SECTIONS.EAU, status: 'available', seats: 4 },
-  { id: 6, name: 'R1', section: TABLE_SECTIONS.EAU, status: 'available', seats: 2 },
-  { id: 7, name: 'R2', section: TABLE_SECTIONS.EAU, status: 'available', seats: 2 },
-  { id: 8, name: 'R3', section: TABLE_SECTIONS.EAU, status: 'available', seats: 2 },
-  { id: 9, name: 'R4', section: TABLE_SECTIONS.EAU, status: 'available', seats: 2 },
-  { id: 10, name: 'Poteau', section: TABLE_SECTIONS.EAU, status: 'available', seats: 4 },
+  { id: 4, name: 'R1', section: TABLE_SECTIONS.EAU, status: 'available', seats: 2 },
+  { id: 5, name: 'R2', section: TABLE_SECTIONS.EAU, status: 'available', seats: 2 },
+  { id: 6, name: 'R3', section: TABLE_SECTIONS.EAU, status: 'available', seats: 2 },
+  { id: 7, name: 'R4', section: TABLE_SECTIONS.EAU, status: 'available', seats: 2 },
+  { id: 8, name: 'R5', section: TABLE_SECTIONS.EAU, status: 'available', seats: 2 },
+  { id: 9, name: 'Poteau 1', section: TABLE_SECTIONS.EAU, status: 'available', seats: 4 },
+  { id: 10, name: 'Poteau 2', section: TABLE_SECTIONS.EAU, status: 'available', seats: 4 },
   { id: 11, name: 'Ext 1', section: TABLE_SECTIONS.EAU, status: 'available', seats: 4 },
   { id: 12, name: 'Ext 2', section: TABLE_SECTIONS.EAU, status: 'available', seats: 4 },
-  { id: 13, name: 'Ext Rge', section: TABLE_SECTIONS.EAU, status: 'available', seats: 6 },
 
   // Tables BUIS
-  { id: 14, name: 'Bas 0', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 15, name: 'Bas 1', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 16, name: 'Arbre 1', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 17, name: 'Arbre 2', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 18, name: 'Tronc', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 2 },
-  { id: 19, name: 'Caillou', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 2 },
+  { id: 13, name: 'Bas 0', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
+  { id: 14, name: 'Bas 1', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
+  { id: 15, name: 'Arbre 1', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
+  { id: 16, name: 'Arbre 2', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
+  { id: 17, name: 'Tronc', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 2 },
+  { id: 18, name: 'Caillou 1', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 2 },
+  { id: 19, name: 'Caillou 2', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 2 },
   { id: 20, name: 'Escalier 1', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
   { id: 21, name: 'Escalier 2', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 22, name: 'Transfo', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 6 },
-  { id: 23, name: 'Bache 1', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 24, name: 'Bache 2', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 25, name: 'Bache 3', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 26, name: 'Che 1', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 27, name: 'Che 2', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 28, name: 'PDC 1', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 29, name: 'PDC 2', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 30, name: 'Eve Rgb', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 6 },
-  { id: 31, name: 'Eve Bois', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 6 },
-  { id: 32, name: 'HDB', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 33, name: 'Lukas 1', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 34, name: 'Lukas 2', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 35, name: 'Route 1', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 36, name: 'Route 2', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
-  { id: 37, name: 'Sous Cabane', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 6 },
+  { id: 22, name: 'Escalier 3', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
+  { id: 23, name: 'Transfo', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 6 },
+  { id: 24, name: 'Bache 1', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
+  { id: 25, name: 'Bache 2', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
+  { id: 26, name: 'Bache 3', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
+  { id: 27, name: 'Che', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
+  { id: 28, name: 'Che 8', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
+  { id: 29, name: 'Che 8bis', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
+  { id: 30, name: 'PDC 1', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
+  { id: 31, name: 'PDC 2', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
+  { id: 32, name: 'Eve Rgb', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 6 },
+  { id: 33, name: 'Eve Bois', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 6 },
+  { id: 34, name: 'BDM 1', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
+  { id: 35, name: 'BDM 2', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
+  { id: 36, name: 'BDM 3', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
+  { id: 37, name: 'BDF 1', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
+  { id: 38, name: 'BDF 2', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
+  { id: 39, name: 'BDF 3', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
+  { id: 40, name: 'HDB', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
+  { id: 41, name: 'Route 1', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
+  { id: 42, name: 'Route 2', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 4 },
+  { id: 43, name: 'Sous Cabane', section: TABLE_SECTIONS.BUIS, status: 'available', seats: 6 },
 ];
 
-// TABLES - Fonctions simplifiées
+// TABLES
 export const initializeTables = async (): Promise<void> => {
-  const existingTables = await load<Table[]>(STORAGE_KEYS.TABLES, []);
-  if (existingTables.length === 0) {
-    await save(STORAGE_KEYS.TABLES, defaultTables);
+  await ensureReady();
+  const row = await db.getFirstAsync<{ count: number }>(`SELECT COUNT(*) as count FROM tables`);
+  if (!row || row.count === 0) {
+    await db.withTransactionAsync(async () => {
+      for (const table of defaultTables) {
+        await db.runAsync(
+          `INSERT OR REPLACE INTO tables (id, name, section, status, seats, guests) VALUES (?, ?, ?, ?, ?, ?)`,
+          [table.id, table.name, table.section, table.status, table.seats, table.guests ?? null]
+        );
+      }
+    });
   }
 };
 
 export const getTables = async (): Promise<Table[]> => {
-  return load<Table[]>(STORAGE_KEYS.TABLES, defaultTables);
+  await ensureReady();
+  const tableRows = await db.getAllAsync<TableRow>(`SELECT * FROM tables ORDER BY id ASC`);
+  if (tableRows.length === 0) return defaultTables;
+
+  const orderRows = await db.getAllAsync<OrderRow>(`SELECT * FROM orders`);
+  const itemRows = await db.getAllAsync<OrderItemRow>(`SELECT * FROM order_items`);
+
+  const orderByTableId = new Map(orderRows.map((o) => [o.table_id, o]));
+
+  return tableRows.map((t) => assembleTable(t, orderByTableId.get(t.id), itemRows));
 };
 
 export const getTable = async (id: number): Promise<Table | null> => {
-  const tables = await getTables();
-  return tables.find((table) => table.id === id) || null;
+  await ensureReady();
+  const tableRow = await db.getFirstAsync<TableRow>(`SELECT * FROM tables WHERE id = ?`, [id]);
+  if (!tableRow) return null;
+
+  const orderRow = await db.getFirstAsync<OrderRow>(`SELECT * FROM orders WHERE table_id = ?`, [id]);
+  const itemRows = orderRow
+    ? await db.getAllAsync<OrderItemRow>(`SELECT * FROM order_items WHERE order_id = ?`, [orderRow.id])
+    : [];
+
+  return assembleTable(tableRow, orderRow ?? undefined, itemRows);
 };
 
 export const updateTable = async (updatedTable: Table): Promise<void> => {
-  const tables = await getTables();
-  const index = tables.findIndex((table) => table.id === updatedTable.id);
-  if (index >= 0) {
-    tables[index] = updatedTable;
-    await save(STORAGE_KEYS.TABLES, tables);
-  }
+  await ensureReady();
+  await db.withTransactionAsync(async () => {
+    await upsertTableTx(updatedTable);
+  });
 };
 
 export const resetTable = async (tableId: number): Promise<void> => {
-  const tables = await getTables();
-  const index = tables.findIndex((table) => table.id === tableId);
-  if (index >= 0) {
-    const defaultTable = defaultTables.find((t) => t.id === tableId);
-    if (defaultTable) {
-      tables[index] = {
-        ...defaultTable,
-        name: tables[index].name,
-        section: tables[index].section,
-      };
-      await save(STORAGE_KEYS.TABLES, tables);
-    }
-  }
+  await ensureReady();
+  const defaultTable = defaultTables.find((t) => t.id === tableId);
+  if (!defaultTable) return;
+
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `UPDATE tables SET status = ?, seats = ?, guests = NULL WHERE id = ?`,
+      [defaultTable.status, defaultTable.seats, tableId]
+    );
+    await db.runAsync(`DELETE FROM orders WHERE table_id = ?`, [tableId]);
+  });
 };
 
 export const resetAllTables = async (): Promise<void> => {
-  const currentTables = await getTables();
-  const resetTables = defaultTables.map((defaultTable) => {
-    const existing = currentTables.find((t) => t.id === defaultTable.id);
-    return {
-      ...defaultTable,
-      name: existing?.name || defaultTable.name,
-      section: existing?.section || defaultTable.section,
-    };
+  await ensureReady();
+  await db.withTransactionAsync(async () => {
+    for (const defaultTable of defaultTables) {
+      await db.runAsync(
+        `UPDATE tables SET status = ?, seats = ?, guests = NULL WHERE id = ?`,
+        [defaultTable.status, defaultTable.seats, defaultTable.id]
+      );
+    }
+    await db.runAsync(`DELETE FROM orders`);
   });
-  await save(STORAGE_KEYS.TABLES, resetTables);
 };
 
 export const saveTables = async (tables: Table[]): Promise<void> => {
-  await save(STORAGE_KEYS.TABLES, tables);
+  await ensureReady();
+  await db.withTransactionAsync(async () => {
+    for (const table of tables) {
+      await upsertTableTx(table);
+    }
+  });
 };
 
-// BILLS - Fonctions simplifiées
+// ---------------------------------------------------------------------------
+// BILLS
+// ---------------------------------------------------------------------------
+
+type BillRow = {
+  id: number;
+  table_number: number;
+  amount: number;
+  items: number | null;
+  status: Bill['status'] | null;
+  timestamp: string;
+  table_name: string | null;
+  section: string | null;
+  payment_method: Bill['paymentMethod'] | null;
+  payment_type: Bill['paymentType'] | null;
+  paid_items: string | null;
+  offered_amount: number | null;
+  guests: number | null;
+};
+
+const rowToBill = (row: BillRow): Bill => ({
+  id: row.id,
+  tableNumber: row.table_number,
+  amount: row.amount,
+  items: row.items ?? 0,
+  status: row.status ?? 'pending',
+  timestamp: row.timestamp,
+  tableName: row.table_name ?? undefined,
+  section: row.section ?? undefined,
+  paymentMethod: row.payment_method ?? undefined,
+  paymentType: row.payment_type ?? undefined,
+  paidItems: row.paid_items ? JSON.parse(row.paid_items) : undefined,
+  offeredAmount: row.offered_amount ?? undefined,
+  guests: row.guests ?? undefined,
+});
+
+const insertBillTx = async (bill: Bill): Promise<void> => {
+  await db.runAsync(
+    `INSERT OR REPLACE INTO bills
+      (id, table_number, amount, items, status, timestamp, table_name, section, payment_method, payment_type, paid_items, offered_amount, guests)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      bill.id,
+      bill.tableNumber,
+      bill.amount,
+      bill.items ?? null,
+      bill.status ?? null,
+      bill.timestamp,
+      bill.tableName ?? null,
+      bill.section ?? null,
+      bill.paymentMethod ?? null,
+      bill.paymentType ?? null,
+      bill.paidItems ? JSON.stringify(bill.paidItems) : null,
+      bill.offeredAmount ?? null,
+      bill.guests ?? null,
+    ]
+  );
+};
+
 export const getBills = async (): Promise<Bill[]> => {
+  await ensureReady();
   try {
-    return await load<Bill[]>(STORAGE_KEYS.BILLS, []);
+    const rows = await db.getAllAsync<BillRow>(`SELECT * FROM bills ORDER BY timestamp DESC`);
+    return rows.map(rowToBill);
   } catch (error) {
-    console.error('Error loading bills:', error);
+    logger.error('Error loading bills:', error);
     return [];
   }
 };
 
+export const getBillsCount = async (): Promise<number> => {
+  await ensureReady();
+  const row = await db.getFirstAsync<{ count: number }>(`SELECT COUNT(*) as count FROM bills`);
+  return row?.count ?? 0;
+};
+
 export const addBill = async (bill: Bill): Promise<void> => {
+  await ensureReady();
   try {
-    const bills = await getBills();
-    bills.push(bill);
+    await db.withTransactionAsync(async () => {
+      await insertBillTx(bill);
 
-    // Limite simple
-    if (bills.length > MAX_BILLS) {
-      const sorted = bills.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-      bills.splice(0, bills.length - 800);
-    }
+      const countRow = await db.getFirstAsync<{ count: number }>(`SELECT COUNT(*) as count FROM bills`);
+      const count = countRow?.count ?? 0;
 
-    await save(STORAGE_KEYS.BILLS, bills);
+      if (count > MAX_BILLS) {
+        const toDelete = count - MAX_BILLS_KEEP;
+        await db.runAsync(
+          `DELETE FROM bills WHERE id IN (SELECT id FROM bills ORDER BY timestamp ASC LIMIT ?)`,
+          [toDelete]
+        );
+      }
+    });
   } catch (error) {
-    console.error('Error adding bill:', error);
+    logger.error('Error adding bill:', error);
     throw error;
   }
 };
 
 export const saveBills = async (bills: Bill[]): Promise<void> => {
-  await save(STORAGE_KEYS.BILLS, bills);
+  await ensureReady();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(`DELETE FROM bills`);
+    for (const bill of bills) {
+      await insertBillTx(bill);
+    }
+  });
 };
 
-// Maintenance simplifiée
+// Maintenance incrémentale : ne revalide que les factures insérées depuis le
+// dernier passage (via le rowid SQLite, monotone à l'insertion), au lieu de
+// rebalayer toute la table à chaque appel.
+const MAINTENANCE_WATERMARK_KEY = 'manjo_carn_bills_maintenance_watermark';
+
 export const performBillsMaintenance = async (): Promise<void> => {
+  await ensureReady();
   try {
-    const bills = await getBills();
-    // Validation simple
-    const validBills = bills.filter(
-      (bill) => bill.id && bill.tableNumber && bill.amount !== undefined && bill.timestamp
+    const stored = await AsyncStorage.getItem(MAINTENANCE_WATERMARK_KEY);
+    const lastRowId = stored ? parseInt(stored, 10) : 0;
+
+    await db.runAsync(
+      `DELETE FROM bills WHERE rowid > ? AND (table_number IS NULL OR amount IS NULL OR timestamp IS NULL)`,
+      [lastRowId]
     );
-    
-    if (validBills.length !== bills.length) {
-      await saveBills(validBills);
-    }
+
+    const maxRow = await db.getFirstAsync<{ maxRowId: number | null }>(
+      `SELECT MAX(rowid) as maxRowId FROM bills`
+    );
+    const newWatermark = maxRow?.maxRowId ?? lastRowId;
+
+    await AsyncStorage.setItem(MAINTENANCE_WATERMARK_KEY, String(newWatermark));
   } catch (error) {
-    console.error('Erreur lors de la maintenance des factures:', error);
+    logger.error('Erreur lors de la maintenance des factures:', error);
   }
 };
 
 // Pagination
 export const getBillsPage = async (page: number = 0, pageSize: number = 20) => {
-  const allBills = await getBills();
-  const sorted = [...allBills].sort(
-    (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+  await ensureReady();
+
+  const totalRow = await db.getFirstAsync<{ count: number }>(`SELECT COUNT(*) as count FROM bills`);
+  const total = totalRow?.count ?? 0;
+
+  const rows = await db.getAllAsync<BillRow>(
+    `SELECT * FROM bills ORDER BY timestamp DESC LIMIT ? OFFSET ?`,
+    [pageSize, page * pageSize]
   );
 
-  const start = page * pageSize;
-  const end = start + pageSize;
+  const bills = rows.map(rowToBill);
+  const end = page * pageSize + bills.length;
 
   return {
-    bills: sorted.slice(start, end),
-    total: sorted.length,
-    hasMore: end < sorted.length,
+    bills,
+    total,
+    hasMore: end < total,
+  };
+};
+
+type BillFilters = {
+  searchText?: string;
+  dateRange?: { start: Date; end: Date };
+  paymentMethod?: string;
+};
+
+const buildBillFilterClause = (filters: BillFilters): { where: string; params: any[] } => {
+  const clauses: string[] = [];
+  const params: any[] = [];
+
+  if (filters.dateRange) {
+    clauses.push(`timestamp >= ? AND timestamp <= ?`);
+    params.push(filters.dateRange.start.toISOString(), filters.dateRange.end.toISOString());
+  }
+
+  if (filters.paymentMethod) {
+    clauses.push(`payment_method = ?`);
+    params.push(filters.paymentMethod);
+  }
+
+  if (filters.searchText) {
+    clauses.push(
+      `(LOWER(COALESCE(table_name, 'Table ' || table_number)) LIKE ? OR CAST(amount AS TEXT) LIKE ?)`
+    );
+    const search = `%${filters.searchText.toLowerCase()}%`;
+    params.push(search, search);
+  }
+
+  return {
+    where: clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '',
+    params,
   };
 };
 
 // Filtrage
-export const getFilteredBills = async (filters: {
-  searchText?: string;
-  dateRange?: { start: Date; end: Date };
-  paymentMethod?: string;
-}) => {
-  const allBills = await getBills();
-
-  return allBills.filter((bill) => {
-    if (filters.dateRange) {
-      const billDate = new Date(bill.timestamp);
-      if (billDate < filters.dateRange.start || billDate > filters.dateRange.end) {
-        return false;
-      }
-    }
-
-    if (filters.paymentMethod && bill.paymentMethod !== filters.paymentMethod) {
-      return false;
-    }
-
-    if (filters.searchText) {
-      const search = filters.searchText.toLowerCase();
-      const tableName = bill.tableName || `Table ${bill.tableNumber}`;
-      return (
-        tableName.toLowerCase().includes(search) ||
-        bill.amount.toString().includes(search)
-      );
-    }
-
-    return true;
-  });
+export const getFilteredBills = async (filters: BillFilters): Promise<Bill[]> => {
+  await ensureReady();
+  const { where, params } = buildBillFilterClause(filters);
+  const rows = await db.getAllAsync<BillRow>(
+    `SELECT * FROM bills ${where} ORDER BY timestamp DESC`,
+    params
+  );
+  return rows.map(rowToBill);
 };
 
 // Statistiques
 export const getBillsStatistics = async () => {
-  const bills = await getBills();
+  await ensureReady();
 
-  if (bills.length === 0) {
+  const totalRow = await db.getFirstAsync<{ count: number; total: number | null }>(
+    `SELECT COUNT(*) as count, SUM(amount) as total FROM bills`
+  );
+  const totalBills = totalRow?.count ?? 0;
+
+  if (totalBills === 0) {
     return {
       totalBills: 0,
       totalAmount: 0,
@@ -317,67 +546,121 @@ export const getBillsStatistics = async () => {
     };
   }
 
+  const totalAmount = totalRow?.total ?? 0;
+
+  const boundsRow = await db.getFirstAsync<{ oldest: string; newest: string }>(
+    `SELECT MIN(timestamp) as oldest, MAX(timestamp) as newest FROM bills`
+  );
+
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
   const monthAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
 
-  const totalAmount = bills.reduce((sum, bill) => sum + bill.amount, 0);
-  const sortedByDate = bills.sort(
-    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-  );
+  const countSince = async (date: Date) => {
+    const row = await db.getFirstAsync<{ count: number }>(
+      `SELECT COUNT(*) as count FROM bills WHERE timestamp >= ?`,
+      [date.toISOString()]
+    );
+    return row?.count ?? 0;
+  };
 
   return {
-    totalBills: bills.length,
+    totalBills,
     totalAmount,
-    averageAmount: totalAmount / bills.length,
-    oldestBill: sortedByDate[0]?.timestamp,
-    newestBill: sortedByDate[sortedByDate.length - 1]?.timestamp,
-    billsToday: bills.filter((bill) => new Date(bill.timestamp) >= today).length,
-    billsThisWeek: bills.filter((bill) => new Date(bill.timestamp) >= weekAgo).length,
-    billsThisMonth: bills.filter((bill) => new Date(bill.timestamp) >= monthAgo).length,
+    averageAmount: totalAmount / totalBills,
+    oldestBill: boundsRow?.oldest,
+    newestBill: boundsRow?.newest,
+    billsToday: await countSince(today),
+    billsThisWeek: await countSince(weekAgo),
+    billsThisMonth: await countSince(monthAgo),
   };
 };
 
-// MENU - Fonctions inchangées mais sans logs
+// ---------------------------------------------------------------------------
+// MENU
+// ---------------------------------------------------------------------------
+
+type MenuAvailabilityRow = { id: number; available: number; name: string; price: number };
+type CustomMenuItemRow = {
+  id: number;
+  name: string;
+  price: number;
+  category: string | null;
+  type: CustomMenuItem['type'] | null;
+  available: number;
+};
+
 export const getMenuAvailability = async (): Promise<MenuItemAvailability[]> => {
-  return load<MenuItemAvailability[]>(STORAGE_KEYS.MENU_AVAILABILITY, []);
+  await ensureReady();
+  const rows = await db.getAllAsync<MenuAvailabilityRow>(`SELECT * FROM menu_availability`);
+  return rows.map((r) => ({ id: r.id, available: !!r.available, name: r.name, price: r.price }));
 };
 
 export const saveMenuAvailability = async (items: MenuItemAvailability[]): Promise<void> => {
-  await save(STORAGE_KEYS.MENU_AVAILABILITY, items);
+  await ensureReady();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(`DELETE FROM menu_availability`);
+    for (const item of items) {
+      await db.runAsync(
+        `INSERT INTO menu_availability (id, available, name, price) VALUES (?, ?, ?, ?)`,
+        [item.id, item.available ? 1 : 0, item.name, item.price]
+      );
+    }
+  });
 };
 
 export const getCustomMenuItems = async (): Promise<CustomMenuItem[]> => {
-  return load<CustomMenuItem[]>(STORAGE_KEYS.CUSTOM_MENU_ITEMS, []);
+  await ensureReady();
+  const rows = await db.getAllAsync<CustomMenuItemRow>(`SELECT * FROM custom_menu_items`);
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    price: r.price,
+    category: r.category ?? '',
+    type: r.type ?? 'resto',
+    available: !!r.available,
+  }));
 };
 
 export const saveCustomMenuItems = async (items: CustomMenuItem[]): Promise<void> => {
-  await save(STORAGE_KEYS.CUSTOM_MENU_ITEMS, items);
+  await ensureReady();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(`DELETE FROM custom_menu_items`);
+    for (const item of items) {
+      await db.runAsync(
+        `INSERT INTO custom_menu_items (id, name, price, category, type, available) VALUES (?, ?, ?, ?, ?, ?)`,
+        [item.id, item.name, item.price, item.category, item.type, item.available ? 1 : 0]
+      );
+    }
+  });
 };
 
 export const addCustomMenuItem = async (item: CustomMenuItem): Promise<void> => {
-  const items = await getCustomMenuItems();
-  items.push(item);
-  await saveCustomMenuItems(items);
+  await ensureReady();
+  await db.runAsync(
+    `INSERT INTO custom_menu_items (id, name, price, category, type, available) VALUES (?, ?, ?, ?, ?, ?)`,
+    [item.id, item.name, item.price, item.category, item.type, item.available ? 1 : 0]
+  );
 };
 
 export const updateCustomMenuItem = async (updatedItem: CustomMenuItem): Promise<void> => {
-  const items = await getCustomMenuItems();
-  const index = items.findIndex((item) => item.id === updatedItem.id);
-  if (index >= 0) {
-    items[index] = updatedItem;
-    await saveCustomMenuItems(items);
-  }
+  await ensureReady();
+  await db.runAsync(
+    `UPDATE custom_menu_items SET name = ?, price = ?, category = ?, type = ?, available = ? WHERE id = ?`,
+    [updatedItem.name, updatedItem.price, updatedItem.category, updatedItem.type, updatedItem.available ? 1 : 0, updatedItem.id]
+  );
 };
 
 export const deleteCustomMenuItem = async (itemId: number): Promise<void> => {
-  const items = await getCustomMenuItems();
-  const filtered = items.filter((item) => item.id !== itemId);
-  await saveCustomMenuItems(filtered);
+  await ensureReady();
+  await db.runAsync(`DELETE FROM custom_menu_items WHERE id = ?`, [itemId]);
 };
 
-// Classes de compatibilité simplifiées
+// ---------------------------------------------------------------------------
+// Classes de compatibilité
+// ---------------------------------------------------------------------------
+
 export class StorageManager {
   static async isFirstLaunch(): Promise<boolean> {
     const value = await AsyncStorage.getItem('manjo_carn_first_launch');
@@ -397,13 +680,13 @@ export class StorageManager {
       await saveMenuAvailability([]);
       await resetAllTables();
     } catch (error) {
-      console.error('Error resetting application data:', error);
+      logger.error('Error resetting application data:', error);
     }
   }
 
   static async getStorageStats() {
     const bills = await getBills();
-    
+
     let health: 'excellent' | 'good' | 'growing' = 'excellent';
     if (bills.length > 1000) health = 'good';
     if (bills.length > 5000) health = 'growing';
@@ -469,64 +752,42 @@ export class BillManager {
   }
 
   static async clearAllBills(): Promise<void> {
+    await ensureReady();
     try {
-      await saveBills([]);
+      await db.runAsync(`DELETE FROM bills`);
     } catch (error) {
-      console.error('Erreur lors de la suppression de toutes les factures:', error);
+      logger.error('Erreur lors de la suppression de toutes les factures:', error);
       throw error;
     }
   }
 
-  static async deleteBills(billsToDelete: number[]): Promise<void>  {
+  static async deleteBills(billsToDelete: number[]): Promise<void> {
+    await ensureReady();
     try {
-      const allBills = await getBills();
-      const billIdsSet = new Set(billsToDelete);
-      const remainingBills = allBills.filter((bill) => !billIdsSet.has(bill.id));
-      await saveBills(remainingBills);
-    } catch (error) {
-      console.error('Erreur lors de la suppression des factures spécifiques:', error);
-      throw error;
-    }
-  }
-
-  static async clearFilteredBills(filters: {
-    searchText?: string;
-    dateRange?: { start: Date; end: Date };
-    paymentMethod?: string;
-  }): Promise<number> {
-    try {
-      const allBills = await getBills();
-      const billsToDelete = allBills.filter((bill) => {
-        if (filters.dateRange) {
-          const billDate = new Date(bill.timestamp);
-          if (billDate < filters.dateRange.start || billDate > filters.dateRange.end) {
-            return false;
-          }
+      await db.withTransactionAsync(async () => {
+        for (const id of billsToDelete) {
+          await db.runAsync(`DELETE FROM bills WHERE id = ?`, [id]);
         }
-
-        if (filters.paymentMethod && bill.paymentMethod !== filters.paymentMethod) {
-          return false;
-        }
-
-        if (filters.searchText) {
-          const search = filters.searchText.toLowerCase();
-          const tableName = bill.tableName || `Table ${bill.tableNumber}`;
-          return (
-            tableName.toLowerCase().includes(search) ||
-            bill.amount.toString().includes(search)
-          );
-        }
-
-        return true;
       });
-
-      const billIdsToDelete = new Set(billsToDelete.map((bill) => bill.id));
-      const remainingBills = allBills.filter((bill) => !billIdsToDelete.has(bill.id));
-
-      await saveBills(remainingBills);
-      return billsToDelete.length;
     } catch (error) {
-      console.error('Erreur lors de la suppression des factures filtrées:', error);
+      logger.error('Erreur lors de la suppression des factures spécifiques:', error);
+      throw error;
+    }
+  }
+
+  static async clearFilteredBills(filters: BillFilters): Promise<number> {
+    await ensureReady();
+    try {
+      const { where, params } = buildBillFilterClause(filters);
+      const countRow = await db.getFirstAsync<{ count: number }>(
+        `SELECT COUNT(*) as count FROM bills ${where}`,
+        params
+      );
+      const count = countRow?.count ?? 0;
+      await db.runAsync(`DELETE FROM bills ${where}`, params);
+      return count;
+    } catch (error) {
+      logger.error('Erreur lors de la suppression des factures filtrées:', error);
       throw error;
     }
   }

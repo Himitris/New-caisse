@@ -33,17 +33,6 @@ export default function RootLayout() {
     setupApp();
   }, []);
 
-  // Nettoyage périodique simple
-  useEffect(() => {
-    if (!initialized) return;
-
-    const cleanupInterval = setInterval(() => {
-      performBillsMaintenance();
-    }, 5 * 60 * 1000); // 5 minutes
-
-    return () => clearInterval(cleanupInterval);
-  }, [initialized]);
-
   if (!initialized) {
     return (
       <View

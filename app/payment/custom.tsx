@@ -10,7 +10,7 @@ import {
   Alert,
   ActivityIndicator,
 } from 'react-native';
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ArrowLeft,
@@ -21,6 +21,7 @@ import {
   Edit3,
 } from 'lucide-react-native';
 import {
+  Table,
   getTable,
   updateTable,
   addBill,
@@ -29,23 +30,20 @@ import {
 import { useToast } from '../../utils/ToastContext';
 import { processPartialPayment } from '@/utils/payment-utils';
 import { useSettings } from '@/utils/useSettings';
-import { useTableContext } from '@/utils/TableContext';
+import { useTableActions } from '@/utils/TableContext';
+import { logger } from '@/utils/logger';
 
 export default function CustomSplitScreen() {
-  const { tableId, total, items } = useLocalSearchParams();
+  const { tableId } = useLocalSearchParams();
   const router = useRouter();
   const tableIdNum = parseInt(tableId as string, 10);
-  const totalAmount = parseFloat(total as string);
-  const orderItems = items ? JSON.parse(items as string) : [];
   const toast = useToast();
-  const { refreshTables } = useTableContext();
+  const { refreshTables } = useTableActions();
 
   // ✅ États MINIMAUX - éviter l'accumulation
   const [processing, setProcessing] = useState(false);
-  const [totalOffered, setTotalOffered] = useState(0);
+  const [table, setTable] = useState<Table | null>(null);
   const [tableFullyPaid, setTableFullyPaid] = useState(false);
-  const [tableName, setTableName] = useState('');
-  const [tableSection, setTableSection] = useState('');
   const [splitAmounts, setSplitAmounts] = useState<string[]>(['']);
   const [errorMessage, setErrorMessage] = useState('');
   const [currentTotal, setCurrentTotal] = useState(0);
@@ -61,6 +59,17 @@ export default function CustomSplitScreen() {
   const { paymentMethods, restaurantInfo } = useSettings();
   const enabledPaymentMethods = paymentMethods.filter(
     (method) => method.enabled
+  );
+
+  // La commande vient uniquement de getTable() : la source de vérité, jamais
+  // d'une copie sérialisée passée en param depuis l'écran précédent.
+  const tableName = table?.name ?? '';
+  const tableSection = table?.section ?? '';
+  const orderItems = useMemo(() => table?.order?.items ?? [], [table]);
+  const totalAmount = table?.order?.total ?? 0;
+  const totalOffered = orderItems.reduce(
+    (sum, item) => (item.offered ? sum + item.price * item.quantity : sum),
+    0
   );
 
   // ✅ Nettoyage automatique des refs
@@ -82,20 +91,12 @@ export default function CustomSplitScreen() {
       if (!mountedRef.current) return;
 
       try {
-        const table = await getTable(tableIdNum);
-        if (table && mountedRef.current) {
-          setTableName(table.name);
-          setTableSection(table.section);
-
-          if (table.order && table.order.items) {
-            const offeredAmount = table.order.items.reduce((sum, item) => {
-              return item.offered ? sum + item.price * item.quantity : sum;
-            }, 0);
-            setTotalOffered(offeredAmount);
-          }
+        const tableData = await getTable(tableIdNum);
+        if (mountedRef.current) {
+          setTable(tableData);
         }
       } catch (error) {
-        console.error('Error fetching table details:', error);
+        logger.error('Error fetching table details:', error);
       }
     };
 
@@ -202,9 +203,9 @@ export default function CustomSplitScreen() {
 
     try {
       setProcessing(true);
-      const table = await getTable(tableIdNum);
+      const currentTable = await getTable(tableIdNum);
 
-      if (!table || !table.order) {
+      if (!currentTable || !currentTable.order) {
         toast.showToast(
           'Impossible de récupérer les informations de la table',
           'error'
@@ -249,7 +250,7 @@ export default function CustomSplitScreen() {
 
         if (!result.success) {
           allPaymentsProcessed = false;
-          console.error('Erreur de paiement:', result.error);
+          logger.error('Erreur de paiement:', result.error);
           continue;
         }
 
@@ -271,13 +272,13 @@ export default function CustomSplitScreen() {
           paymentType: 'custom' as 'custom',
           paidItems: orderItems.map((item: any) => ({
             ...item,
-            paymentPercentage: table.order
-              ? (payment.amount / table.order.total) * 100
+            paymentPercentage: currentTable.order
+              ? (payment.amount / currentTable.order.total) * 100
               : 0,
             customAmount: payment.amount,
           })),
           offeredAmount: (payment.amount / totalAmount) * totalOffered,
-          guests: table.guests,
+          guests: currentTable.guests,
         };
 
         if (payment.methodId) {
@@ -291,7 +292,7 @@ export default function CustomSplitScreen() {
       if (allPaymentsProcessed && willPayFull) {
         const finalCheck = await getTable(tableIdNum);
         if (finalCheck && (finalCheck.order || finalCheck.guests)) {
-          console.warn('Forçage de la réinitialisation de la table');
+          logger.warn('Forçage de la réinitialisation de la table');
           await resetTable(tableIdNum);
 
           const verifyReset = await getTable(tableIdNum);
@@ -360,7 +361,7 @@ export default function CustomSplitScreen() {
         }
       }
     } catch (error) {
-      console.error('Erreur de paiement :', error);
+      logger.error('Erreur de paiement :', error);
       toast.showToast('Erreur lors du traitement des paiements.', 'error');
     } finally {
       if (mountedRef.current) {

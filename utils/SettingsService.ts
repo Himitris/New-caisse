@@ -1,6 +1,7 @@
 // utils/SettingsService.ts
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SETTINGS_STORAGE_KEY, ConfigData, RestaurantInfo, PaymentMethod } from './settingsTypes';
+import { logger } from '@/utils/logger';
 
 // Valeurs par défaut pour la configuration
 const defaultConfig: ConfigData = {
@@ -75,7 +76,7 @@ class SettingsService {
       const keyExists = keys.includes(SETTINGS_STORAGE_KEY);
 
       if (!keyExists) {
-        console.log(
+        logger.log(
           'Première initialisation des paramètres avec les valeurs par défaut'
         );
         // Initialiser immédiatement avec les valeurs par défaut
@@ -113,7 +114,7 @@ class SettingsService {
             };
           }
         } catch (parseError) {
-          console.error(
+          logger.error(
             'Erreur lors du parsing de la configuration:',
             parseError
           );
@@ -126,7 +127,7 @@ class SettingsService {
         }
       } else {
         // Cas qui ne devrait plus se produire grâce à la vérification initiale
-        console.log(
+        logger.log(
           'Configuration non trouvée, utilisation des valeurs par défaut'
         );
         this.config = defaultConfig;
@@ -139,7 +140,7 @@ class SettingsService {
       this.isLoaded = true;
       this.notifyListeners('config');
     } catch (error) {
-      console.error('Erreur lors du chargement des paramètres:', error);
+      logger.error('Erreur lors du chargement des paramètres:', error);
       this.config = defaultConfig;
 
       // Même en cas d'erreur, essayons de sauvegarder les valeurs par défaut
@@ -149,7 +150,7 @@ class SettingsService {
           JSON.stringify(defaultConfig)
         );
       } catch (saveError) {
-        console.error(
+        logger.error(
           'Erreur lors de la sauvegarde des paramètres par défaut:',
           saveError
         );
@@ -166,7 +167,7 @@ class SettingsService {
       );
       this.notifyListeners('config');
     } catch (error) {
-      console.error('Erreur lors de la sauvegarde des paramètres:', error);
+      logger.error('Erreur lors de la sauvegarde des paramètres:', error);
     }
   }
 

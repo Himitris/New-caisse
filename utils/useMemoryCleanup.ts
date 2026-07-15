@@ -1,5 +1,6 @@
 // utils/useMemoryCleanup.ts
 import { useEffect, useRef, useCallback } from 'react';
+import { logger } from '@/utils/logger';
 
 export const useMemoryCleanup = () => {
   const cleanupFuncs = useRef<(() => void)[]>([]);
@@ -19,7 +20,7 @@ export const useMemoryCleanup = () => {
         try {
           cleanup();
         } catch (error) {
-          console.warn('Cleanup error:', error);
+          logger.warn('Cleanup error:', error);
         }
       });
       cleanupFuncs.current = [];

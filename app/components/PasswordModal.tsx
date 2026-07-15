@@ -12,6 +12,7 @@ import {
 import { X, Lock, Eye, EyeOff } from 'lucide-react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
+import { logger } from '@/utils/logger';
 
 interface PasswordModalProps {
   visible: boolean;
@@ -28,7 +29,7 @@ export const getStoredPassword = async (): Promise<string> => {
     const password = await AsyncStorage.getItem(PASSWORD_STORAGE_KEY);
     return password || DEFAULT_PASSWORD;
   } catch (error) {
-    console.error('Erreur lors de la récupération du mot de passe:', error);
+    logger.error('Erreur lors de la récupération du mot de passe:', error);
     return DEFAULT_PASSWORD;
   }
 };
@@ -40,7 +41,7 @@ export const setStoredPassword = async (
     await AsyncStorage.setItem(PASSWORD_STORAGE_KEY, newPassword);
     return true;
   } catch (error) {
-    console.error('Erreur lors de la sauvegarde du mot de passe:', error);
+    logger.error('Erreur lors de la sauvegarde du mot de passe:', error);
     return false;
   }
 };
@@ -88,7 +89,7 @@ const PasswordModal: React.FC<PasswordModalProps> = ({
         setLoading(false);
       }
     } catch (error) {
-      console.error('Erreur lors de la vérification du mot de passe:', error);
+      logger.error('Erreur lors de la vérification du mot de passe:', error);
       setError('Une erreur est survenue');
       setLoading(false);
     }
@@ -137,7 +138,7 @@ const PasswordModal: React.FC<PasswordModalProps> = ({
         setLoading(false);
       }
     } catch (error) {
-      console.error('Erreur lors du changement de mot de passe:', error);
+      logger.error('Erreur lors du changement de mot de passe:', error);
       setError('Une erreur est survenue');
       setLoading(false);
     }

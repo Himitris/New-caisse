@@ -1,5 +1,6 @@
 // app/table/[id].tsx - VERSION SIMPLIFIÉE (600 lignes au lieu de 1000+)
 
+import * as Haptics from 'expo-haptics';
 import * as Print from 'expo-print';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
@@ -19,6 +20,7 @@ import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -32,11 +34,12 @@ import {
   resetTable,
   updateTable,
 } from '../../utils/storage';
-import { useTableContext } from '../../utils/TableContext';
+import { useTableActions } from '../../utils/TableContext';
 import { useToast } from '../../utils/ToastContext';
 import { useMenu } from '../../utils/MenuManager';
 import { useSettings } from '@/utils/useSettings';
 import SplitSelectionModal from '../components/SplitSelectionModal';
+import { logger } from '@/utils/logger';
 
 interface MenuItem {
   id: number;
@@ -47,24 +50,453 @@ interface MenuItem {
   color: string;
 }
 
-const MenuItemComponent = memo<{ item: MenuItem; onPress: () => void }>(
-  ({ item, onPress }) => (
-    <Pressable
-      style={[styles.menuItem, { borderLeftColor: item.color }]}
-      onPress={onPress}
-    >
-      <Text style={styles.menuItemName}>{item.name}</Text>
-      <Text style={styles.menuItemPrice}>{item.price.toFixed(2)} €</Text>
-    </Pressable>
+const MenuItemComponent = memo<{
+  item: MenuItem;
+  onAdd: (item: MenuItem) => void;
+}>(({ item, onAdd }) => (
+  <Pressable
+    style={[styles.menuItem, { borderLeftColor: item.color }]}
+    onPress={() => onAdd(item)}
+  >
+    <Text style={styles.menuItemName}>{item.name}</Text>
+    <Text style={styles.menuItemPrice}>{item.price.toFixed(2)} €</Text>
+  </Pressable>
+));
+MenuItemComponent.displayName = 'MenuItemComponent';
+
+// Au-delà de ce nombre d'articles dans une colonne, on virtualise avec une
+// FlatList plutôt qu'un ScrollView + .map() qui monte tout d'un coup.
+const ORDER_COLUMN_VIRTUALIZE_THRESHOLD = 20;
+
+interface OrderItemCardProps {
+  item: OrderItem;
+  onUpdateQuantity: (itemId: number, increment: boolean) => void;
+  onToggleOffered: (itemId: number) => void;
+}
+
+// Cellule mémoïsée : reçoit les callbacks stables directement (pattern onAdd du
+// Prompt 3) et construit ses propres handlers liés à `item` en interne.
+const OrderItemCard = memo<OrderItemCardProps>(
+  ({ item, onUpdateQuantity, onToggleOffered }) => {
+    const handleDecrement = useCallback(
+      () => onUpdateQuantity(item.id, false),
+      [item.id, onUpdateQuantity]
+    );
+    const handleIncrement = useCallback(
+      () => onUpdateQuantity(item.id, true),
+      [item.id, onUpdateQuantity]
+    );
+    const handleToggleOffered = useCallback(
+      () => onToggleOffered(item.id),
+      [item.id, onToggleOffered]
+    );
+
+    return (
+      <View style={[styles.orderItem, item.offered && styles.offeredItem]}>
+        <View style={styles.itemHeader}>
+          <View style={styles.itemNameContainer}>
+            {item.offered && <Gift size={14} color="#FF9800" />}
+            <Text
+              style={[styles.itemName, item.offered && styles.offeredItemText]}
+            >
+              {item.name} {item.offered ? '(Offert)' : ''}
+            </Text>
+          </View>
+          <Text
+            style={[styles.itemPrice, item.offered && styles.offeredPrice]}
+          >
+            {(item.price * item.quantity).toFixed(2)} €
+          </Text>
+        </View>
+        <View style={styles.itemActions}>
+          <View style={styles.quantityControl}>
+            <Pressable style={styles.quantityButton} onPress={handleDecrement}>
+              <Minus size={16} color="#666" />
+            </Pressable>
+            <Text style={styles.quantity}>{item.quantity}</Text>
+            <Pressable style={styles.quantityButton} onPress={handleIncrement}>
+              <Plus size={16} color="#666" />
+            </Pressable>
+          </View>
+          <Pressable style={styles.offerButton} onPress={handleToggleOffered}>
+            <Text style={styles.offerButtonText}>
+              {item.offered ? 'Annuler offre' : 'Offrir'}
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+    );
+  }
+);
+OrderItemCard.displayName = 'OrderItemCard';
+
+const orderItemKeyExtractor = (item: OrderItem) => `order-item-${item.id}`;
+
+interface OrderColumnProps {
+  items: OrderItem[];
+  onUpdateQuantity: (itemId: number, increment: boolean) => void;
+  onToggleOffered: (itemId: number) => void;
+}
+
+// >20 articles : FlatList virtualisée. Sinon, un simple ScrollView suffit et
+// évite le surcoût de virtualisation pour de petites commandes.
+const OrderColumn = memo<OrderColumnProps>(
+  ({ items, onUpdateQuantity, onToggleOffered }) => {
+    const renderItem = useCallback(
+      ({ item }: { item: OrderItem }) => (
+        <OrderItemCard
+          item={item}
+          onUpdateQuantity={onUpdateQuantity}
+          onToggleOffered={onToggleOffered}
+        />
+      ),
+      [onUpdateQuantity, onToggleOffered]
+    );
+
+    if (items.length > ORDER_COLUMN_VIRTUALIZE_THRESHOLD) {
+      return (
+        <FlatList
+          style={styles.orderColumnScroll}
+          data={items}
+          renderItem={renderItem}
+          keyExtractor={orderItemKeyExtractor}
+          initialNumToRender={12}
+          windowSize={7}
+          removeClippedSubviews
+        />
+      );
+    }
+
+    return (
+      <ScrollView style={styles.orderColumnScroll}>
+        {items.map((item) => (
+          <OrderItemCard
+            key={item.id}
+            item={item}
+            onUpdateQuantity={onUpdateQuantity}
+            onToggleOffered={onToggleOffered}
+          />
+        ))}
+      </ScrollView>
+    );
+  }
+);
+OrderColumn.displayName = 'OrderColumn';
+
+interface OrderSectionProps {
+  orderItems: OrderItem[];
+  categorizedOrderItems: { plats: OrderItem[]; boissons: OrderItem[] };
+  total: number;
+  offeredTotal: number;
+  guestCount: number;
+  calculateAmountPerPerson: (total: number, guests: number) => number;
+  onUpdateQuantity: (itemId: number, increment: boolean) => void;
+  onToggleOffered: (itemId: number) => void;
+  onPayment: (type: 'full' | 'split' | 'custom' | 'items') => void;
+}
+
+const OrderSection = memo<OrderSectionProps>(
+  ({
+    orderItems,
+    categorizedOrderItems,
+    total,
+    offeredTotal,
+    guestCount,
+    calculateAmountPerPerson,
+    onUpdateQuantity,
+    onToggleOffered,
+    onPayment,
+  }) => (
+    <View style={styles.orderSection}>
+      <Text style={styles.sectionTitle}>Commande actuelle</Text>
+      {orderItems.length === 0 ? (
+        <Text style={styles.emptyOrder}>Aucun article dans la commande.</Text>
+      ) : (
+        <View style={styles.orderColumns}>
+          {/* Colonne Plats */}
+          <View style={styles.orderColumn}>
+            <Text style={styles.columnTitle}>Plats</Text>
+            <OrderColumn
+              items={categorizedOrderItems.plats}
+              onUpdateQuantity={onUpdateQuantity}
+              onToggleOffered={onToggleOffered}
+            />
+          </View>
+
+          {/* Colonne Boissons */}
+          <View style={styles.orderColumn}>
+            <Text style={styles.columnTitle}>Boissons</Text>
+            <OrderColumn
+              items={categorizedOrderItems.boissons}
+              onUpdateQuantity={onUpdateQuantity}
+              onToggleOffered={onToggleOffered}
+            />
+          </View>
+        </View>
+      )}
+
+      <View style={styles.totalSection}>
+        <View style={styles.finalTotal}>
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>Total:</Text>
+            <View style={styles.totalAmountContainer}>
+              <Text style={styles.totalAmount}>{total.toFixed(2)} €</Text>
+              {guestCount > 1 && total > 0 && (
+                <Text style={styles.perPersonTextCompact}>
+                  ({calculateAmountPerPerson(total, guestCount).toFixed(2)} €
+                  / pers.)
+                </Text>
+              )}
+            </View>
+          </View>
+
+          {offeredTotal > 0 && (
+            <View style={styles.offeredTotalRow}>
+              <Text style={styles.offeredTotalLabel}>Articles offerts:</Text>
+              <Text style={styles.offeredTotalAmount}>
+                {offeredTotal.toFixed(2)} €
+              </Text>
+            </View>
+          )}
+        </View>
+      </View>
+
+      <View style={styles.paymentActions}>
+        <View style={styles.paymentActionsRow}>
+          <Pressable
+            style={[styles.paymentButton, { backgroundColor: '#4CAF50' }]}
+            onPress={() => onPayment('full')}
+          >
+            <CreditCard size={24} color="white" />
+            <Text style={styles.paymentButtonText}>Paiement total</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.paymentButton, { backgroundColor: '#673AB7' }]}
+            onPress={() => onPayment('items')}
+          >
+            <ShoppingCart size={24} color="white" />
+            <Text style={styles.paymentButtonText}>Par article</Text>
+          </Pressable>
+        </View>
+        <View style={styles.paymentActionsRow}>
+          <Pressable
+            style={[styles.paymentButton, { backgroundColor: '#FF9800' }]}
+            onPress={() => onPayment('custom')}
+          >
+            <Receipt size={24} color="white" />
+            <Text style={styles.paymentButtonText}>Personnalisé</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.paymentButton, { backgroundColor: '#2196F3' }]}
+            onPress={() => onPayment('split')}
+          >
+            <Split size={24} color="white" />
+            <Text style={styles.paymentButtonText}>Partager</Text>
+          </Pressable>
+        </View>
+      </View>
+    </View>
   )
 );
+OrderSection.displayName = 'OrderSection';
+
+interface MenuSectionProps {
+  activeType: 'resto' | 'boisson' | null;
+  activeCategory: string | null;
+  categories: string[];
+  filteredMenuItems: MenuItem[];
+  onSelectType: (type: 'resto' | 'boisson' | null) => void;
+  onSelectCategory: (category: string | null) => void;
+  onAddItem: (item: MenuItem) => void;
+}
+
+// Le menu (jusqu'à ~150 boutons) est aplati en lignes ('header' | 'items' de 3
+// articles max) et rendu par une FlatList unique plutôt qu'un ScrollView + .map().
+const MENU_ROW_CHUNK_SIZE = 3;
+
+type MenuListRow =
+  | { type: 'header'; key: string; category: string }
+  | { type: 'items'; key: string; items: MenuItem[] };
+
+const menuRowKeyExtractor = (row: MenuListRow) => row.key;
+
+const MenuSection = memo<MenuSectionProps>(
+  ({
+    activeType,
+    activeCategory,
+    categories,
+    filteredMenuItems,
+    onSelectType,
+    onSelectCategory,
+    onAddItem,
+  }) => {
+    const rows = useMemo<MenuListRow[]>(() => {
+      const result: MenuListRow[] = [];
+
+      for (const category of categories) {
+        const categoryItems = filteredMenuItems.filter(
+          (item) => item.category === category
+        );
+        if (categoryItems.length === 0) continue;
+
+        result.push({ type: 'header', key: `header-${category}`, category });
+        for (let i = 0; i < categoryItems.length; i += MENU_ROW_CHUNK_SIZE) {
+          result.push({
+            type: 'items',
+            key: `items-${category}-${i}`,
+            items: categoryItems.slice(i, i + MENU_ROW_CHUNK_SIZE),
+          });
+        }
+      }
+
+      return result;
+    }, [categories, filteredMenuItems]);
+
+    const renderRow = useCallback(
+      ({ item: row }: { item: MenuListRow }) => {
+        if (row.type === 'header') {
+          return (
+            <Text style={styles.categoryHeaderText}>{row.category}</Text>
+          );
+        }
+        return (
+          <View style={styles.categoryItemsRow}>
+            {row.items.map((menuItem) => (
+              <MenuItemComponent
+                key={menuItem.id}
+                item={menuItem}
+                onAdd={onAddItem}
+              />
+            ))}
+          </View>
+        );
+      },
+      [onAddItem]
+    );
+
+    return (
+    <View style={styles.menuSection}>
+      <View style={styles.menuHeader}>
+        <Text style={styles.sectionTitle}>Menu</Text>
+        <View style={styles.typeFilters}>
+          <Pressable
+            style={[
+              styles.typeFilterButton,
+              activeType === 'resto' && styles.activeTypeButton,
+            ]}
+            onPress={() => onSelectType('resto')}
+          >
+            <Text
+              style={[
+                styles.typeFilterText,
+                activeType === 'resto' && styles.activeTypeText,
+              ]}
+            >
+              Plats
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[
+              styles.typeFilterButton,
+              activeType === 'boisson' && styles.activeTypeButton,
+            ]}
+            onPress={() => onSelectType('boisson')}
+          >
+            <Text
+              style={[
+                styles.typeFilterText,
+                activeType === 'boisson' && styles.activeTypeText,
+              ]}
+            >
+              Boissons
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[
+              styles.typeFilterButton,
+              activeType === null && styles.activeTypeButton,
+            ]}
+            onPress={() => onSelectType(null)}
+          >
+            <Text
+              style={[
+                styles.typeFilterText,
+                activeType === null && styles.activeTypeText,
+              ]}
+            >
+              Tout
+            </Text>
+          </Pressable>
+        </View>
+      </View>
+
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={styles.categoryTabs}
+      >
+        <Pressable
+          style={[
+            styles.categoryTab,
+            activeCategory === null && styles.activeCategoryTab,
+          ]}
+          onPress={() => onSelectCategory(null)}
+        >
+          <Text
+            style={[
+              styles.categoryTabText,
+              activeCategory === null && styles.activeCategoryTabText,
+            ]}
+          >
+            Tout
+          </Text>
+        </Pressable>
+        {categories.map((category) => (
+          <Pressable
+            key={category}
+            style={[
+              styles.categoryTab,
+              activeCategory === category && styles.activeCategoryTab,
+            ]}
+            onPress={() => onSelectCategory(category)}
+          >
+            <Text
+              style={[
+                styles.categoryTabText,
+                activeCategory === category && styles.activeCategoryTabText,
+              ]}
+            >
+              {category}
+            </Text>
+          </Pressable>
+        ))}
+      </ScrollView>
+
+      <View style={styles.menuItems}>
+        <FlatList
+          style={styles.menuItemsScroll}
+          data={rows}
+          renderItem={renderRow}
+          keyExtractor={menuRowKeyExtractor}
+          initialNumToRender={12}
+          windowSize={7}
+          removeClippedSubviews
+          showsVerticalScrollIndicator={false}
+        />
+      </View>
+    </View>
+    );
+  }
+);
+MenuSection.displayName = 'MenuSection';
 
 export default function TableScreen() {
   const { id } = useLocalSearchParams();
   const tableId = parseInt(id as string, 10);
   const router = useRouter();
   const toast = useToast();
-  const { refreshTables, getTableById, updateTableData } = useTableContext();
+  const { refreshTables, getTableById, updateTableData, flushTableWrites } =
+    useTableActions();
   const { restaurantInfo } = useSettings();
   const {
     isLoaded: menuLoaded,
@@ -97,7 +529,7 @@ export default function TableScreen() {
         setGuestCount(tableData.guests || 1);
       }
     } catch (error) {
-      console.error('Error loading table:', error);
+      logger.error('Error loading table:', error);
     } finally {
       setLoading(false);
     }
@@ -107,18 +539,29 @@ export default function TableScreen() {
     loadTable();
   }, [loadTable]);
 
-  // Sauvegarde simplifiée avec debounce
+  // Sauvegarde optimiste : l'écran a déjà mis à jour son état local via setTable(),
+  // updateTableData se charge du debounce/coalescing et de la persistance réelle.
   const saveTable = useCallback(
     async (updatedTable: Table) => {
       try {
-        await updateTableData(tableId, updatedTable);
+        await updateTableData(updatedTable);
       } catch (error) {
-        console.error('Save error:', error);
+        logger.error('Save error:', error);
         toast.showToast('Erreur lors de la sauvegarde', 'error');
       }
     },
-    [tableId, updateTableData, toast]
+    [updateTableData, toast]
   );
+
+  // Flush obligatoire des écritures en attente au démontage de l'écran (fermeture,
+  // retour en arrière) pour ne jamais perdre la dernière modification débattue.
+  useEffect(() => {
+    return () => {
+      flushTableWrites(tableId).catch((error) => {
+        logger.error(`Error flushing table ${tableId} on unmount:`, error);
+      });
+    };
+  }, [tableId, flushTableWrites]);
 
   // Calcul du total simplifié
   const calculateTotal = useCallback((items: OrderItem[]): number => {
@@ -139,50 +582,60 @@ export default function TableScreen() {
   // Ajouter un item
   const addItemToOrder = useCallback(
     (item: MenuItem) => {
-      if (!table) return;
+      let tableToSave: Table | null = null;
 
-      const updatedTable = { ...table };
+      setTable((prev) => {
+        if (!prev) return prev;
 
-      if (!updatedTable.order) {
-        updatedTable.order = {
-          id: Date.now(),
-          items: [],
-          guests: guestCount,
-          status: 'active',
-          timestamp: new Date().toISOString(),
-          total: 0,
-        };
+        const updatedTable = { ...prev };
+
+        if (!updatedTable.order) {
+          updatedTable.order = {
+            id: Date.now(),
+            items: [],
+            guests: guestCount,
+            status: 'active',
+            timestamp: new Date().toISOString(),
+            total: 0,
+          };
+        }
+
+        const items = [...updatedTable.order.items];
+        const existingItemIndex = items.findIndex(
+          (orderItem) =>
+            orderItem.menuId === item.id && orderItem.name === item.name
+        );
+
+        if (existingItemIndex >= 0) {
+          items[existingItemIndex] = {
+            ...items[existingItemIndex],
+            quantity: items[existingItemIndex].quantity + 1,
+          };
+        } else {
+          items.push({
+            id: Date.now() + Math.random(),
+            menuId: item.id,
+            name: item.name,
+            price: item.price,
+            quantity: 1,
+            type: item.type,
+          });
+        }
+
+        updatedTable.order.items = items;
+        updatedTable.order.total = calculateTotal(items);
+
+        tableToSave = updatedTable;
+        return updatedTable;
+      });
+
+      if (tableToSave) {
+        saveTable(tableToSave);
       }
 
-      const items = [...updatedTable.order.items];
-      const existingItemIndex = items.findIndex(
-        (orderItem) =>
-          orderItem.menuId === item.id && orderItem.name === item.name
-      );
-
-      if (existingItemIndex >= 0) {
-        items[existingItemIndex] = {
-          ...items[existingItemIndex],
-          quantity: items[existingItemIndex].quantity + 1,
-        };
-      } else {
-        items.push({
-          id: Date.now() + Math.random(),
-          menuId: item.id,
-          name: item.name,
-          price: item.price,
-          quantity: 1,
-          type: item.type,
-        });
-      }
-
-      updatedTable.order.items = items;
-      updatedTable.order.total = calculateTotal(items);
-
-      setTable(updatedTable);
-      saveTable(updatedTable);
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     },
-    [table, guestCount, calculateTotal, saveTable]
+    [guestCount, calculateTotal, saveTable]
   );
 
   // Modifier quantité
@@ -382,6 +835,9 @@ export default function TableScreen() {
           text: 'Fermer',
           style: 'destructive',
           onPress: async () => {
+            // Vide la file de debounce avant resetTable pour qu'une écriture en
+            // attente (ex: dernier article ajouté) ne réapparaisse pas après coup.
+            await flushTableWrites(tableId);
             await resetTable(tableId);
             setTable(null);
             setGuestCount(1);
@@ -392,10 +848,10 @@ export default function TableScreen() {
         },
       ]
     );
-  }, [table, tableId, refreshTables, router, toast]);
+  }, [table, tableId, refreshTables, router, toast, flushTableWrites]);
 
   const handlePayment = useCallback(
-    (type: 'full' | 'split' | 'custom' | 'items') => {
+    async (type: 'full' | 'split' | 'custom' | 'items') => {
       if (!table?.order) return;
 
       const total = table.order.total;
@@ -404,37 +860,38 @@ export default function TableScreen() {
         return;
       }
 
-      const serializedItems = JSON.stringify(table.order.items);
+      // 'split' n'ouvre qu'une modale ici ; le flush pour sa propre navigation a
+      // lieu dans SplitSelectionModal.onConfirm, plus bas.
+      if (type === 'split') {
+        if (guestCount <= 1) {
+          toast.showToast(
+            'Il faut au moins 2 convives pour partager',
+            'warning'
+          );
+          return;
+        }
+        setSplitModalVisible(true);
+        return;
+      }
 
+      // Toute autre navigation vers /payment/* dépend de l'état persisté : on force
+      // l'écriture du dernier debounce en attente avant de quitter l'écran.
+      await flushTableWrites(tableId);
+
+      // Seul tableId transite en param : chaque écran de paiement recharge la
+      // commande via getTable(tableId), qui est la source de vérité — une copie
+      // sérialisée dans les params pourrait être obsolète au moment du paiement.
       switch (type) {
         case 'full':
           router.push({
             pathname: '/payment/full',
-            params: {
-              tableId: tableId.toString(),
-              total: total.toString(),
-              items: serializedItems,
-            },
+            params: { tableId: tableId.toString() },
           });
-          break;
-        case 'split':
-          if (guestCount <= 1) {
-            toast.showToast(
-              'Il faut au moins 2 convives pour partager',
-              'warning'
-            );
-            return;
-          }
-          setSplitModalVisible(true);
           break;
         case 'custom':
           router.push({
             pathname: '/payment/custom',
-            params: {
-              tableId: tableId.toString(),
-              total: total.toString(),
-              items: serializedItems,
-            },
+            params: { tableId: tableId.toString() },
           });
           break;
         case 'items':
@@ -445,7 +902,7 @@ export default function TableScreen() {
           break;
       }
     },
-    [table?.order, guestCount, tableId, router, toast]
+    [table?.order, guestCount, tableId, router, toast, flushTableWrites]
   );
 
   const handlePreviewNote = useCallback(async () => {
@@ -476,6 +933,18 @@ export default function TableScreen() {
       setProcessing(false);
     }
   }, [table, generatePreviewTicketHTML, toast]);
+
+  const handleSelectType = useCallback(
+    (type: 'resto' | 'boisson' | null) => {
+      setActiveType(type);
+      setActiveCategory(null);
+    },
+    []
+  );
+
+  const handleSelectCategory = useCallback((category: string | null) => {
+    setActiveCategory(category);
+  }, []);
 
   // Données dérivées
   const filteredMenuItems = useMemo(() => {
@@ -605,357 +1074,42 @@ export default function TableScreen() {
       </View>
 
       <View style={styles.content}>
-        {/* Section commande */}
-        <View style={styles.orderSection}>
-          <Text style={styles.sectionTitle}>Commande actuelle</Text>
-          {orderItems.length === 0 ? (
-            <Text style={styles.emptyOrder}>
-              Aucun article dans la commande.
-            </Text>
-          ) : (
-            <View style={styles.orderColumns}>
-              {/* Colonne Plats */}
-              <View style={styles.orderColumn}>
-                <Text style={styles.columnTitle}>Plats</Text>
-                <ScrollView style={styles.orderColumnScroll}>
-                  {categorizedOrderItems.plats.map((item) => (
-                    <View
-                      key={item.id}
-                      style={[
-                        styles.orderItem,
-                        item.offered && styles.offeredItem,
-                      ]}
-                    >
-                      <View style={styles.itemHeader}>
-                        <View style={styles.itemNameContainer}>
-                          {item.offered && <Gift size={14} color="#FF9800" />}
-                          <Text
-                            style={[
-                              styles.itemName,
-                              item.offered && styles.offeredItemText,
-                            ]}
-                          >
-                            {item.name} {item.offered ? '(Offert)' : ''}
-                          </Text>
-                        </View>
-                        <Text
-                          style={[
-                            styles.itemPrice,
-                            item.offered && styles.offeredPrice,
-                          ]}
-                        >
-                          {(item.price * item.quantity).toFixed(2)} €
-                        </Text>
-                      </View>
-                      <View style={styles.itemActions}>
-                        <View style={styles.quantityControl}>
-                          <Pressable
-                            style={styles.quantityButton}
-                            onPress={() => updateItemQuantity(item.id, false)}
-                          >
-                            <Minus size={16} color="#666" />
-                          </Pressable>
-                          <Text style={styles.quantity}>{item.quantity}</Text>
-                          <Pressable
-                            style={styles.quantityButton}
-                            onPress={() => updateItemQuantity(item.id, true)}
-                          >
-                            <Plus size={16} color="#666" />
-                          </Pressable>
-                        </View>
-                        <Pressable
-                          style={styles.offerButton}
-                          onPress={() => toggleItemOffered(item.id)}
-                        >
-                          <Text style={styles.offerButtonText}>
-                            {item.offered ? 'Annuler offre' : 'Offrir'}
-                          </Text>
-                        </Pressable>
-                      </View>
-                    </View>
-                  ))}
-                </ScrollView>
-              </View>
+        <OrderSection
+          orderItems={orderItems}
+          categorizedOrderItems={categorizedOrderItems}
+          total={total}
+          offeredTotal={offeredTotal}
+          guestCount={guestCount}
+          calculateAmountPerPerson={calculateAmountPerPerson}
+          onUpdateQuantity={updateItemQuantity}
+          onToggleOffered={toggleItemOffered}
+          onPayment={handlePayment}
+        />
 
-              {/* Colonne Boissons */}
-              <View style={styles.orderColumn}>
-                <Text style={styles.columnTitle}>Boissons</Text>
-                <ScrollView style={styles.orderColumnScroll}>
-                  {categorizedOrderItems.boissons.map((item) => (
-                    <View
-                      key={item.id}
-                      style={[
-                        styles.orderItem,
-                        item.offered && styles.offeredItem,
-                      ]}
-                    >
-                      <View style={styles.itemHeader}>
-                        <View style={styles.itemNameContainer}>
-                          {item.offered && <Gift size={14} color="#FF9800" />}
-                          <Text
-                            style={[
-                              styles.itemName,
-                              item.offered && styles.offeredItemText,
-                            ]}
-                          >
-                            {item.name} {item.offered ? '(Offert)' : ''}
-                          </Text>
-                        </View>
-                        <Text
-                          style={[
-                            styles.itemPrice,
-                            item.offered && styles.offeredPrice,
-                          ]}
-                        >
-                          {(item.price * item.quantity).toFixed(2)} €
-                        </Text>
-                      </View>
-                      <View style={styles.itemActions}>
-                        <View style={styles.quantityControl}>
-                          <Pressable
-                            style={styles.quantityButton}
-                            onPress={() => updateItemQuantity(item.id, false)}
-                          >
-                            <Minus size={16} color="#666" />
-                          </Pressable>
-                          <Text style={styles.quantity}>{item.quantity}</Text>
-                          <Pressable
-                            style={styles.quantityButton}
-                            onPress={() => updateItemQuantity(item.id, true)}
-                          >
-                            <Plus size={16} color="#666" />
-                          </Pressable>
-                        </View>
-                        <Pressable
-                          style={styles.offerButton}
-                          onPress={() => toggleItemOffered(item.id)}
-                        >
-                          <Text style={styles.offerButtonText}>
-                            {item.offered ? 'Annuler offre' : 'Offrir'}
-                          </Text>
-                        </Pressable>
-                      </View>
-                    </View>
-                  ))}
-                </ScrollView>
-              </View>
-            </View>
-          )}
-
-          <View style={styles.totalSection}>
-            <View style={styles.finalTotal}>
-              <View style={styles.totalRow}>
-                <Text style={styles.totalLabel}>Total:</Text>
-                <View style={styles.totalAmountContainer}>
-                  <Text style={styles.totalAmount}>{total.toFixed(2)} €</Text>
-                  {guestCount > 1 && total > 0 && (
-                    <Text style={styles.perPersonTextCompact}>
-                      ({calculateAmountPerPerson(total, guestCount).toFixed(2)}{' '}
-                      € / pers.)
-                    </Text>
-                  )}
-                </View>
-              </View>
-
-              {offeredTotal > 0 && (
-                <View style={styles.offeredTotalRow}>
-                  <Text style={styles.offeredTotalLabel}>
-                    Articles offerts:
-                  </Text>
-                  <Text style={styles.offeredTotalAmount}>
-                    {offeredTotal.toFixed(2)} €
-                  </Text>
-                </View>
-              )}
-            </View>
-          </View>
-
-          <View style={styles.paymentActions}>
-            <View style={styles.paymentActionsRow}>
-              <Pressable
-                style={[styles.paymentButton, { backgroundColor: '#4CAF50' }]}
-                onPress={() => handlePayment('full')}
-              >
-                <CreditCard size={24} color="white" />
-                <Text style={styles.paymentButtonText}>Paiement total</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.paymentButton, { backgroundColor: '#673AB7' }]}
-                onPress={() => handlePayment('items')}
-              >
-                <ShoppingCart size={24} color="white" />
-                <Text style={styles.paymentButtonText}>Par article</Text>
-              </Pressable>
-            </View>
-            <View style={styles.paymentActionsRow}>
-              <Pressable
-                style={[styles.paymentButton, { backgroundColor: '#FF9800' }]}
-                onPress={() => handlePayment('custom')}
-              >
-                <Receipt size={24} color="white" />
-                <Text style={styles.paymentButtonText}>Personnalisé</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.paymentButton, { backgroundColor: '#2196F3' }]}
-                onPress={() => handlePayment('split')}
-              >
-                <Split size={24} color="white" />
-                <Text style={styles.paymentButtonText}>Partager</Text>
-              </Pressable>
-            </View>
-          </View>
-        </View>
-
-        {/* Section menu */}
-        <View style={styles.menuSection}>
-          <View style={styles.menuHeader}>
-            <Text style={styles.sectionTitle}>Menu</Text>
-            <View style={styles.typeFilters}>
-              <Pressable
-                style={[
-                  styles.typeFilterButton,
-                  activeType === 'resto' && styles.activeTypeButton,
-                ]}
-                onPress={() => {
-                  setActiveType('resto');
-                  setActiveCategory(null);
-                }}
-              >
-                <Text
-                  style={[
-                    styles.typeFilterText,
-                    activeType === 'resto' && styles.activeTypeText,
-                  ]}
-                >
-                  Plats
-                </Text>
-              </Pressable>
-              <Pressable
-                style={[
-                  styles.typeFilterButton,
-                  activeType === 'boisson' && styles.activeTypeButton,
-                ]}
-                onPress={() => {
-                  setActiveType('boisson');
-                  setActiveCategory(null);
-                }}
-              >
-                <Text
-                  style={[
-                    styles.typeFilterText,
-                    activeType === 'boisson' && styles.activeTypeText,
-                  ]}
-                >
-                  Boissons
-                </Text>
-              </Pressable>
-              <Pressable
-                style={[
-                  styles.typeFilterButton,
-                  activeType === null && styles.activeTypeButton,
-                ]}
-                onPress={() => {
-                  setActiveType(null);
-                  setActiveCategory(null);
-                }}
-              >
-                <Text
-                  style={[
-                    styles.typeFilterText,
-                    activeType === null && styles.activeTypeText,
-                  ]}
-                >
-                  Tout
-                </Text>
-              </Pressable>
-            </View>
-          </View>
-
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.categoryTabs}
-          >
-            <Pressable
-              style={[
-                styles.categoryTab,
-                activeCategory === null && styles.activeCategoryTab,
-              ]}
-              onPress={() => setActiveCategory(null)}
-            >
-              <Text
-                style={[
-                  styles.categoryTabText,
-                  activeCategory === null && styles.activeCategoryTabText,
-                ]}
-              >
-                Tout
-              </Text>
-            </Pressable>
-            {categories.map((category) => (
-              <Pressable
-                key={category}
-                style={[
-                  styles.categoryTab,
-                  activeCategory === category && styles.activeCategoryTab,
-                ]}
-                onPress={() => setActiveCategory(category)}
-              >
-                <Text
-                  style={[
-                    styles.categoryTabText,
-                    activeCategory === category && styles.activeCategoryTabText,
-                  ]}
-                >
-                  {category}
-                </Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-
-          <View style={styles.menuItems}>
-            <ScrollView
-              style={styles.menuItemsScroll}
-              showsVerticalScrollIndicator={false}
-            >
-              {categories.map((category) => {
-                const categoryItems = filteredMenuItems.filter(
-                  (item) => item.category === category
-                );
-                if (categoryItems.length === 0) return null;
-
-                return (
-                  <View key={category} style={styles.categorySection}>
-                    <Text style={styles.categoryHeaderText}>{category}</Text>
-                    <View style={styles.categoryItems}>
-                      {categoryItems.map((item) => (
-                        <MenuItemComponent
-                          key={item.id}
-                          item={item}
-                          onPress={() => addItemToOrder(item)}
-                        />
-                      ))}
-                    </View>
-                  </View>
-                );
-              })}
-            </ScrollView>
-          </View>
-        </View>
+        <MenuSection
+          activeType={activeType}
+          activeCategory={activeCategory}
+          categories={categories}
+          filteredMenuItems={filteredMenuItems}
+          onSelectType={handleSelectType}
+          onSelectCategory={handleSelectCategory}
+          onAddItem={addItemToOrder}
+        />
       </View>
 
       <SplitSelectionModal
         visible={splitModalVisible}
         onClose={() => setSplitModalVisible(false)}
-        onConfirm={(partsCount: number) => {
+        onConfirm={async (partsCount: number) => {
           if (!table?.order) return;
+          await flushTableWrites(tableId);
+          // Seuls tableId et guests (nombre de parts) transitent : /payment/split
+          // recharge la commande et le total via getTable(tableId).
           router.push({
             pathname: '/payment/split',
             params: {
               tableId: tableId.toString(),
-              total: table.order.total.toString(),
               guests: partsCount.toString(),
-              items: JSON.stringify(table.order.items),
             },
           });
         }}
@@ -1310,6 +1464,7 @@ const styles = StyleSheet.create({
     color: '#333',
   },
   categoryItems: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  categoryItemsRow: { flexDirection: 'row', gap: 8 },
   menuItem: {
     width: '31%',
     minWidth: 90,

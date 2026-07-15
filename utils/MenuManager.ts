@@ -138,9 +138,9 @@ class MenuManager {
       );
 
       this.isLoaded = true;
-      console.log(`✅ Menu chargé: ${this.menuItems.length} items`);
+      logger.log(`✅ Menu chargé: ${this.menuItems.length} items`);
     } catch (error) {
-      console.error('❌ Erreur chargement menu:', error);
+      logger.error('❌ Erreur chargement menu:', error);
       throw error;
     }
   }
@@ -179,7 +179,7 @@ class MenuManager {
     this.menuMap.clear();
     this.unavailableIds.clear();
     this.loadPromise = null;
-    console.log('🔄 Menu reset');
+    logger.log('🔄 Menu reset');
   }
 }
 
@@ -188,6 +188,7 @@ export const menuManager = MenuManager.getInstance();
 
 // ✅ Hook React simple
 import { useEffect, useRef, useState } from 'react';
+import { logger } from '@/utils/logger';
 
 export const useMenu = () => {
   const [isLoaded, setIsLoaded] = useState(menuManager.isMenuLoaded());

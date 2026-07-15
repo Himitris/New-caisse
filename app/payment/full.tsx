@@ -1,7 +1,7 @@
 // app/payment/full.tsx - Version simplifiée sans événements
 
 import { View, Text, StyleSheet, Pressable, Alert, Switch } from 'react-native';
-import { useState, useEffect } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   CreditCard,
@@ -10,54 +10,50 @@ import {
   ArrowLeft,
   Edit3,
 } from 'lucide-react-native';
-import {
-  getTable,
-  updateTable,
-  resetTable,
-  addBill,
-} from '../../utils/storage';
+import { Table, getTable, resetTable, addBill } from '../../utils/storage';
 import { useToast } from '../../utils/ToastContext';
 import { useSettings } from '@/utils/useSettings';
-import { useTableContext } from '@/utils/TableContext';
+import { useTableActions } from '@/utils/TableContext';
+import { logger } from '@/utils/logger';
 
 export default function FullPaymentScreen() {
-  const { tableId, total, items } = useLocalSearchParams();
+  const { tableId } = useLocalSearchParams();
   const { paymentMethods, restaurantInfo, printSettings } = useSettings();
-  const { refreshTables } = useTableContext();
+  const { refreshTables } = useTableActions();
   const router = useRouter();
   const [printReceipt, setPrintReceipt] = useState(printSettings.autoPrint);
   const [processing, setProcessing] = useState(false);
-  const [tableName, setTableName] = useState('');
+  const [table, setTable] = useState<Table | null>(null);
   const toast = useToast();
-  const [totalOffered, setTotalOffered] = useState(0);
 
   const tableIdNum = parseInt(tableId as string, 10);
-  const totalAmount = parseFloat(total as string);
-  const orderItems = items ? JSON.parse(items as string) : [];
   const availableMethods = paymentMethods.filter((method) => method.enabled);
 
-  // Get table name on load
+  // La commande vient uniquement de getTable() : la source de vérité, jamais
+  // d'une copie sérialisée passée en param depuis l'écran précédent.
+  const orderItems = useMemo(() => table?.order?.items ?? [], [table]);
+  const totalAmount = table?.order?.total ?? 0;
+  const totalOffered = useMemo(
+    () =>
+      orderItems.reduce(
+        (sum, item) => (item.offered ? sum + item.price * item.quantity : sum),
+        0
+      ),
+    [orderItems]
+  );
+
   useEffect(() => {
+    let cancelled = false;
     const fetchTableData = async () => {
       const tableData = await getTable(tableIdNum);
-      if (tableData) {
-        setTableName(tableData.name);
-
-        // Calculer le montant des articles offerts
-        if (tableData.order && tableData.order.items) {
-          const offeredAmount = tableData.order.items.reduce((sum, item) => {
-            if (item.offered) {
-              return sum + item.price * item.quantity;
-            }
-            return sum;
-          }, 0);
-
-          setTotalOffered(offeredAmount);
-        }
+      if (!cancelled) {
+        setTable(tableData);
       }
     };
-
     fetchTableData();
+    return () => {
+      cancelled = true;
+    };
   }, [tableIdNum]);
 
   // Fonction utilitaire pour obtenir l'icône en fonction du type de méthode
@@ -88,88 +84,53 @@ export default function FullPaymentScreen() {
     }
   }
 
-  // Fonction de paiement simplifiée
+  // Fonction de paiement simplifiée : "Paiement total" paie toujours le montant
+  // couramment dû, relu depuis getTable() au moment du clic (jamais une copie
+  // capturée au moment de la navigation), donc jamais de branche "partiel".
   const handlePayment = async (method: 'card' | 'cash' | 'check') => {
     if (processing) return;
 
     setProcessing(true);
 
     try {
-      // Get the latest table data
-      const table = await getTable(tableIdNum);
+      const currentTable = await getTable(tableIdNum);
 
-      if (!table || !table.order) {
+      if (!currentTable || !currentTable.order) {
         Alert.alert('Error', 'Could not find table information');
         setProcessing(false);
         return;
       }
 
+      const currentOrderItems = currentTable.order.items;
+      const currentTotal = currentTable.order.total;
+      const currentOffered = currentOrderItems.reduce(
+        (sum, item) =>
+          item.offered ? sum + item.price * item.quantity : sum,
+        0
+      );
+
       // Create a bill record
       const bill = {
         id: Date.now(),
         tableNumber: tableIdNum,
-        amount: totalAmount,
-        items: orderItems.length,
+        amount: currentTotal,
+        items: currentOrderItems.length,
         status: 'paid' as 'paid',
         timestamp: new Date().toISOString(),
-        tableName: table.name,
-        section: table.section,
+        tableName: currentTable.name,
+        section: currentTable.section,
         paymentMethod: method,
         paymentType: 'full' as 'full',
-        paidItems: orderItems,
-        offeredAmount: totalOffered,
-        guests: table.guests,
+        paidItems: currentOrderItems,
+        offeredAmount: currentOffered,
+        guests: currentTable.guests,
       };
 
       // Add to bills history
       await addBill(bill);
 
-      // Check if this payment completes the bill
-      if (totalAmount >= table.order.total) {
-        try {
-          // Reset the table if payment covers full amount
-          await resetTable(tableIdNum);
-
-          // Rafraîchir les tables dans le contexte
-          await refreshTables();
-
-          if (printReceipt) {
-            router.push({
-              pathname: '/print-preview',
-              params: {
-                tableId: tableIdNum.toString(),
-                total: totalAmount.toString(),
-                items: items as string,
-                paymentMethod: method,
-                tableName: table.name,
-              },
-            });
-          } else {
-            router.replace('/');
-          }
-          toast.showToast(
-            `${table.name} a été payée complètement en ${method}.`,
-            'success'
-          );
-        } catch (error) {
-          console.error(
-            'Erreur lors de la réinitialisation de la table:',
-            error
-          );
-          toast.showToast('Erreur lors de la fermeture de la table', 'error');
-        }
-      } else {
-        // If payment is partial, update the table's total
-        const remainingAmount = table.order.total - totalAmount;
-        const updatedTable = {
-          ...table,
-          order: {
-            ...table.order,
-            total: remainingAmount,
-          },
-        };
-
-        await updateTable(updatedTable);
+      try {
+        await resetTable(tableIdNum);
         await refreshTables();
 
         if (printReceipt) {
@@ -177,27 +138,28 @@ export default function FullPaymentScreen() {
             pathname: '/print-preview',
             params: {
               tableId: tableIdNum.toString(),
-              total: totalAmount.toString(),
-              items: items as string,
+              total: currentTotal.toString(),
+              items: JSON.stringify(currentOrderItems),
               paymentMethod: method,
-              isPartial: 'true',
-              remaining: remainingAmount.toString(),
-              tableName: table.name,
+              tableName: currentTable.name,
             },
           });
         } else {
-          router.replace(`/table/${tableIdNum}`);
+          router.replace('/');
         }
-
         toast.showToast(
-          `Paiement ${method}: ${totalAmount.toFixed(
-            2
-          )} €\nReste: ${remainingAmount.toFixed(2)} €`,
+          `${currentTable.name} a été payée complètement en ${method}.`,
           'success'
         );
+      } catch (error) {
+        logger.error(
+          'Erreur lors de la réinitialisation de la table:',
+          error
+        );
+        toast.showToast('Erreur lors de la fermeture de la table', 'error');
       }
     } catch (error) {
-      console.error('Payment error:', error);
+      logger.error('Payment error:', error);
       toast.showToast('There was an error processing your payment.', 'error');
     } finally {
       setProcessing(false);
@@ -211,7 +173,7 @@ export default function FullPaymentScreen() {
           <ArrowLeft size={24} color="#333" />
         </Pressable>
         <Text style={styles.title}>
-          Payment - {tableName || `Table ${tableId}`}
+          Payment - {table?.name || `Table ${tableId}`}
         </Text>
       </View>
 

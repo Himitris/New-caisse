@@ -17,6 +17,7 @@ import {
   RestaurantInfo,
   Setting,
 } from './settingsTypes';
+import { logger } from '@/utils/logger';
 
 // Fonction utilitaire pour transformer la config en tableau de settings
 const configToSettings = (config: ConfigData): Setting[] => {
@@ -143,10 +144,10 @@ export function useSettings() {
           // Ajouter d'autres cas selon vos paramètres
 
           default:
-            console.log(`Paramètre ${id} non géré pour la persistance`);
+            logger.log(`Paramètre ${id} non géré pour la persistance`);
         }
       } catch (error) {
-        console.error('Erreur lors de la mise à jour du paramètre:', error);
+        logger.error('Erreur lors de la mise à jour du paramètre:', error);
       } finally {
         setIsSaving(false);
       }
@@ -160,7 +161,7 @@ export function useSettings() {
     try {
       await settingsService.updateRestaurantInfo(info);
     } catch (error) {
-      console.error(
+      logger.error(
         'Erreur lors de la mise à jour des informations du restaurant:',
         error
       );
@@ -175,7 +176,7 @@ export function useSettings() {
     try {
       await settingsService.updatePaymentMethods(methods);
     } catch (error) {
-      console.error(
+      logger.error(
         'Erreur lors de la mise à jour des méthodes de paiement:',
         error
       );
@@ -190,7 +191,7 @@ export function useSettings() {
     try {
       await settingsService.updateOpeningHours(hours);
     } catch (error) {
-      console.error(
+      logger.error(
         "Erreur lors de la mise à jour des heures d'ouverture:",
         error
       );
@@ -206,7 +207,7 @@ export function useSettings() {
       try {
         await settingsService.updatePrintSettings(settings);
       } catch (error) {
-        console.error(
+        logger.error(
           "Erreur lors de la mise à jour des paramètres d'impression:",
           error
         );

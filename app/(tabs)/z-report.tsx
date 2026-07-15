@@ -41,6 +41,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import PasswordModal from '../components/PasswordModal';
 import { useFocusEffect } from 'expo-router';
 import { useSettings } from '@/utils/useSettings';
+import { logger } from '@/utils/logger';
 
 // Clé de stockage pour le compteur de Z
 const Z_COUNTER_KEY = 'manjo_carn_z_counter';
@@ -77,7 +78,7 @@ export default function ZReportScreen() {
           await AsyncStorage.setItem(Z_COUNTER_KEY, '1');
         }
       } catch (error) {
-        console.error('Erreur lors du chargement du compteur Z:', error);
+        logger.error('Erreur lors du chargement du compteur Z:', error);
       }
     };
 
@@ -107,7 +108,7 @@ export default function ZReportScreen() {
       const report = generateZReportData(filteredBills);
       setReportData(report);
     } catch (error) {
-      console.error('Error loading bills:', error);
+      logger.error('Error loading bills:', error);
       toast.showToast('Impossible de charger les factures.', 'error');
     } finally {
       setLoading(false);
@@ -135,7 +136,7 @@ export default function ZReportScreen() {
       setZCounter(newCounter);
       return zCounter; // Retourne la valeur actuelle (avant incrémentation)
     } catch (error) {
-      console.error("Erreur lors de l'incrémentation du compteur Z:", error);
+      logger.error("Erreur lors de l'incrémentation du compteur Z:", error);
       return zCounter;
     }
   };
@@ -542,7 +543,7 @@ export default function ZReportScreen() {
 
       toast.showToast('Rapport Z imprimé avec succès', 'success');
     } catch (error) {
-      console.error("Erreur lors de l'impression:", error);
+      logger.error("Erreur lors de l'impression:", error);
       toast.showToast("Erreur lors de l'impression", 'error');
     } finally {
       setProcessing(false);
@@ -562,7 +563,7 @@ export default function ZReportScreen() {
       });
       toast.showToast('Rapport Z partagé avec succès', 'success');
     } catch (error) {
-      console.error('Erreur lors du partage:', error);
+      logger.error('Erreur lors du partage:', error);
       toast.showToast('Erreur lors du partage', 'error');
     } finally {
       setProcessing(false);
@@ -583,7 +584,7 @@ export default function ZReportScreen() {
       });
       toast.showToast('Rapport Z téléchargé avec succès', 'success');
     } catch (error) {
-      console.error('Erreur lors du téléchargement:', error);
+      logger.error('Erreur lors du téléchargement:', error);
       toast.showToast('Erreur lors du téléchargement', 'error');
     } finally {
       setProcessing(false);

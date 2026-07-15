@@ -32,6 +32,7 @@ import {
   RestaurantInfoModal,
 } from '../components/SettingsModals';
 import SecretPasswordModal from '../components/SecretPasswordModal'; // Import du nouveau composant
+import { logger } from '@/utils/logger';
 
 interface VersionFooterProps {
   version?: string;
@@ -96,7 +97,7 @@ export default function SettingsScreen() {
       // Petit effet de vibration/feedback si disponible
       try {
         // Dans une vraie app React Native, vous pourriez utiliser Haptics
-        console.log('🥚 Easter egg activé!');
+        logger.log('🥚 Easter egg activé!');
       } catch (error) {
         // Ignore l'erreur si Haptics n'est pas disponible
       }
@@ -149,7 +150,7 @@ export default function SettingsScreen() {
                 try {
                   await AsyncStorage.removeItem(key);
                 } catch (error) {
-                  console.warn(`Impossible de supprimer la clé ${key}:`, error);
+                  logger.warn(`Impossible de supprimer la clé ${key}:`, error);
                 }
               }
 
@@ -158,7 +159,7 @@ export default function SettingsScreen() {
                 'success'
               );
             } catch (error) {
-              console.error(
+              logger.error(
                 'Erreur lors de la réinitialisation des données:',
                 error
               );
@@ -209,7 +210,7 @@ export default function SettingsScreen() {
         'success'
       );
     } catch (error) {
-      console.error('Erreur lors du nettoyage:', error);
+      logger.error('Erreur lors du nettoyage:', error);
       toast.showToast('Erreur lors du nettoyage des données', 'error');
     } finally {
       setProcessingAction(false);

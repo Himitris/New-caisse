@@ -13,6 +13,7 @@ import { useState, useEffect } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { CreditCard, Wallet, Home, Edit3 } from 'lucide-react-native';
 import {
+  Table,
   getTable,
   updateTable,
   addBill,
@@ -21,22 +22,19 @@ import {
 import { useToast } from '../../utils/ToastContext';
 import { processPartialPayment } from '@/utils/payment-utils';
 import { useSettings } from '@/utils/useSettings';
-import { useTableContext } from '@/utils/TableContext';
+import { useTableActions } from '@/utils/TableContext';
+import { logger } from '@/utils/logger';
 
 export default function SplitBillScreen() {
-  const { tableId, total, guests, items } = useLocalSearchParams();
+  const { tableId, guests } = useLocalSearchParams();
   const router = useRouter();
-  const totalAmount = parseFloat(total as string);
   const guestCount = parseInt(guests as string, 10);
   const tableIdNum = parseInt(tableId as string, 10);
-  const orderItems = items ? JSON.parse(items as string) : [];
-  const [tableName, setTableName] = useState('');
-  const [tableSection, setTableSection] = useState('');
+  const [table, setTable] = useState<Table | null>(null);
   const toast = useToast();
   const [processing, setProcessing] = useState(false);
-  const [totalOffered, setTotalOffered] = useState(0);
   const [tableFullyPaid, setTableFullyPaid] = useState(false);
-  const { refreshTables } = useTableContext();
+  const { refreshTables } = useTableActions();
 
   // Utiliser le SettingsContext pour accéder aux méthodes de paiement configurées
   const { paymentMethods, restaurantInfo } = useSettings();
@@ -44,32 +42,33 @@ export default function SplitBillScreen() {
     (method) => method.enabled
   );
 
+  // La commande et le montant à partager viennent uniquement de getTable() :
+  // la source de vérité, jamais d'une copie sérialisée passée en param.
+  const tableName = table?.name ?? '';
+  const tableSection = table?.section ?? '';
+  const orderItems = table?.order?.items ?? [];
+  const totalAmount = table?.order?.total ?? 0;
+  const totalOffered = orderItems.reduce(
+    (sum, item) => (item.offered ? sum + item.price * item.quantity : sum),
+    0
+  );
+
   // Montant partagé par invité (partage égal)
   const splitAmount = Math.round((totalAmount / guestCount) * 100) / 100;
 
   // Récupérer les détails de la table au chargement
   useEffect(() => {
+    let cancelled = false;
     const fetchTableDetails = async () => {
-      const table = await getTable(tableIdNum);
-      if (table) {
-        setTableName(table.name);
-        setTableSection(table.section);
-
-        // Calculer le montant des articles offerts s'il y en a
-        if (table.order && table.order.items) {
-          const offeredAmount = table.order.items.reduce((sum, item) => {
-            if (item.offered) {
-              return sum + item.price * item.quantity;
-            }
-            return sum;
-          }, 0);
-
-          setTotalOffered(offeredAmount);
-        }
+      const tableData = await getTable(tableIdNum);
+      if (!cancelled) {
+        setTable(tableData);
       }
     };
-
     fetchTableDetails();
+    return () => {
+      cancelled = true;
+    };
   }, [tableIdNum]);
 
   const [payments, setPayments] = useState<
@@ -155,7 +154,7 @@ export default function SplitBillScreen() {
         // Double vérification pour s'assurer que la table est réellement fermée
         const checkTable = await getTable(tableIdNum);
         if (checkTable && (checkTable.order || checkTable.guests)) {
-          console.warn(
+          logger.warn(
             'Table marquée comme fermée mais contient encore des données, nettoyage forcé'
           );
           await resetTable(tableIdNum);
@@ -236,7 +235,7 @@ export default function SplitBillScreen() {
 
       toast.showToast(`Paiement ${methodName} traité avec succès`, 'success');
     } catch (error) {
-      console.error('Erreur de traitement du paiement:', error);
+      logger.error('Erreur de traitement du paiement:', error);
       toast.showToast('Échec du traitement du paiement', 'error');
     } finally {
       setProcessing(false);

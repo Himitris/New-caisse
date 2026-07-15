@@ -24,6 +24,7 @@ import {
 } from '../../utils/storage';
 import CoversSelectionModal from '../components/CoversSelectionModal';
 import CustomCoversModal from '../components/CustomCoversModal';
+import { logger } from '@/utils/logger';
 
 // Couleurs des tables
 const TABLE_COLORS = {
@@ -95,7 +96,7 @@ export default function TablesScreen() {
                 'success'
               );
             } catch (error) {
-              console.error('Error resetting tables:', error);
+              logger.error('Error resetting tables:', error);
               toast.showToast('Erreur lors de la réinitialisation.', 'error');
             }
           },
@@ -170,7 +171,7 @@ export default function TablesScreen() {
         await refreshTables();
         router.navigate(`/table/${table.id}`);
       } catch (error) {
-        console.error('Error opening table:', error);
+        logger.error('Error opening table:', error);
         toast.showToast(
           "Impossible d'ouvrir la table. Veuillez réessayer.",
           'error'

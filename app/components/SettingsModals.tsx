@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { Save, X, Plus } from 'lucide-react-native';
 import { ConfigData, OpeningHours, PaymentMethod, RestaurantInfo } from '@/utils/settingsTypes';
+import { logger } from '@/utils/logger';
 
 
 // Props pour les différents modals
@@ -340,7 +341,7 @@ export const PaymentMethodsModal: React.FC<PaymentModalProps> = ({
     if (Array.isArray(paymentMethods)) {
       setMethods(paymentMethods);
     } else {
-      console.warn(
+      logger.warn(
         "paymentMethods n'est pas un tableau, utilisation des valeurs par défaut"
       );
       setMethods(defaultPaymentMethods);

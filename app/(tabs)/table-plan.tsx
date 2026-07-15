@@ -21,6 +21,7 @@ import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { getTables, Table } from '../../utils/storage';
 import { useToast } from '../../utils/ToastContext';
+import { logger } from '@/utils/logger';
 
 export default function TablePlanScreen() {
   const [tables, setTables] = useState<Table[]>([]);
@@ -35,75 +36,51 @@ export default function TablePlanScreen() {
     'Doc 1',
     'Doc 2',
     'Doc 3',
-    'Vue 1',
-    'Vue 2',
     'R1',
     'R2',
     'R3',
     'R4',
-    'Poteau',
+    'R5',
+    'Poteau 1',
+    'Poteau 2',
     'Ext 1',
     'Ext 2',
-    'Ext Rge',
     'Bas 0',
     'Bas 1',
     'Arbre 1',
     'Arbre 2',
     'Tronc',
-    'Caillou',
+    'Caillou 1',
+    'Caillou 2',
     'Escalier 1',
     'Escalier 2',
+    'Escalier 3',
     'Transfo',
     'Bache 1',
     'Bache 2',
     'Bache 3',
-    'Che 1',
-    'Che 2',
+    'Che',
+    'Che 8',
+    'Che 8bis',
     'PDC 1',
     'PDC 2',
     'Eve Rgb',
     'Eve Bois',
+    'BDM 1',
+    'BDM 2',
+    'BDM 3',
+    'BDF 1',
+    'BDF 2',
+    'BDF 3',
     'HDB',
-    'Lukas 1',
-    'Lukas 2',
     'Route 1',
     'Route 2',
     'Sous Cabane',
   ];
 
-  // Ordre réduit des tables pour petit service
-  const smallTableOrder = [
-    'Doc 1',
-    'Doc 2',
-    'Doc 3',
-    'Vue 1',
-    'R1',
-    'R2',
-    'R3',
-    'R4',
-    'Poteau',
-    'Ext 1',
-    'Ext 2',
-    'Bas 0',
-    'Bas 1',
-    'Arbre 1',
-    'Arbre 2',
-    'Tronc',
-    'Caillou',
-    'Escalier 1',
-    'Escalier 2',
-    'Transfo',
-    'Bache 1',
-    'Bache 2',
-    'Bache 3',
-    'Che 1',
-    'Che 2',
-    'PDC 1',
-    'PDC 2',
-    'Eve Rgb',
-    'Eve Bois',
-    'HDB',
-  ];
+  // Ordre réduit des tables pour petit service — temporairement identique au
+  // plan complet le temps de redéfinir quelles tables exclure pour ce mode.
+  const smallTableOrder = fullTableOrder;
 
   // Tables à afficher selon le mode sélectionné (petit service ou normal)
   const getActiveTableOrder = () => {
@@ -120,7 +97,7 @@ export default function TablePlanScreen() {
       const loadedTables = await getTables();
       setTables(loadedTables);
     } catch (error) {
-      console.error('Error loading tables:', error);
+      logger.error('Error loading tables:', error);
       toast.showToast('Impossible de charger les tables.', 'error');
     } finally {
       setLoading(false);
@@ -280,7 +257,7 @@ export default function TablePlanScreen() {
       setTimeout(() => setSuccess(false), 2000);
       toast.showToast("Plan des tables envoyé à l'imprimante", 'success');
     } catch (error) {
-      console.error("Échec de l'impression:", error);
+      logger.error("Échec de l'impression:", error);
       toast.showToast("Impossible d'imprimer le plan", 'error');
     } finally {
       setProcessing(false);
@@ -304,7 +281,7 @@ export default function TablePlanScreen() {
       setTimeout(() => setSuccess(false), 2000);
       toast.showToast('Plan des tables partagé avec succès', 'success');
     } catch (error) {
-      console.error('Échec du partage:', error);
+      logger.error('Échec du partage:', error);
       toast.showToast('Impossible de partager le plan', 'error');
     } finally {
       setProcessing(false);
